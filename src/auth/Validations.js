@@ -11,6 +11,7 @@ export const  signup = Joi.object({
     phone: Joi.string().max(13).min(10).required(),
     parentphone: Joi.string().max(13).min(10).required(),
     grade : Joi.number().integer().positive().min(10).max(100).required(),
+    gradeid :  Joi.ObjectId().required().error(errorParser)
 
 }).required()
 
