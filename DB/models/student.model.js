@@ -29,7 +29,7 @@ const studentSchema = new Schema(
       lowercase: true,
       trim: true,
     },
-    parentEmail: {
+    parentemail: {
       type: String,
       required: [true, "Parent Email must be typed"],
       lowercase: true,
