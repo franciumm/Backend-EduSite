@@ -1,4 +1,5 @@
 import Joi from "joi";
+import mongoose from "mongoose";
 
 export const  signup = Joi.object({
     userName : Joi.string().min(2).max(20).required(),
