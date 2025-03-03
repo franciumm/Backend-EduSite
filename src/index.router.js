@@ -6,12 +6,15 @@ import group from "./Modules/Groups/Group.router.js"
 import assg from './Modules/Assignments/Assg.router.js'
 import exam  from './Modules/Exams/Exams.router.js'
 const bootstrape =  async (app,express)=>{
+    const whitelist = ["http://127.0.0.1:5500"];
     app.use(express.json());
+    
     app.use(cors());
   
     DBConnect();
  
-  
+    app.use(express.urlencoded({ extended: false }));
+
     app.use('/group',group);
     app.use('/exams',exam);
     app.use("/assignments", assg)
