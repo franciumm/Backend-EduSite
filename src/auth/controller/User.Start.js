@@ -13,7 +13,7 @@ export const Signup = asyncHandler(async(req,res,next)=>{
         return next( Error('User Email or Username or phone Exists', {cause:409}));
     }
      
-    if(!await gradeModel.findById(gradeid)){
+    if(!(await gradeModel.findById(gradeid))){
         return next( Error('Invalid Grade Id ', {cause:409}));
     }
     if(password != cPassword){
