@@ -5,6 +5,7 @@ import { s3 } from "../../../utils/S3Client.js";
 import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
 import mongoose from "mongoose";
 import fs from 'fs'
+import studentModel from "../../../../DB/models/student.model.js";
 
 
 
@@ -33,7 +34,8 @@ const authorizeUserForExam = async (req, res, next) => {
 
   // لو student، نتحقق من المجموعات والتسجيل والـ exceptions
   const studentId = req.user._id.toString();
-  const studentGroupId = req.user.groupid?.toString();
+  const a7a = await studentModel.findById( req.user._id);
+  const studentGroupId = a7a.groupId?.toString();
 
   const isInGroup = exam.groupIds.some((gid) => gid.toString() === studentGroupId);
   const isEnrolled = exam.enrolledStudents.some((sid) => sid.toString() === studentId);
