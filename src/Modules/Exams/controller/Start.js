@@ -5,7 +5,6 @@ import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.m
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
 import { PDFDocument, rgb } from "pdf-lib";
 import { s3, uploadFileToS3, deleteFileFromS3 } from "../../../utils/S3Client.js";
-import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { pagination } from "../../../utils/pagination.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { gradeModel} from "../../../../DB/models/grades.model.js";
