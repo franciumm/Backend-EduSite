@@ -4,6 +4,7 @@ import { examModel } from "../../../../DB/models/exams.model.js";
 import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
 import { pagination } from "../../../utils/pagination.js";
 import mongoose from "mongoose";
+import studentModel from "../../../../DB/models/student.model.js";
 
 export const getExams = asyncHandler(async (req, res, next) => {
   const { page = 1, size = 10, groupId, gradeId, status } = req.query;
@@ -60,11 +61,23 @@ export const getExams = asyncHandler(async (req, res, next) => {
     //     OR (exceptionStudents.studentId == userId)
     const studentQuery = {
       $or: [
-        { groupIds: user.gradeId },
+        { groupIds: user.groupId },
         { enrolledStudents: user._id },
         { "exceptionStudents.studentId": user._id },
       ],
     };
+
+    if (!user.groupId ){
+      let student = await studentModel.findById(user._Id);
+        studentQuery = {
+      $or: [
+        { groupIds: student.groupId },
+        { enrolledStudents: user._id },
+        { "exceptionStudents.studentId": user._id },
+      ],
+    };
+    }
+
 
     // We fetch everything matching that. Then do filtering in memory.
     let allExams = await examModel
