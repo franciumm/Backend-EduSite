@@ -2,7 +2,7 @@
     return (req,res,next)=>{
         const validateData = schema.validate(req.body , {abortEarly : false});
         if(validateData.error){
-          return res.json({Message : validateData.error.details})}else {return next()
+          return res.json({Message : validateData.error.details.path})}else {return next()
           }
     }
     
