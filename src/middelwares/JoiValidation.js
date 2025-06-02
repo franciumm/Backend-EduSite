@@ -6,7 +6,7 @@ const Joivalidation = (schema) => {
 
     if (error) {
      
-      const firstMessage = error.details[0].message;
+      const firstMessage = error.details[0];
       return res.status(400).json({ message: firstMessage });
     }
 
