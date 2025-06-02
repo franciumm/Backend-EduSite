@@ -67,36 +67,6 @@ const authorizeUserForExam = async (req, res, next) => {
 };
 
 // 3. دالة تنزيل الملف من S3، بردو async معمولها wrap بالـ asyncHandler
-// const streamExamFile = async (req, res, next) => {
-//   const exam = req.exam;
-//   const { bucketName, key } = exam;
-
-//   try {
-//     const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
-//     const response = await s3.send(command);
-
-//     const filename = key.split("/").pop();
-//     res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
-//     res.setHeader("Content-Type", response.ContentType || "application/pdf");
-
-//     response.Body.pipe(res);
-
-//     response.Body.on("end", async () => {
-//       if (!req.isteacher?.teacher) {
-//         const stillEnrolled = exam.enrolledStudents.some(
-//           (sid) => sid.toString() === req.user._id.toString()
-//         );
-//         if (!stillEnrolled) {
-//           exam.enrolledStudents.push(req.user._id);
-//           await exam.save();
-//         }
-//       }
-//     });
-//   } catch (err) {
-//     console.error("S3 Error:", err);
-//     return next(new Error("Failed to download the exam file.", { cause: 500 }));
-//   }
-// };
 const streamExamFile = async (req, res, next) => {
   const exam = req.exam;
   const { bucketName, key } = exam;
@@ -106,18 +76,24 @@ const streamExamFile = async (req, res, next) => {
     const response = await s3.send(command);
 
     const filename = key.split("/").pop();
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
     res.setHeader("Content-Type", response.ContentType || "application/pdf");
 
-    // طريقة قديمة ممكن تنفع: نقرأ الـ body كله كـ Buffer وبعدين نبثه
-    const chunks = [];
-    for await (let chunk of response.Body) {
-      chunks.push(chunk);
-    }
-    const buffer = Buffer.concat(chunks);
-    res.send(buffer);
+    response.Body.pipe(res);
+
+    response.Body.on("end", async () => {
+      if (!req.isteacher?.teacher) {
+        const stillEnrolled = exam.enrolledStudents.some(
+          (sid) => sid.toString() === req.user._id.toString()
+        );
+        if (!stillEnrolled) {
+          exam.enrolledStudents.push(req.user._id);
+          await exam.save();
+        }
+      }
+    });
   } catch (err) {
-    console.error("Error streaming file:", err);
+    console.error("S3 Error:", err);
     return next(new Error("Failed to download the exam file.", { cause: 500 }));
   }
 };
