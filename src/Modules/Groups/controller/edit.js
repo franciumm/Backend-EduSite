@@ -37,10 +37,10 @@ export const addStudent = asyncHandler(async (req, res, next) => {
 
 const group = await groupModel.findById(groupid);
 
-if(student.gradeid.toString() != group.gradeid.toString()){
+if(student.gradeId.toString() != group.gradeid.toString()){
   return res.status(404).json({ message: 'Student not In the groups Grade' });
 }
-  student.groupid = groupid;
+  student.groupId = groupid;
   await student.save();
   const updatedGroup = await groupModel.findByIdAndUpdate(
     groupid,
