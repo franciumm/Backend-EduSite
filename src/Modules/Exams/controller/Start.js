@@ -5,7 +5,7 @@ import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.m
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
 import { PDFDocument, rgb } from "pdf-lib";
 import { s3, uploadFileToS3, deleteFileFromS3 } from "../../../utils/S3Client.js";
-
+import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { pagination } from "../../../utils/pagination.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { gradeModel} from "../../../../DB/models/grades.model.js";
@@ -186,7 +186,10 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     const existingSubmission = await SubexamModel.findOne({ examId, studentId });
 
     if (existingSubmission?.fileKey) {
-      await deleteFileFromS3(process.env.S3_BUCKET_NAME, existingSubmission.fileKey);
+await s3.send(new DeleteObjectCommand({
+  Bucket: process.env.S3_BUCKET_NAME,
+  Key: exam.key
+}));await deleteFileFromS3(process.env.S3_BUCKET_NAME, existingSubmission.fileKey);
     }
 
     const updatedSubmission = await SubexamModel.findOneAndUpdate(
