@@ -10,14 +10,14 @@ export const Signup = asyncHandler(async(req,res,next)=>{
     const {email,parentemail,userName,firstName,lastName,password,grade ,  parentphone ,phone,cPassword}= req.body ;
     
     if(await UserModel.findOne({$or:[{email},{userName},{phone}]})){
-        return next( Error('User Email or Username or phone Exists', {cause:409}));
+        return next( Error({Message : 'User Email or Username or phone Exists'}, {cause:409}));
     } 
     const  gradeOBJ = await gradeModel.findOne({grade});
     if(!(gradeOBJ)){
-        return next( Error('Invalid Grade Id ', {cause:409}));
+        return next( Error({Message :'Invalid Grade Id '}, {cause:409}));
     }
     if(password != cPassword){
-        return next( Error('Password Doesn`t match'), {cause:403});
+        return next( Error({Message :'Password Doesn`t match'}), {cause:403});
     }
     
   
@@ -128,7 +128,7 @@ export const Signup = asyncHandler(async(req,res,next)=>{
     const MailSent = await SendMail({ to: email, subject: "Confirmation Email", html })
     if(!MailSent){
           
-        return next(new Error ('Email doesn`t Exist '), { cause : 404})
+        return next(new Error ({Message :'Email doesn`t Exist '}), { cause : 404})
     }
     
     
@@ -142,11 +142,11 @@ export const Login = asyncHandler(async(req,res,next)=>{
     const {email , password}= req.body;
     const user = await UserModel.findOne({email});
     if(!user){
-return next(new Error ('The User Doesn`t exist try to signUp',{cause : 404}))
+return next(new Error ({Message :'The User Doesn`t exist try to signUp'},{cause : 404}))
     }
     const isPassMatch = bycrypt.compareSync(password , user.password) 
     if(!isPassMatch){
-        return next(Error('The Password is wrong ', {cause :401 }))
+        return next(Error({Message :'The Password is wrong '}, {cause :401 }))
     }
     const token =generateToken({payload : {
         email ,
