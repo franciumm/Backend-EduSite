@@ -6,125 +6,110 @@ import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
 import mongoose from "mongoose";
 import fs from 'fs'
 
-export const downloadExam = asyncHandler(async (req, res, next) => {
-  const { examId } = req.query;
 
-  // 1. Validate exam ID
+
+
+
+const validateExamId = (req, res, next) => {
+  const { examId } = req.query;
   if (!examId) {
     return next(new Error("Exam ID is required", { cause: 400 }));
   }
+  next();
+};
 
-  // 2. Fetch the exam details
+// 2. دالة للتحقق من صلاحيات الـ student أو الـ teacher على الامتحان
+const authorizeUserForExam = async (req, res, next) => {
+  const { examId } = req.query;
   const exam = await examModel.findById(examId);
   if (!exam) {
     return next(new Error("Exam not found", { cause: 404 }));
   }
 
-  // 3. If user is a teacher, check if they created it (or remove this check if all teachers can access)
-  if (req.isteacher.teacher) {
-    // Teachers can access the exam without timeline checks
-    if (exam.createdBy.toString() !== req.user._id.toString()) {
-      return next(
-        new Error("You are not authorized to access this exam.", { cause: 403 })
-      );
+  // لو teacher، نفترض إنه عنده صلاحية تلقائية
+  if (req.isteacher?.teacher) {
+    req.exam = exam;
+    return next();
+  }
+
+  // لو student، نتحقق من المجموعات والتسجيل والـ exceptions
+  const studentId = req.user._id.toString();
+  const studentGroupId = req.user.groupid?.toString();
+
+  const isInGroup = exam.groupIds.some((gid) => gid.toString() === studentGroupId);
+  const isEnrolled = exam.enrolledStudents.some((sid) => sid.toString() === studentId);
+  const isRejected = exam.rejectedStudents.some((sid) => sid.toString() === studentId);
+  const exceptionEntry = exam.exceptionStudents.find((ex) => ex.studentId.toString() === studentId);
+
+  if (isRejected || (!isInGroup && !isEnrolled && !exceptionEntry)) {
+    return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
+  }
+
+  // نتحقق من التايملاين (أساسي أو استثناء)
+  const now = new Date();
+  if (exceptionEntry) {
+    if (now < exceptionEntry.startdate || now > exceptionEntry.enddate) {
+      return next(new Error("This exam is not available (exception timeline).", { cause: 403 }));
     }
   } else {
-    // 4. For students, check group membership or direct enrollment
-    const studentId = req.user._id.toString();
-    const studentGroupId = req.user.groupid?.toString();
-
-    // Check if the student is in any group assigned to the exam
-    const isInGroup = exam.groupIds.some(
-      (gid) => gid.toString() === studentGroupId
-    );
-
-    // Check if the student is explicitly enrolled
-    const isEnrolled = exam.enrolledStudents.some(
-      (sid) => sid.toString() === studentId
-    );
-
-    // Check if the student is explicitly rejected
-    const isRejected = exam.rejectedStudents.some(
-      (sid) => sid.toString() === studentId
-    );
-
-    // Check if the student is an exception
-    const exceptionEntry = exam.exceptionStudents.find(
-      (ex) => ex.studentId.toString() === studentId
-    );
-
-    // If not in group and not enrolled, or is rejected, block
-    if ((!isInGroup && !isEnrolled && !exceptionEntry) || isRejected) {
-      return next(
-        new Error("You are not authorized to access this exam.", { cause: 403 })
-      );
-    }
-
-    // 5. Timeline check
-    const now = new Date();
-    if (exceptionEntry) {
-      // Use custom timeline from exceptionStudents
-      if (now < exceptionEntry.startdate || now > exceptionEntry.enddate) {
-        return next(
-          new Error("This exam is not available (exception timeline).", {
-            cause: 403,
-          })
-        );
-      }
-    } else {
-      // Use main exam timeline
-      if (now < exam.startdate || now > exam.enddate) {
-        return next(
-          new Error("This exam is not available (main timeline).", {
-            cause: 403,
-          })
-        );
-      }
-    }
-
-    // 6. If the student passes checks and is not already enrolled, add them to enrolledStudents
-    if (!isEnrolled) {
-      exam.enrolledStudents.push(req.user._id);
-      await exam.save(); // Persist the updated exam document
+    if (now < exam.startdate || now > exam.enddate) {
+      return next(new Error("This exam is not available (main timeline).", { cause: 403 }));
     }
   }
 
-  // 7. Fetch the exam file from S3
-  const { bucketName, key } = exam;
-  try {
-    const command = new GetObjectCommand({
-      Bucket: bucketName,
-      Key: key,
-    });
+  // لو ماكانش مسجل، نضيفه لقائمة المسجلين
+  if (!isEnrolled) {
+    exam.enrolledStudents.push(req.user._id);
+    await exam.save();
+  }
 
+  req.exam = exam;
+  next();
+};
+
+// 3. دالة لوحدها للتعامل مع تحميل الملف من S3 والإرسال للـ client
+const streamExamFile = async (req, res, next) => {
+  const exam = req.exam;
+  const { bucketName, key } = exam;
+
+  try {
+    // ننشئ الأمر وننفذه
+    const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
     const response = await s3.send(command);
 
-    // 8. Set headers for file download
-    const filename = key.split("/").pop(); // Extract filename from the S3 key
+    // تجهيز الهيدرز لضمان تحميل PDF
+    const filename = key.split("/").pop();
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.setHeader("Content-Type", response.ContentType);
+    res.setHeader("Content-Type", response.ContentType || "application/pdf");
 
-    // 9. Stream the file to the response
+    // نبث الـ stream للـ response
     response.Body.pipe(res);
 
-    // 10. Mark the student as enrolled only after successful response
+    // لما يخلص البث، نتاكد إنه لو مدرّس ما يعملش حاجة، لو طالب ممكن نضيفه مرة ثانية لو لزم الأمر
     response.Body.on("end", async () => {
-      if (!req.isteacher.teacher) {
-        const isStudentAlreadyEnrolled = exam.enrolledStudents.some(
+      // لو طالب وما كانش مسجل أصلًا (احتمال جانا هنا بعد التدقيق)
+      if (!req.isteacher?.teacher) {
+        const isStillEnrolled = exam.enrolledStudents.some(
           (sid) => sid.toString() === req.user._id.toString()
         );
-
-        if (!isStudentAlreadyEnrolled) {
+        if (!isStillEnrolled) {
           exam.enrolledStudents.push(req.user._id);
-          await exam.save(); // Update the enrolledStudents array
+          await exam.save();
         }
       }
     });
-  } catch (error) {
-    console.error("Error fetching exam from S3:", error);
-    return next(new Error("Failed to download the exam.", { cause: 500 }));
+  } catch (err) {
+    console.error("S3 Error:", err);
+    return next(new Error("Failed to download the exam file.", { cause: 500 }));
   }
-});
+};
+
+// التجميعة النهائية للـ route مع الميدلويرز
+export const downloadExam = [
+  asyncHandler(validateExamId),
+  asyncHandler(authorizeUserForExam),
+  asyncHandler(streamExamFile),
+];
 
 export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
   const { submissionId } = req.query;
