@@ -1,9 +1,14 @@
 import express  from "express"
 import bootstrape from "./src/index.router.js";
+import serverless  from "serverless-http"
 import dotenv from 'dotenv'
 dotenv.config();
 const app = express();
-app.listen( process.env.PORT || 6900 , '0.0.0.0' , () => {
-    console.log(`App is running on port ${process.env.PORT } ......`);
+
+app.get("/", (req, res) => {
+  res.json({ message: "Hello from Vercel!" });
 });
+
+module.exports.handler = serverless(app);
+
 bootstrape(app,express);
