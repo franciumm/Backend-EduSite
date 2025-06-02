@@ -7,13 +7,13 @@ import { generateToken } from "../../utils/tokenFunctions.js";
 import { teacherModel } from "../../../DB/models/teacher.model.js";
 import { gradeModel } from "../../../DB/models/grades.model.js";
 export const Signup = asyncHandler(async(req,res,next)=>{
-    const {email,parentemail,userName,firstName,lastName,password,gradeid ,  parentphone ,phone,cPassword}= req.body ;
+    const {email,parentemail,userName,firstName,lastName,password,grade ,  parentphone ,phone,cPassword}= req.body ;
     
     if(await UserModel.findOne({$or:[{email},{userName},{phone}]})){
         return next( Error('User Email or Username or phone Exists', {cause:409}));
-    }
-     
-    if(!(await gradeModel.findById(gradeid))){
+    } 
+    const  gradeOBJ = await gradeModel.findOne({grade});
+    if(!(gradeOBJ)){
         return next( Error('Invalid Grade Id ', {cause:409}));
     }
     if(password != cPassword){
@@ -21,8 +21,9 @@ export const Signup = asyncHandler(async(req,res,next)=>{
     }
     
   
-    const token = jwt.sign({  email, user:{firstName,lastName,email,parentemail,gradeId: gradeid, userName,password ,parentPhone: parentphone , phone ,confirmEmail:true } }, process.env.EMAIL_SIG, { expiresIn: 60 * 5 });
-
+    
+    const token = jwt.sign({  email, user:{firstName,lastName,email,parentemail,gradeId: gradeOBJ._id, userName,password ,parentPhone: parentphone , phone ,confirmEmail:true } }, process.env.EMAIL_SIG, { expiresIn: 60 * 5 });
+    
    
     const newConfirmEmailToken = jwt.sign({  email }, process.env.EMAIL_SIG);
    

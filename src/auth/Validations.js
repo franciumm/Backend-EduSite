@@ -12,8 +12,7 @@ export const  signup = Joi.object({
     phone: Joi.string().max(13).min(10).required(),
     parentphone: Joi.string().max(13).min(10).required(),
    
-    gradeid : Joi.string().custom((value, helpers) => {  if (!mongoose.Types.ObjectId.isValid(value)) {  return helpers.message("Invalid ObjectId");  }    return value; }, "ObjectId Validation")
-
+    grade : Joi.number()
 }).required()
 
 
