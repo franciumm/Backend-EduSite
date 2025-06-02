@@ -60,7 +60,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
     //     OR (exceptionStudents.studentId == userId)
     const studentQuery = {
       $or: [
-        { groupIds: user.groupid },
+        { groupIds: user.gradeId },
         { enrolledStudents: user._id },
         { "exceptionStudents.studentId": user._id },
       ],

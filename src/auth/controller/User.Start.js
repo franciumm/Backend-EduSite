@@ -152,6 +152,7 @@ return next(new Error ('The User Doesn`t exist try to signUp',{cause : 404}))
         email ,
         password , 
         _id: user._id,
+        groupId : gradeId,
         
     },
 signature:process.env.SIGN_IN_TOKEN_SECRET,

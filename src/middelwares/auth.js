@@ -70,6 +70,7 @@ export const isAuth = asyncHandler(async (req, res, next) => {
             payload: {
             email: user.email,
             _id: user._id,
+            
             },
             signature: process.env.SIGN_IN_TOKEN_SECRET,
             expiresIn: '2h',
