@@ -154,7 +154,7 @@ export const submitExam = asyncHandler(async (req, res, next) => {
   } else {
     studentId = user._id;
     const a7a = await studentModel.findById(user._id);
-    const isInGroup = exam.groupIds.some((gid) => gid.toString() === a7a.groupid?.toString());
+    const isInGroup = exam.groupIds.some((gid) => gid.toString() === a7a.groupId?.toString());
     const exceptionEntry = exam.exceptionStudents.find(
       (ex) => ex.studentId.toString() === studentId.toString()
     );
