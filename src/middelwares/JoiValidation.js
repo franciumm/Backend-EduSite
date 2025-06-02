@@ -1,11 +1,17 @@
-  const Joivalidation = (schema)=>{
-    return (req,res,next)=>{
-        const validateData = schema.validate(req.body , {abortEarly : false});
-        if(validateData.error){
-          return res.json({Message : validateData.error.details})}else {return next()
-          }
-    }
-    
+// middelwares/JoiValidation.js
+const Joivalidation = (schema) => {
+  return (req, res, next) => {
+
+    const { error } = schema.validate(req.body, { abortEarly: true });
+
+    if (error) {
+     
+      const firstMessage = error.details[0].message;
+      return res.status(400).json({ message: firstMessage });
     }
 
-    export default Joivalidation
+    next();
+  };
+};
+
+export default Joivalidation;
