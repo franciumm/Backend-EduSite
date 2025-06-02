@@ -8,8 +8,7 @@ import fs from 'fs'
 
 
 
-
-
+// 1. الدالة دي مش محتاجة ترجّع Promise، فمش هنغلفها بـ asyncHandler
 const validateExamId = (req, res, next) => {
   const { examId } = req.query;
   if (!examId) {
@@ -18,7 +17,7 @@ const validateExamId = (req, res, next) => {
   next();
 };
 
-// 2. دالة للتحقق من صلاحيات الـ student أو الـ teacher على الامتحان
+// 2. دالة صلاحيات الطالب/المدرس لحد دلوقتي async، يبقى هنا نستخدم asyncHandler عادي
 const authorizeUserForExam = async (req, res, next) => {
   const { examId } = req.query;
   const exam = await examModel.findById(examId);
@@ -57,7 +56,7 @@ const authorizeUserForExam = async (req, res, next) => {
     }
   }
 
-  // لو ماكانش مسجل، نضيفه لقائمة المسجلين
+  // لو مش مسجل أصلاً، نضيفه لقائمة المسجلين
   if (!isEnrolled) {
     exam.enrolledStudents.push(req.user._id);
     await exam.save();
@@ -67,32 +66,27 @@ const authorizeUserForExam = async (req, res, next) => {
   next();
 };
 
-// 3. دالة لوحدها للتعامل مع تحميل الملف من S3 والإرسال للـ client
+// 3. دالة تنزيل الملف من S3، بردو async معمولها wrap بالـ asyncHandler
 const streamExamFile = async (req, res, next) => {
   const exam = req.exam;
   const { bucketName, key } = exam;
 
   try {
-    // ننشئ الأمر وننفذه
     const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
     const response = await s3.send(command);
 
-    // تجهيز الهيدرز لضمان تحميل PDF
     const filename = key.split("/").pop();
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
     res.setHeader("Content-Type", response.ContentType || "application/pdf");
 
-    // نبث الـ stream للـ response
     response.Body.pipe(res);
 
-    // لما يخلص البث، نتاكد إنه لو مدرّس ما يعملش حاجة، لو طالب ممكن نضيفه مرة ثانية لو لزم الأمر
     response.Body.on("end", async () => {
-      // لو طالب وما كانش مسجل أصلًا (احتمال جانا هنا بعد التدقيق)
       if (!req.isteacher?.teacher) {
-        const isStillEnrolled = exam.enrolledStudents.some(
+        const stillEnrolled = exam.enrolledStudents.some(
           (sid) => sid.toString() === req.user._id.toString()
         );
-        if (!isStillEnrolled) {
+        if (!stillEnrolled) {
           exam.enrolledStudents.push(req.user._id);
           await exam.save();
         }
@@ -104,9 +98,9 @@ const streamExamFile = async (req, res, next) => {
   }
 };
 
-// التجميعة النهائية للـ route مع الميدلويرز
+// 4. نصدّر الـ middleware محتوية على الثلاث مراحل بدون تغليف validateExamId بالـ asyncHandler
 export const downloadExam = [
-  asyncHandler(validateExamId),
+  validateExamId,
   asyncHandler(authorizeUserForExam),
   asyncHandler(streamExamFile),
 ];
