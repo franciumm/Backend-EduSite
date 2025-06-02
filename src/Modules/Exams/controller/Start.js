@@ -13,6 +13,7 @@ import {examModel} from "../../../../DB/models/exams.model.js";
 import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
 import fs from "fs";
 import mongoose from "mongoose";
+import studentModel from "../../../../DB/models/student.model.js";
 
 
 export const createExam = asyncHandler(async (req, res, next) => {
@@ -152,8 +153,8 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     studentId = user._id;
   } else {
     studentId = user._id;
-
-    const isInGroup = exam.groupIds.some((gid) => gid.toString() === user.groupid?.toString());
+    const a7a = await studentModel.findById(user._id);
+    const isInGroup = exam.groupIds.some((gid) => gid.toString() === a7a.groupid?.toString());
     const exceptionEntry = exam.exceptionStudents.find(
       (ex) => ex.studentId.toString() === studentId.toString()
     );
