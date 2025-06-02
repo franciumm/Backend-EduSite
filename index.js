@@ -9,6 +9,6 @@ app.get("/", (req, res) => {
   res.json({ message: "Hello from Vercel!" });
 });
 
-module.exports.handler = serverless(app);
+export const handler = serverless(app);
 
 bootstrape(app,express);
