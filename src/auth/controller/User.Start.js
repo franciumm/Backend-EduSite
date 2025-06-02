@@ -22,7 +22,7 @@ export const Signup = asyncHandler(async(req,res,next)=>{
     
   
     
-    const token = jwt.sign({  email, user:{firstName,lastName,email,parentemail,gradeId: gradeOBJ._id, userName,password ,parentPhone: parentphone , phone ,confirmEmail:true } }, process.env.EMAIL_SIG, { expiresIn: 60 * 5 });
+    const token = jwt.sign({  email, user:{firstName,lastName,email,parentemail,gradeId: gradeOBJ._id, userName,password ,parentPhone: parentphone , phone ,confirmEmail:true } }, process.env.EMAIL_SIG, { expiresIn: 60 * 120 });
     
    
     const newConfirmEmailToken = jwt.sign({  email }, process.env.EMAIL_SIG);
