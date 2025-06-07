@@ -161,7 +161,8 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
       }
     } else {
       // For students, filter by their group
-      query.groupId = user.groupid;
+        let student = await studentModel.findById(user._Id);
+      query.groupId = student.groupId;
     }
 
     // Apply timeline filters if status is provided

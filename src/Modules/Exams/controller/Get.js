@@ -59,15 +59,8 @@ export const getExams = asyncHandler(async (req, res, next) => {
     //       (groupIds includes user.groupid) 
     //     OR (enrolledStudents includes userId) 
     //     OR (exceptionStudents.studentId == userId)
-    const studentQuery = {
-      $or: [
-        { groupIds: user.groupId },
-        { enrolledStudents: user._id },
-        { "exceptionStudents.studentId": user._id },
-      ],
-    };
-
-    if (!user.groupId ){
+  
+   
       let student = await studentModel.findById(user._Id);
         studentQuery = {
       $or: [
@@ -76,7 +69,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
         { "exceptionStudents.studentId": user._id },
       ],
     };
-    }
+    
 
 
     // We fetch everything matching that. Then do filtering in memory.
