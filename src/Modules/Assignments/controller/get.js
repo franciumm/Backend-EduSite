@@ -163,7 +163,10 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
     } else {
       // For students, filter by their group
       
-        let student = await studentModel.findById(user._id);
+        let student = await studentModel.findById(user._id).lean();
+          if (!student) {
+        return res.status(404).json({ message: "Student not found" });
+      }
       query.groupId = student.groupId;
     }
 

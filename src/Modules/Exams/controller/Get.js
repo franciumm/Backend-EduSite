@@ -55,7 +55,10 @@ export const getExams = asyncHandler(async (req, res, next) => {
   } else {
     
    
-      let student = await studentModel.findById(user._id);
+      let student = await studentModel.findById(user._id).lean();
+          if (!student) {
+        return res.status(404).json({ message: "Student not found" });
+      };
         studentQuery = {
       $or: [
         { groupIds: student.groupId },
