@@ -55,7 +55,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
   } else {
     
    
-      let student = await studentModel.findById(user._Id);
+      let student = await studentModel.findById(user._id);
         studentQuery = {
       $or: [
         { groupIds: student.groupId },
