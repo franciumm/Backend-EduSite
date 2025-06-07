@@ -163,11 +163,11 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
     } else {
       // For students, filter by their group
       
-        let student = await studentModel.findById(user._Id);
+        let student = await studentModel.findById(user._id);
       query.groupId = student.groupId;
     }
 
-    // Apply timeline filters if status is provided
+
     if (status) {
       if (status === "active") {
         query.startDate = { $lte: currentDate };
