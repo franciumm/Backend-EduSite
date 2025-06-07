@@ -59,9 +59,9 @@ export const getExams = asyncHandler(async (req, res, next) => {
           if (!student) {
         return res.status(404).json({ message: "Student not found" });
       };
-        studentQuery = {
+     var studentQuery = {
       $or: [
-        { groupIds: student.groupId },
+        { groupIds : student.groupId },
         { enrolledStudents: user._id },
         { "exceptionStudents.studentId": user._id },
       ],
