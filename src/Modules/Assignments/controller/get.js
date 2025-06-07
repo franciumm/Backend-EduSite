@@ -6,6 +6,7 @@ import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.m
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
 import { PDFDocument, rgb } from "pdf-lib";
 import { pagination } from "../../../utils/pagination.js";
+import studentModel from "../../../../DB/models/student.model.js";
 
 
 
@@ -161,6 +162,7 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
       }
     } else {
       // For students, filter by their group
+      
         let student = await studentModel.findById(user._Id);
       query.groupId = student.groupId;
     }
