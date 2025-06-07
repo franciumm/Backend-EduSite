@@ -53,13 +53,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
 
     totalExams = await examModel.countDocuments(query);
   } else {
-    // 3. Student logic
-    // Step A: Find all potential exams that the student might see:
-    //    condition: 
-    //       (groupIds includes user.groupid) 
-    //     OR (enrolledStudents includes userId) 
-    //     OR (exceptionStudents.studentId == userId)
-  
+    
    
       let student = await studentModel.findById(user._Id);
         studentQuery = {
@@ -72,23 +66,16 @@ export const getExams = asyncHandler(async (req, res, next) => {
     
 
 
-    // We fetch everything matching that. Then do filtering in memory.
+    
     let allExams = await examModel
       .find(studentQuery)
       .sort({ startdate: 1 })
       .select("Name startdate enddate groupIds grade exceptionStudents");
 
-    // Step B: Filter out based on the student's perspective of timeline & status
-    // If no status is specified, we return all the exams that the student can see, ignoring timeline.
-    // If status is set, we apply these definitions:
-
+   
     const filtered = allExams.filter((exam) => {
-      // Check if user is in the exam or exception
-      // (We've already done that in the query, so now do timeline checks if "status" was provided.)
-
-      if (!status) return true; // If no status, show all
-
-      // Find custom timeline if the user is an exception
+      
+      if (!status) return true; 
       const exceptionEntry = exam.exceptionStudents.find(
         (ex) => ex.studentId.toString() === user._id.toString()
       );

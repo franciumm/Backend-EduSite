@@ -14,7 +14,7 @@ import studentModel from "../../../../DB/models/student.model.js";
 
 export const GetAllByGroup = asyncHandler (async  (req, res, next) => {
   const {groupId}= req.body ;
-  
+  req.user.groupId = await studentModel.findById(user._Id);
   if(req.isteacher.teacher== false&& req.user.groupId ==groupId){
     return next(new Error("The Studednt no in This group", { cause: 401 }));
     ;
