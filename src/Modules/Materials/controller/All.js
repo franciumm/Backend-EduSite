@@ -5,14 +5,15 @@ import { asyncHandler } from '../../../utils/erroHandling.js';
 import MaterialModel from '../../../../DB/models/material.model.js';
 import { groupModel } from '../../../../DB/models/groups.model.js';
 import studentModel from '../../../../DB/models/student.model.js';
-import { getPresignedUrlForS3, deleteFileFromS3 } from '../../../utils/S3Client.js';
+import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3 } from '../../../utils/S3Client.js';
+
+
 import { pagination } from '../../../utils/pagination.js';
 
 
 
 function generateSlug(text) {
-  return slugify(text, { lower: true, strict: true });
-}
+return slugify(text, { lower: true, strict: true });}
 
 export const createMaterial = asyncHandler(async (req, res, next) => {
   const userId = req.user._id;
@@ -86,6 +87,9 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
     fs.unlinkSync(req.file.path);
   }
 });
+
+
+
 // ── 2) List materials (students & teachers) ────────────────────────────────────
 export const getMaterials = asyncHandler(async (req, res, next) => {
   const { page = 1, size = 4 } = req.query;
@@ -135,6 +139,9 @@ export const getMaterials = asyncHandler(async (req, res, next) => {
     },
   });
 });
+
+
+
 
 // ── 3) View one material (URL) ─────────────────────────────────────────────────
 export const viewMaterial = asyncHandler(async (req, res, next) => {
