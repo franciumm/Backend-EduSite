@@ -20,8 +20,7 @@ const bootstrape =  async (app,express)=>{
     app.use('/exams',exam);
     app.use("/assignments", assg)
     app.use('/student',auth);
-
-app.use('/material',mater);
+    app.use('/material',mater);
     app.use(globalerrorHandling);
     app.use('*',(req,res,next) => {return res.status(404).json('In-Valid Routing')});
 

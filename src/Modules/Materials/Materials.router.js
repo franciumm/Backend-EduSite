@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { AdminAuth, isAuth } from "../../middelwares/auth";
+import { AdminAuth, isAuth } from "../../middelwares/auth.js";
 import * as materialsController from "./controller/All.js";
 
 const router = Router();
