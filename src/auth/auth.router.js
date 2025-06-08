@@ -14,4 +14,6 @@ router.post('/login',Joivalidation(Joi.Login),UserStart.Login );
 router.post('/teacher/login',Joivalidation(Joi.Login),UserStart.AdminLogin );
 router.post ('/forget',PasswordC.forgetPassword);
 router.post ('/reset/:token',PasswordC.ResetPassword);
+router.get("/profile", isAuth, UserStart.getMyProfile);
+
 export default router;

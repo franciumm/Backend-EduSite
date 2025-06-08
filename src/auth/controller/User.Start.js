@@ -137,6 +137,26 @@ export const Signup = asyncHandler(async(req,res,next)=>{
 })
 
 
+export const getMyProfile = asyncHandler(async (req, res, next) => {
+  const userId = req.user._id;            // from your auth middleware
+  const isTeacher = req.isteacher?.teacher === true;
+
+  // 1. choose model and projection
+  const Model = isTeacher ? teacherModel : studentModel;
+  const projection = { password: 0, __v: 0 }; // hide pwd & version
+
+  // 2. fetch user
+  const account = await Model.findById(userId).select(projection);
+  if (!account) {
+    return next(new Error("Account not found", { cause: 404 }));
+  }
+
+  // 3. respond
+  res.status(200).json({
+    message: "Account info fetched successfully",
+    data: account,
+  });
+});
 
 export const Login = asyncHandler(async(req,res,next)=>{
     const {email , password}= req.body;
