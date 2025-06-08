@@ -6,6 +6,7 @@ import SendMail from "../../utils/Mailer.js";
 import { generateToken } from "../../utils/tokenFunctions.js";
 import { teacherModel } from "../../../DB/models/teacher.model.js";
 import { gradeModel } from "../../../DB/models/grades.model.js";
+import studentModel from "../../../DB/models/student.model.js";
 export const Signup = asyncHandler(async(req,res,next)=>{
     const {email,parentemail,userName,firstName,lastName,password,grade ,  parentphone ,phone,cPassword}= req.body ;
     
