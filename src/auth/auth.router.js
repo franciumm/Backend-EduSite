@@ -4,6 +4,7 @@ import * as UserMailConfirm from './controller/Emailer.js'
 import * as Joi from './Validations.js'
 import Joivalidation from '../middelwares/JoiValidation.js';
 import * as PasswordC from './controller/password.js'
+import { isAuth } from '../middelwares/auth.js';
 
 const router = Router ();
 
@@ -14,6 +15,6 @@ router.post('/login',Joivalidation(Joi.Login),UserStart.Login );
 router.post('/teacher/login',Joivalidation(Joi.Login),UserStart.AdminLogin );
 router.post ('/forget',PasswordC.forgetPassword);
 router.post ('/reset/:token',PasswordC.ResetPassword);
-router.get("/profile", isAuth, UserStart.getMyProfile);
+router.get("/profile", isAuth , UserStart.getMyProfile);
 
 export default router;
