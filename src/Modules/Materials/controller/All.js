@@ -46,13 +46,13 @@ export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) =>
   const slug = generateSlug(req.body.name);
   const fileName = `${slug}-${Date.now()}.pdf`;
   const s3Key   = `materials/${fileName}`;
-  const presignedUrl = await getPresignedUrlForS3(
-    process.env.S3_BUCKET_NAME,
-    s3Key,
-    "application/pdf",
-    60 * 10
-  );
-
+ await uploadFileToS3(
+       process.env.S3_BUCKET_NAME,
+       s3Key,
+       fileContent,
+       "application/pdf" // MIME type
+     );
+ 
   const newMaterial = await MaterialModel.create({
     name:        req.body.name,
     description: req.body.description,
