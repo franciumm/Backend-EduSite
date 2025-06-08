@@ -1,13 +1,14 @@
 import { Router } from "express";
 import { AdminAuth, isAuth } from "../../middelwares/auth.js";
 import * as materialsController from "./controller/All.js";
+import { multerCloudFunction } from "../../utils/MulterCloud.js";
 
 const router = Router();
 
  // Create materials for a group (teachers)
 router.post(
     "/create",
-    AdminAuth, // Ensure user is authenticated
+    AdminAuth,multerCloudFunction(allowedExtensions.Files).single("file"), // Ensure user is authenticated
     materialsController.generatePresignedUploadUrl
   );
   
