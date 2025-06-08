@@ -3,6 +3,7 @@ import { MaterialModel } from "../../../../DB/models/material.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { generatePresignedUrl, deleteFileFromS3 } from "../../../utils/S3Client.js";
 import { pagination } from "../../../utils/pagination.js";
+import studentModel from "../../../../DB/models/student.model.js";
 
 // Generate Pre-signed URL for Upload (Teachers Only)
 export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) => {
@@ -59,8 +60,8 @@ export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) =>
 // Fetch Materials (Students & Teachers)
 export const getMaterials = asyncHandler(async (req, res, next) => {
   const { page = 1, size = 4 } = req.query; // Pagination defaults
-  const { groupId, _id, isteacher } = req.user; // User info from middleware
-
+  const {  _id, isteacher } = req.user; // User info from middleware
+  const groupId = await studentModel.findById(_id);
   try {
     // Students: Ensure access is restricted to their group only
     if (!isteacher) {
