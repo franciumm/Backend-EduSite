@@ -1,7 +1,7 @@
 import { asyncHandler } from "../../../utils/erroHandling.js";
 import MaterialModel  from "../../../../DB/models/material.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
-import { generatePresignedUrl, deleteFileFromS3 } from "../../../utils/S3Client.js";
+import { getPresignedUrlForS3, deleteFileFromS3 } from "../../../utils/S3Client.js";
 import { pagination } from "../../../utils/pagination.js";
 import studentModel from "../../../../DB/models/student.model.js";
 
@@ -27,7 +27,7 @@ export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) =>
   
     try {
       // Generate a pre-signed URL for the client to upload directly to S3
-      const presignedUrl = await generatePresignedUrl(
+      const presignedUrl = await getPresignedUrlForS3(
         process.env.S3_BUCKET_NAME,
         s3Key,
         "application/pdf",
