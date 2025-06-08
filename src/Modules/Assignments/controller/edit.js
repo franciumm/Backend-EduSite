@@ -6,6 +6,8 @@ import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.m
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
 import { PDFDocument, rgb } from "pdf-lib";
 import fs from "fs";
+import { groupModel } from "../../../../DB/models/groups.model.js";
+import studentModel from "../../../../DB/models/student.model.js";
 
 
 export const downloadAssignment = asyncHandler(async (req, res, next) => {
@@ -17,9 +19,7 @@ export const downloadAssignment = asyncHandler(async (req, res, next) => {
   if (!assignment) {
     return next(new Error("Assignment not found", { cause: 404 }));
   }
-  if(req.user.gradeid && req.user.gradeid != assignment.gradeId){
-    next(new Error("Student not In same Grade", { cause: 404 })); 
- }
+  req.user.groupId =  await studentModel.findById(req.user._id).groupId;
  if(req.isteacher.teacher == false && req.user.groupId != assignment.groupId)
   {
     next(new Error("Student not In same Group", { cause: 404 })); 
