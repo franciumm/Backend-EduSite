@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AdminAuth, isAuth } from "../../middelwares/auth.js";
 import * as materialsController from "./controller/All.js";
 import { multerCloudFunction } from "../../utils/MulterCloud.js";
+import { allowedExtensions } from "../../utils/allowedExtensions.js";
 
 const router = Router();
 
