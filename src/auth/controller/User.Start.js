@@ -139,26 +139,34 @@ export const Signup = asyncHandler(async(req,res,next)=>{
 
 
 export const getMyProfile = asyncHandler(async (req, res, next) => {
-  const userId = req.user._id;            // from your auth middleware
+  const userId = req.user._id;            
   const isTeacher = req.isteacher?.teacher === true;
 
-  // 1. choose model and projection
+  // choose model & hide sensitive props
   const Model = isTeacher ? teacherModel : studentModel;
-  const projection = { password: 0, __v: 0 }; // hide pwd & version
+  const projection = { password: 0, __v: 0 };
 
-  // 2. fetch user
-  const account = await Model.findById(userId).select(projection);
+  // build the query
+  let query = Model.findById(userId).select(projection);
+
+  // only students have gradeId & groupId fields
+  if (!isTeacher) {
+    query = query
+      .populate({ path: "groupId", select: "groupname" })
+      .populate({ path: "gradeId", select: "grade" });
+  }
+
+  // execute
+  const account = await query;
   if (!account) {
     return next(new Error("Account not found", { cause: 404 }));
   }
 
-  // 3. respond
   res.status(200).json({
     message: "Account info fetched successfully",
     data: account,
   });
 });
-
 export const Login = asyncHandler(async(req,res,next)=>{
     const {email , password}= req.body;
     const user = await UserModel.findOne({email});
