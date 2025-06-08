@@ -14,7 +14,12 @@ const materialSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "teacher",
       required: true,
-    },
+    },   
+     status: {
+      type: String,
+      enum: ["Pending Upload", "Uploaded", "Failed"],
+      default: "Uploaded"
+   },
   },
   { timestamps: true }
 );

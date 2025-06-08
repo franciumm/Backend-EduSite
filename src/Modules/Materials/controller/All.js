@@ -1,10 +1,15 @@
 import mongoose from 'mongoose';
+import fs from 'fs';
+import slugify from 'slugify';
 import { asyncHandler } from '../../../utils/erroHandling.js';
 import MaterialModel from '../../../../DB/models/material.model.js';
 import { groupModel } from '../../../../DB/models/groups.model.js';
 import studentModel from '../../../../DB/models/student.model.js';
 import { getPresignedUrlForS3, deleteFileFromS3 } from '../../../utils/S3Client.js';
 import { pagination } from '../../../utils/pagination.js';
+
+
+
 function generateSlug(text) {
   return slugify(text, { lower: true, strict: true });
 }
