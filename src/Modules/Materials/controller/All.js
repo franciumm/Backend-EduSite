@@ -19,15 +19,13 @@ function generateSlug(text) {
 
 export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) => {
     const { _id } = req.user; // User data from middleware
-    const { name, description, groupId } = req.body;
-  
-  
-  
-    // Validate group existence
-    const group = await groupModel.findById(groupId);
-    if (!group) {
-      return next(new Error("Group not found", { cause: 404 }));
-    }
+    const { name, description, groupIds } = req.body;
+
+ if (!Array.isArray(groupIds) || groupIds.length === 0) {
+   return next(new Error("At least one groupId is required", { cause: 400 }));
+ }
+
+    const slug = generateSlug(name);
   
     // Generate a unique filename for the material
     const fileName = `${name}-${Date.now()}.pdf`;
@@ -47,7 +45,7 @@ export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) =>
     name,
     slug,               // ← now satisfies the schema
     description,
-    groupId,
+    groupIds,
     createdBy: _id,
     bucketName: process.env.S3_BUCKET_NAME,
     key: s3Key,
@@ -68,56 +66,110 @@ export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) =>
 
   
 export const getMaterials = asyncHandler(async (req, res, next) => {
-  const { page = 1, size = 4 } = req.query; // Pagination defaults
-  const {  _id, isteacher } = req.user; // User info from middleware
-  const student = await studentModel.findById(_id);
-  const groupId = student.groupId;
-  try {
-    // Students: Ensure access is restricted to their group only
-    if (!isteacher) {
-      const groupExists = await groupModel.findOne({ _id: groupId, enrolledStudents: _id });
-      if (!groupExists) {
-        return next(new Error("You are not authorized to access these materials", { cause: 403 }));
-      }
-    }
+  // 1️⃣ Pagination & user info
+  const { page = 1, size = 4 } = req.query;
+  const userId    = req.user._id;
+  const isTeacher = req.isteacher.teacher;
 
-    // Pagination calculation
-    const { limit, skip } = pagination({ page, size });
+  let studentGroupId;
+  if (!isTeacher) {
+    // 2️⃣ Grab the student’s group
+    const student = await studentModel.findById(userId).select('groupId');
+    studentGroupId = student.groupId;
 
-    // Fetch materials for the group
-    const materials = await MaterialModel.find({ groupId, status: "Uploaded" }) // Only "Uploaded" materials
-      .select("name description createdAt path")
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    // Count total materials
-    const totalMaterials = await MaterialModel.countDocuments({ groupId, status: "Uploaded" });
-
-    res.status(200).json({
-      message: "Materials retrieved successfully",
-      materials,
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(totalMaterials / size),
-        totalMaterials,
-      },
+    // 3️⃣ Classic access check
+    const isEnrolled = await groupModel.exists({
+      _id: studentGroupId,
+      enrolledStudents: userId
     });
-  } catch (error) {
-    console.error("Error retrieving materials:", error);
-    next(new Error("Error retrieving materials", { cause: 500 }));
+    if (!isEnrolled) {
+      return next(new Error("You are not authorized to access these materials", { cause: 403 }));
+    }
   }
+
+  // 4️⃣ Compute limit & skip
+  const { limit, skip } = pagination({ page, size });
+
+  // 5️⃣ Build our filter: always status=Uploaded, plus groupIds check for students
+  const filter = { status: 'Uploaded' };
+  if (!isTeacher) {
+    // Mongo treats field: value on an array as “array contains that value”
+    filter.groupIds = studentGroupId;
+  }
+
+  // 6️⃣ Fetch & count
+  const materials = await MaterialModel.find(filter)
+    .select('name description createdAt path')
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+  const totalMaterials = await MaterialModel.countDocuments(filter);
+
+  // 7️⃣ Respond old-school style
+  res.status(200).json({
+    message: "Materials retrieved successfully",
+    materials,
+    pagination: {
+      currentPage: Number(page),
+      totalPages:  Math.ceil(totalMaterials / size),
+      totalMaterials,
+    },
+  });
 });
 
+// export const getMaterials = asyncHandler(async (req, res, next) => {
+//   const { page = 1, size = 4 } = req.query; // Pagination defaults
+//   const {  _id, isteacher } = req.user; // User info from middleware
+//   const student = await studentModel.findById(_id);
+//   const groupId = student.groupId;
+//   try {
+//     // Students: Ensure access is restricted to their group only
+//     if (!isteacher) {
+//       const groupExists = await groupModel.findOne({ _id: groupId, enrolledStudents: _id });
+//       if (!groupExists) {
+//         return next(new Error("You are not authorized to access these materials", { cause: 403 }));
+//       }
+//     }
+
+//     // Pagination calculation
+//     const { limit, skip } = pagination({ page, size });
+
+//     // Fetch materials for the group
+//     const materials = await MaterialModel.find({ groupId, status: "Uploaded" }) // Only "Uploaded" materials
+//       .select("name description createdAt path")
+//       .skip(skip)
+//       .limit(limit)
+//       .lean();
+
+//     // Count total materials
+//     const totalMaterials = await MaterialModel.countDocuments({ groupId, status: "Uploaded" });
+
+//     res.status(200).json({
+//       message: "Materials retrieved successfully",
+//       materials,
+//       pagination: {
+//         currentPage: page,
+//         totalPages: Math.ceil(totalMaterials / size),
+//         totalMaterials,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error retrieving materials:", error);
+//     next(new Error("Error retrieving materials", { cause: 500 }));
+//   }
+// });
+
+
+
+
 // Delete Material (Teachers Only)
+
+
 export const deleteMaterial = asyncHandler(async (req, res, next) => {
   const { materialId } = req.params;
-  const { isteacher } = req.user;
-
-  if (!isteacher) {
-    return next(new Error("Only teachers can delete materials", { cause: 403 }));
-  }
-
+ 
+  
   try {
     const material = await MaterialModel.findById(materialId);
     if (!material) {
