@@ -1,5 +1,5 @@
 import { asyncHandler } from "../../../utils/erroHandling.js";
-import { MaterialModel } from "../../../../DB/models/material.model.js";
+import MaterialModel  from "../../../../DB/models/material.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { generatePresignedUrl, deleteFileFromS3 } from "../../../utils/S3Client.js";
 import { pagination } from "../../../utils/pagination.js";
