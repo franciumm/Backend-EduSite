@@ -1,5 +1,6 @@
 import { Schema, model } from "mongoose";
 
+
 const materialSchema = new Schema(
   {
     name: { type: String, required: true },
@@ -22,4 +23,6 @@ const materialSchema = new Schema(
   { timestamps: true }
 );
 
-export default materialModel = model("material", materialSchema);
+
+const materialModel = model("material", materialSchema);
+export default materialModel;

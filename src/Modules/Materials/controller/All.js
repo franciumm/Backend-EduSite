@@ -5,7 +5,18 @@ import { getPresignedUrlForS3, deleteFileFromS3 } from "../../../utils/S3Client.
 import { pagination } from "../../../utils/pagination.js";
 import studentModel from "../../../../DB/models/student.model.js";
 
-// Generate Pre-signed URL for Upload (Teachers Only)
+
+
+function generateSlug(text) {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')       // spaces → hyphens
+    .replace(/[^\w\-]+/g, '')   // remove non-word chars
+    .replace(/\-\-+/g, '-');    // collapse multiple hyphens
+}
+
 export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) => {
     const { _id, isteacher } = req.user; // User data from middleware
     const { name, description, groupId } = req.body;
@@ -34,18 +45,18 @@ export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) =>
         60 * 10 // URL valid for 10 minutes
       );
   
-      // Save material metadata in the database (status: "Pending Upload")
-      const newMaterial = await MaterialModel.create({
-        name,
-        description,
-        groupId,
-        createdBy: _id,
-        bucketName: process.env.S3_BUCKET_NAME,
-        key: s3Key,
-        path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-        status: "Pending Upload", // Initial status
-      });
   
+  const newMaterial = await MaterialModel.create({
+    name,
+    slug,               // ← now satisfies the schema
+    description,
+    groupId,
+    createdBy: _id,
+    bucketName: process.env.S3_BUCKET_NAME,
+    key: s3Key,
+    path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
+    status: "Pending Upload",
+  });
       res.status(201).json({
         message: "Pre-signed URL generated successfully",
         presignedUrl,
@@ -57,11 +68,13 @@ export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) =>
     }
   });
   
-// Fetch Materials (Students & Teachers)
+
+  
 export const getMaterials = asyncHandler(async (req, res, next) => {
   const { page = 1, size = 4 } = req.query; // Pagination defaults
   const {  _id, isteacher } = req.user; // User info from middleware
-  const groupId = await studentModel.findById(_id);
+  const student = await studentModel.findById(_id);
+  const groupId = student.groupId;
   try {
     // Students: Ensure access is restricted to their group only
     if (!isteacher) {

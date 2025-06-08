@@ -23,7 +23,7 @@ router.post(
   
 
 // Route to view material (students can view if enrolled, teachers can view any)
-router.get('/materials/:materialId', isAuth, materialsController.viewMaterial);
+router.get('/:materialId', isAuth, materialsController.viewMaterial);
 
   // Delete a material by its ID (teachers only)
   router.delete(
