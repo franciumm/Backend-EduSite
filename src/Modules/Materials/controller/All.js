@@ -18,13 +18,10 @@ function generateSlug(text) {
 }
 
 export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) => {
-    const { _id, isteacher } = req.user; // User data from middleware
+    const { _id } = req.user; // User data from middleware
     const { name, description, groupId } = req.body;
   
-    // Ensure the user is a teacher
-    if (!isteacher) {
-      return next(new Error("Only teachers can upload materials", { cause: 403 }));
-    }
+  
   
     // Validate group existence
     const group = await groupModel.findById(groupId);
