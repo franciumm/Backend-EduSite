@@ -5,72 +5,82 @@ import { groupModel } from '../../../../DB/models/groups.model.js';
 import studentModel from '../../../../DB/models/student.model.js';
 import { getPresignedUrlForS3, deleteFileFromS3 } from '../../../utils/S3Client.js';
 import { pagination } from '../../../utils/pagination.js';
-
-// Utility: slug factory (unchanged)
 function generateSlug(text) {
-  return text.toString()
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^\w\-]+/g, '')
-    .replace(/\-\-+/g, '-');
+  return slugify(text, { lower: true, strict: true });
 }
 
-// ── 1) Upload URL (teachers only; AdminAuth middleware ensures teacher) ─────────
-export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) => {
-  const userId = req.user._id;  // guaranteed by AdminAuth
-  let groupIds = req.body.groupIds ?? req.body.groupId;  // accept either field
+export const createMaterial = asyncHandler(async (req, res, next) => {
+  const userId = req.user._id;
+  let { name, description } = req.body;
+  let groupIds = req.body.groupIds ?? req.body.groupId;  // accept either
 
-  // Normalize into an array
+  // ── 1) Validate groupIds as an array ─────────────────────────────────────────
   if (!groupIds) {
     return next(new Error("At least one groupId is required", { cause: 400 }));
   }
   if (!Array.isArray(groupIds)) {
     groupIds = [groupIds];
   }
-
-  // Validate every ID shape
+  // ensure each is a valid ObjectId
   for (const id of groupIds) {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return next(new Error(`Invalid groupId: ${id}`, { cause: 400 }));
     }
   }
-
-  // Ensure each group actually exists
-  const count = await groupModel.countDocuments({ _id: { $in: groupIds } });
-  if (count !== groupIds.length) {
+  // ensure they all exist
+  const existingCount = await groupModel.countDocuments({ _id: { $in: groupIds } });
+  if (existingCount !== groupIds.length) {
     return next(new Error("One or more groupIds do not exist", { cause: 404 }));
   }
 
-  // Generate S3 key & record pending material
-  const slug = generateSlug(req.body.name);
+  // ── 2) File presence & read ───────────────────────────────────────────────────
+  if (!req.file) {
+    return next(new Error("Please upload a PDF file", { cause: 400 }));
+  }
+  const fileContent = fs.readFileSync(req.file.path);
+
+  // ── 3) Generate slug + S3 key ──────────────────────────────────────────────────
+  const slug     = generateSlug(name);
   const fileName = `${slug}-${Date.now()}.pdf`;
-  const s3Key   = `materials/${fileName}`;
- await uploadFileToS3(
-       process.env.S3_BUCKET_NAME,
-       s3Key,
-       fileContent,
-       "application/pdf" // MIME type
-     );
- 
-  const newMaterial = await MaterialModel.create({
-    name:        req.body.name,
-    description: req.body.description,
-    slug,
-    groupIds,                // ← array now
-    createdBy: userId,
-    bucketName: process.env.S3_BUCKET_NAME,
-    key:        s3Key,
-    path:       `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-  });
+  const s3Key    = `materials/${fileName}`;
 
-  res.status(201).json({
-    message:      "Pre-signed URL generated successfully",
-    presignedUrl,
-    materialId:   newMaterial._id,
-  });
+  try {
+    // ── 4) Upload to S3 ─────────────────────────────────────────────────────────
+    await uploadFileToS3(
+      process.env.S3_BUCKET_NAME,
+      s3Key,
+      fileContent,
+      "application/pdf"
+    );
+
+    // ── 5) Create DB record ─────────────────────────────────────────────────────
+    const newMaterial = await MaterialModel.create({
+      name,
+      slug,
+      description,
+      groupIds,
+      createdBy:  userId,
+      bucketName: process.env.S3_BUCKET_NAME,
+      key:        s3Key,
+      path:       `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
+      status:     "Uploaded"
+    });
+
+    // ── 6) Success ──────────────────────────────────────────────────────────────
+    res.status(201).json({
+      message:     "Material uploaded successfully",
+      material:    newMaterial
+    });
+  } catch (err) {
+    console.error("Error uploading material:", err);
+    // rollback on failure
+    await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key);
+    return next(new Error("Failed to upload material", { cause: 500 }));
+  } finally {
+    // cleanup local temp file
+    fs.unlinkSync(req.file.path);
+  }
 });
-
 // ── 2) List materials (students & teachers) ────────────────────────────────────
 export const getMaterials = asyncHandler(async (req, res, next) => {
   const { page = 1, size = 4 } = req.query;

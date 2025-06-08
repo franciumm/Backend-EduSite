@@ -10,7 +10,7 @@ const router = Router();
 router.post(
     "/create",
     AdminAuth,multerCloudFunction(allowedExtensions.Files).single("file"), // Ensure user is authenticated
-    materialsController.generatePresignedUploadUrl
+    materialsController.createMaterial
   );
   
 
