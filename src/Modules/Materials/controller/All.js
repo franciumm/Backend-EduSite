@@ -21,10 +21,18 @@ export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) =>
     const { _id } = req.user; // User data from middleware
     const { name, description, groupIds } = req.body;
 
- if (!Array.isArray(groupIds) || groupIds.length === 0) {
-   return next(new Error("At least one groupId is required", { cause: 400 }));
- }
-
+  if (!groupIds) {
+    return next(new Error("At least one groupId is required", { cause: 400 }));
+  }
+ if (typeof groupIds === "string") {
+    groupIds = [groupIds];
+  }  
+  if (!Array.isArray(groupIds)) {
+    return next(new Error("groupIds must be a string or an array of strings", { cause: 400 }));
+  }
+    if (groupIds.length === 0) {
+    return next(new Error("At least one groupId is required", { cause: 400 }));
+  }
     const slug = generateSlug(name);
   
     // Generate a unique filename for the material
@@ -43,7 +51,7 @@ export const generatePresignedUploadUrl = asyncHandler(async (req, res, next) =>
   
   const newMaterial = await MaterialModel.create({
     name,
-    slug,               // ← now satisfies the schema
+    slug,              
     description,
     groupIds,
     createdBy: _id,
