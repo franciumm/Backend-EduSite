@@ -22,4 +22,4 @@ const materialSchema = new Schema(
   { timestamps: true }
 );
 
-export const materialModel = model("material", materialSchema);
+export default materialModel = model("material", materialSchema);
