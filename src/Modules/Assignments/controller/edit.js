@@ -10,41 +10,80 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 
 
+// export const downloadAssignment = asyncHandler(async (req, res, next) => {
+//   const { assignmentId } = req.query;
+
+
+//   // Fetch assignment details from the database
+//   const assignment = await assignmentModel.findById(assignmentId);
+//   if (!assignment) {
+//     return next(new Error("Assignment not found", { cause: 404 }));
+//   }
+//   req.user.groupId =  await studentModel.findById(req.user._id).groupId;
+//  if(req.isteacher.teacher == false && req.user.groupId != assignment.groupId)
+//   {
+//     next(new Error("Student not In same Group", { cause: 404 })); 
+//   }
+// // Extract S3 bucket name and file key
+//   const { bucketName, key } = assignment;
+
+//   try {
+//     // Get the object from S3
+//     const command = new GetObjectCommand({
+//       Bucket: bucketName,
+//       Key: key,
+//     });
+
+//     const response = await s3.send(command);
+
+//     // Set headers for file download
+//     res.setHeader("Content-Disposition", `attachment; filename="${key.split("/").pop()}"`);
+//     res.setHeader("Content-Type", response.ContentType);
+
+//     // Pipe the file stream to the response
+//     response.Body.pipe(res);
+//   } catch (error) {
+//     console.error("Error downloading file from S3:", error);
+//     return next(new Error("Error downloading file from S3", { cause: 500 }));
+//   }
+// });
+
+
 export const downloadAssignment = asyncHandler(async (req, res, next) => {
   const { assignmentId } = req.query;
 
-
-  // Fetch assignment details from the database
+  // 1. Fetch assignment  
   const assignment = await assignmentModel.findById(assignmentId);
   if (!assignment) {
     return next(new Error("Assignment not found", { cause: 404 }));
   }
-  req.user.groupId =  await studentModel.findById(req.user._id).groupId;
- if(req.isteacher.teacher == false && req.user.groupId != assignment.groupId)
-  {
-    next(new Error("Student not In same Group", { cause: 404 })); 
+
+  // 2. Fetch student and get their group
+  const student = await studentModel.findById(req.user._id);
+  if (!student) {
+    return next(new Error("Student record not found", { cause: 404 }));
   }
-// Extract S3 bucket name and file key
+  const studentGroupId = student.groupId; // this is a Mongoose ObjectId
+
+  // 3. Check authorization
+  const isTeacher = req.isteacher.teacher === true;
+  // use .toString() (or assignment.groupId.equals(studentGroupId))
+  if (!isTeacher && studentGroupId.toString() !== assignment.groupId.toString()) {
+    return next(new Error("Student not in the same group", { cause: 403 }));
+  }
+
+  // 4. Proceed with S3 download
   const { bucketName, key } = assignment;
-
   try {
-    // Get the object from S3
-    const command = new GetObjectCommand({
-      Bucket: bucketName,
-      Key: key,
-    });
-
+    const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
     const response = await s3.send(command);
 
-    // Set headers for file download
     res.setHeader("Content-Disposition", `attachment; filename="${key.split("/").pop()}"`);
     res.setHeader("Content-Type", response.ContentType);
-
-    // Pipe the file stream to the response
     response.Body.pipe(res);
   } catch (error) {
     console.error("Error downloading file from S3:", error);
-    return next(new Error("Error downloading file from S3", { cause: 500 }));
+    next(new Error("Error downloading file from S3", { cause: 500 }));
   }
 });
 
