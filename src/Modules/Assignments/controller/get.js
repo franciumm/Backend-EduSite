@@ -5,8 +5,7 @@ import { GetObjectCommand ,PutObjectCommand} from "@aws-sdk/client-s3";
 import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3 } from '../../../utils/S3Client.js';
 import mongoose from "mongoose";
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
-import { streamToBuffer } from "../../../utils/streamToBuffer.js";
-import { PDFDocument, rgb } from "pdf-lib";
+
 import { pagination } from "../../../utils/pagination.js";
 import studentModel from "../../../../DB/models/student.model.js";
 
@@ -50,7 +49,13 @@ export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
     return next(new Error("Assignment not found", { cause: 404 }));
   }
   // assignment.groupIds is an array of ObjectIds :contentReference[oaicite:0]{index=0}
-  if (!assignment.groupIds.some(id => id.equals(gId))) {
+const assignedGroups = Array.isArray(assignment.groupIds)
+ ? assignment.groupIds
+ : assignment.groupId
+    ? [assignment.groupId]
+    : [];
+// now check the normalized array
+if (!assignedGroups.some(id => id.equals(gId))) {
     return next(new Error("Invalid assignment ID for the provided group", { cause: 400 }));
   }
 
