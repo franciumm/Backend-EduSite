@@ -214,12 +214,12 @@ export const ViewSub = asyncHandler(async(req, res, next) =>{
 
   const userId    = req.user._id;
   const isTeacher = req.isteacher.teacher;
-  const { SubassignmentId } = req.params;
+  const { SubassignmentId } = req.query;
 
   // fetch it
   const assignment = await SubassignmentModel.findById(SubassignmentId);
   if (!assignment) {
-    return next(new Error("assignment not found", { cause: 404 }));
+    return next(new Error("Subassignment not found", { cause: 404 }));
   }
 
   if (!isTeacher) {
