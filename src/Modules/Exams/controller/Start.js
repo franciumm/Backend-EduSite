@@ -18,14 +18,21 @@ import studentModel from "../../../../DB/models/student.model.js";
 export const createExam = asyncHandler(async (req, res, next) => {
   const { Name, startdate, enddate, gradeId, exceptionStudents } = req.body;
   let groupIds = req.body.groupIds ?? req.body["groupIds[]"];
-  
+
   const gradedoc= await gradeModel.findById(gradeId);
   if(!gradedoc){
       return next(new Error("wrong GradeId ", { cause: 400 }));
   }
+  if (typeof raw === "string" && raw.trim().startsWith("[")) {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      // not valid JSON – fall back below
+    }
+  }
   // Validate groupIds
   if (!Array.isArray(groupIds) || groupIds.length === 0) {
-    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
+    return next(new Error('Group IDs are required and should be an array ', { cause: 400 }));
   }
 
   const invalidGroupIds = groupIds.filter(
