@@ -10,94 +10,6 @@ import studentModel from "../../../../DB/models/student.model.js";
 
 
 
-export const getStudentsSubmission = asyncHandler(async (req, res, next) => {
-  const { assignmentId, groupId, page = 1, limit = 20 } = req.body;
-
-  // 1) Validate IDs
-  if (!mongoose.Types.ObjectId.isValid(assignmentId)) {
-    return next(new Error("Valid assignmentId is required", { cause: 400 }));
-  }
-  if (!mongoose.Types.ObjectId.isValid(groupId)) {
-    return next(new Error("Valid groupId is required", { cause: 400 }));
-  }
-  const aId = new mongoose.Types.ObjectId(assignmentId);
-  const gId = new mongoose.Types.ObjectId(groupId);
-
-  // 2) Ensure assignment & group exist and are linked
-  const assignment = await assignmentModel.findById(aId).lean();
-  if (!assignment) {
-    return next(new Error("Assignment not found", { cause: 404 }));
-  }
-  if (!assignment.groupIds.some(g => g.equals(gId))) {
-    return next(new Error("Group not assigned to this assignment", { cause: 404 }));
-  }
-  const group = await groupModel.findById(gId).select("enrolledStudents").lean();
-  if (!group) {
-    return next(new Error("Group not found", { cause: 404 }));
-  }
-
-  // 3) If no students in group
-  if (!group.enrolledStudents || group.enrolledStudents.length === 0) {
-    return res.status(200).json({ Message: "No Student Attached to it" });
-  }
-
-  // 4) Build aggregation on students
-  const skip = (Math.max(1, page) - 1) * Math.max(1, limit);
-  const pipeline = [
-    { $match: { _id: { $in: group.enrolledStudents } } },
-    {
-      $lookup: {
-        from: SubassignmentModel.collection.name,
-        let: { sid: "$_id" },
-        pipeline: [
-          { $match: { 
-              $expr: {
-                $and: [
-                  { $eq: ["$assignmentId", aId] },
-                  { $eq: ["$studentId", "$$sid"] }
-                ]
-              }
-            }
-          },
-          { $project: { _id: 1 } }
-        ],
-        as: "subs"
-      }
-    },
-    {
-      $addFields: {
-        status: {
-          $cond: [
-            { $gt: [{ $size: "$subs" }, 0] },
-            "submitted",
-            "not submitted"
-          ]
-        }
-      }
-    },
-    { $project: { _id:1, userName:1, firstName:1, lastName:1, status:1 } },
-    {
-      $facet: {
-        metadata: [ { $count: "total" } ],
-        data: [ { $skip: skip }, { $limit: Math.max(1, limit) } ]
-      }
-    }
-  ];
-
-  const [ result ] = await mongoose.model("student").aggregate(pipeline);
-  const total = result.metadata[0]?.total || 0;
-  const students = result.data;
-
-  return res.status(200).json({
-    Message: "Students fetched successfully",
-    page,
-    limit,
-    total,
-    students
-  });
-});
-
-
 export const GetAllByGroup = asyncHandler (async  (req, res, next) => {
   const {groupId}= req.body ;
   req.user.groupId = await studentModel.findById(user._Id);
@@ -295,3 +207,39 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
     next(new Error("Failed to fetch assignments", { cause: 500 }));
   }
 });
+
+
+export const ViewSub = asyncHandler(async(req, res, next) =>{
+
+
+  const userId    = req.user._id;
+  const isTeacher = req.isteacher.teacher;
+  const { assignmentId } = req.params;
+
+  // fetch it
+  const assignment = await SubassignmentModel.findById(assignmentId);
+  if (!assignment) {
+    return next(new Error("assignment not found", { cause: 404 }));
+  }
+
+  if (!isTeacher) {
+    
+    if ( assignment.studentId !=req.user._id ) {
+      return next(new Error("You are not valid to it boy ", { cause: 403 }));
+    }
+  }
+
+  // anyone authorized gets a presigned GET URL
+  const presignedUrl = await getPresignedUrlForS3(
+    assignment.bucketName,
+    assignment.key,
+    60 * 30
+  );
+  res.status(200).json({
+    message:     "Material is ready for viewing",
+    presignedUrl,
+  });
+});
+
+
+

@@ -15,11 +15,10 @@ router.delete("/submission/delete", isAuth, Edit.deleteSubmittedAssignment);
 
 router.post ('/create',AdminAuth,multerCloudFunction(allowedExtensions.Files).single('file'),Start.CreateAssignment);
 router.post( "/submit", isAuth,  multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitAssignment);
-router.post(
-  "/studentsubmission", AdminAuth,Get.getStudentsSubmission
-);
+
 router.put("/mark", AdminAuth, multerCloudFunction(allowedExtensions.Files).single("file"), Edit.markAssignment);
 
+router.get("/submissions/View/:assignmentId", isAuth, Get.ViewSub);
 
 router.get("/submissions/download", isAuth, Edit.downloadSubmittedAssignment);
 router.get("/submissions/assignment", AdminAuth, Get.getSubmissionsByGroup);
