@@ -7,7 +7,6 @@ import {SubassignmentModel}from "../../../../DB/models/submitted_assignment.mode
 import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
 import fs from "fs";
-
 import { promisify } from "util";
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
