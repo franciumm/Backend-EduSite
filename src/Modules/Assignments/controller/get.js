@@ -3,7 +3,7 @@ import { assignmentModel } from "../../../../DB/models/assignment.model.js";
 import { s3 } from "../../../utils/S3Client.js";
 import { GetObjectCommand ,PutObjectCommand} from "@aws-sdk/client-s3";
 import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3 } from '../../../utils/S3Client.js';
-
+import mongoose from "mongoose";
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
 import { PDFDocument, rgb } from "pdf-lib";
@@ -122,6 +122,9 @@ export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
     students:     paged
   });
 });
+
+
+
 export const getSubmissions = asyncHandler(async (req, res, next) => {
   const { assignmentId, submissionId } = req.query;
   const userId = req.user._id;
