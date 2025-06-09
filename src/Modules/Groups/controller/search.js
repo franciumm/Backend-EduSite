@@ -11,7 +11,7 @@ export const getall = asyncHandler(async(req,res,next)=>{
 // controllers/group.controller.js
 
 export const Bygrade  = asyncHandler(async (req, res, next) => {
-  const { grade } = req.params;                            // e.g. “10”
+  const { grade } = req.query;                            // e.g. “10”
   
   const gradeDoc = await gradeModel.findOne({ grade: grade });
   if (!gradeDoc) {
