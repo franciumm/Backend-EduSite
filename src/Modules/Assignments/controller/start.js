@@ -11,67 +11,86 @@ import { promises as fsPromises } from 'fs';
 import { gradeModel } from "../../../../DB/models/grades.model.js";
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
-  const { _id } = req.user; // The teacher creating the assignment
-  const { name, startDate, endDate, groupId, gradeId } = req.body;
-  
+  const { _id } = req.user; // teacher ID
+  const { name, startDate, endDate, groupIds, gradeId } = req.body;
   const slug = slugify(name, "-");
 
-  // Check if the assignment name already exists for this group
-  if (await assignmentModel.findOne({ name, groupId })) {
-    return next(new Error("Assignment name is already created for this group", { cause: 400 }));
+  // 🔹 Validate groupIds as non-empty array
+  if (!Array.isArray(groupIds) || groupIds.length === 0) {
+    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
   }
- 
-  const gradedoc= await gradeModel.findById(gradeId);
-  if(!gradedoc){
-      return next(new Error("wrong GradeId ", { cause: 400 }));
+  // 🔹 Filter out invalid ObjectIds
+  const invalidGroupIds = groupIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
+  if (invalidGroupIds.length > 0) {
+    return next(
+      new Error(`Invalid Group ID(s): ${invalidGroupIds.join(", ")}`, { cause: 400 })
+    );
   }
+  const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
+
+  // 🔹 Ensure none of these groups already has an assignment with this name
+  const duplicate = await assignmentModel.findOne({
+    name,
+    groupIds: { $in: validGroupIds }
+  });
+  if (duplicate) {
+    return next(new Error(
+      "An assignment with this name already exists for one of the selected groups",
+      { cause: 400 }
+    ));
+  }
+
+  // 🔹 Validate gradeId
+  const gradedoc = await gradeModel.findById(gradeId);
+  if (!gradedoc) {
+    return next(new Error("Wrong GradeId", { cause: 400 }));
+  }
+
+  // 🔹 File must be present
   if (!req.file) {
     return next(new Error("Please upload a PDF file", { cause: 400 }));
   }
 
-  // Read file from disk
+  // Read & upload file
   const fileContent = fs.readFileSync(req.file.path);
-  const fileName = `${slug}-${Date.now()}.pdf`; // Generate unique filename
-  const s3Key = `Assignments/${fileName}`; // File path in S3
+  const fileName = `${slug}-${Date.now()}.pdf`;
+  const s3Key = `Assignments/${fileName}`;
 
-
-  
   try {
-    // Upload the file to S3
     await uploadFileToS3(
       process.env.S3_BUCKET_NAME,
       s3Key,
       fileContent,
-      "application/pdf" // MIME type
+      "application/pdf"
     );
 
-    // Create the assignment in the database
+    // 🔹 Create with groupIds array
     const newAssignment = await assignmentModel.create({
       name,
       slug,
       startDate,
       endDate,
-      groupId,
-      gradeId ,
+      groupIds: validGroupIds,    // <-- switched from single groupId
+      gradeId,
       bucketName: process.env.S3_BUCKET_NAME,
       key: s3Key,
-      path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`, // URL for accessing the file
+      path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
       createdBy: _id,
     });
 
     if (!newAssignment) {
-      // If creation fails, delete the uploaded file from S3
       await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key);
       return next(new Error("Error while creating the assignment", { cause: 400 }));
     }
 
-    // Success response
-    res.status(200).json({ message: "Assignment created successfully", newAssignment });
+    res.status(200).json({
+      message: "Assignment created successfully",
+      newAssignment
+    });
   } catch (error) {
     console.error("Error uploading file to S3:", error);
     return next(new Error("Error while uploading file to S3", { cause: 500 }));
   } finally {
-    // Cleanup: Remove file from local disk after uploading to S3
     fs.unlinkSync(req.file.path);
   }
 });
