@@ -11,7 +11,6 @@ import { pagination } from '../../../utils/pagination.js';
 
 
 
-
 function generateSlug(text) {
   return slugify(text, { lower: true, strict: true });
 }
@@ -19,24 +18,62 @@ function generateSlug(text) {
 export const createMaterial = asyncHandler(async (req, res, next) => {
   const userId = req.user._id;
   let { name, description, gradeId } = req.body;
-  let groupIds = req.body.groupIds ?? req.body.groupId;
 
-  // … your grade & groupIds validation (unchanged)
+  // ── Grade validation (unchanged) ─────────────────────────────────────────────
+  const gradedoc = await gradeModel.findById(gradeId);
+  if (!gradedoc) {
+    return next(new Error("wrong GradeId", { cause: 400 }));
+  }
 
-  // 2) File presence & read
+  // ── 1) Normalize & validate groupIds exactly as in createExam ──────────────
+  let raw = req.body.groupIds ?? req.body["groupIds[]"];
+  if (!raw) {
+    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
+  }
+  // parse JSON-stringified arrays
+  if (typeof raw === "string" && raw.trim().startsWith("[")) {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      // leave as-is
+    }
+  }
+  // coerce to array
+  let groupIds = Array.isArray(raw) ? raw : [raw];
+
+  // array must not be empty
+  if (groupIds.length === 0) {
+    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
+  }
+  // must all be valid ObjectIds
+  const invalidGroupIds = groupIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
+  if (invalidGroupIds.length > 0) {
+    return next(new Error(
+      `Invalid Group ID(s): ${invalidGroupIds.join(", ")}`,
+      { cause: 400 }
+    ));
+  }
+  // cast to ObjectId
+  const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
+  // ensure they all exist
+  const existCount = await groupModel.countDocuments({ _id: { $in: validGroupIds } });
+  if (existCount !== validGroupIds.length) {
+    return next(new Error("One or more Group IDs do not exist", { cause: 404 }));
+  }
+
+  // ── 2) File presence & read ───────────────────────────────────────────────────
   if (!req.file) {
     return next(new Error("Please upload a PDF file", { cause: 400 }));
   }
   const fileContent = fs.readFileSync(req.file.path);
 
-  // 3) Generate a **unique** slug + S3 key
-  // ← include timestamp so slug := "name-20250609T1432"
+  // ── 3) Generate a **unique** slug + S3 key ────────────────────────────────────
   const slug     = generateSlug(`${name}-${Date.now()}`);
   const fileName = `${slug}-${Date.now()}.pdf`;
   const s3Key    = `materials/${fileName}`;
 
   try {
-    // 4) Upload to S3
+    // ── 4) Upload to S3 ─────────────────────────────────────────────────────────
     await uploadFileToS3(
       process.env.S3_BUCKET_NAME,
       s3Key,
@@ -44,12 +81,12 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
       "application/pdf"
     );
 
-    // 5) Create DB record
+    // ── 5) Create DB record with validated groupIds ─────────────────────────────
     const newMaterial = await MaterialModel.create({
       name,
-      slug,             // now guaranteed unique
+      slug,
       description,
-      groupIds,
+      groupIds: validGroupIds,  // <— use the validated array here
       gradeId,
       createdBy: userId,
       bucketName: process.env.S3_BUCKET_NAME,
@@ -58,25 +95,19 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
       status:     "Uploaded"
     });
 
-    // 6) Success
+    // ── 6) Success ──────────────────────────────────────────────────────────────
     res.status(201).json({
       message:  "Material uploaded successfully",
       material: newMaterial
     });
   } catch (err) {
-    // **Log the real error** so you know why the DB insert failed
     console.error("❌ createMaterial error:", err);
-
-    // Roll back the file in S3
     await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key);
-
     return next(new Error("Failed to upload material", { cause: 500 }));
   } finally {
-    // clean up the temp file
     fs.unlinkSync(req.file.path);
   }
 });
-
 // ── 2) List materials (students & teachers) ────────────────────────────────────
 export const getMaterials = asyncHandler(async (req, res, next) => {
   const { page = 1, size = 4 } = req.query;

@@ -37,9 +37,7 @@ export const createExam = asyncHandler(async (req, res, next) => {
   }
 
   // ─── 3) Now coerce to an array  
-  let groupIds = Array.isArray(raw) ? raw : [raw];
-
-  // Validate groupIds
+ lidate groupIds
   if ( groupIds.length === 0) {
     return next(new Error('Group IDs are required and should be an array ', { cause: 400 }));
   }
@@ -88,7 +86,9 @@ export const createExam = asyncHandler(async (req, res, next) => {
       )
     );
   }
+ let groupIds = Array.isArray(raw) ? raw : [raw];
 
+  // Va
   // Validate and format exceptionStudents if provided
   let formattedExceptions = [];
   if (exceptionStudents && Array.isArray(exceptionStudents)) {
