@@ -13,6 +13,9 @@ export const removeStudent = asyncHandler(async(req,res,next)=>{
         return next(new Error ( ' Invalid Group ID'),{cause : 400});
       }
       group.enrolledStudents.pull(studentid);
+      const student = await studentModel.findById(studentid);
+      student.groupId=null;
+      await student.save();
       const updatedGroup = await group.save();
       res.status(201).json({Message : "Done" ,updatedGroup });
 

@@ -9,7 +9,7 @@ import { allowedExtensions } from "../../utils/allowedExtensions.js";
 
 const router = Router();
 
-router.delete("/assignment/delete", AdminAuth, Edit.deleteAssignmentWithSubmissions);
+router.delete("/delete", AdminAuth, Edit.deleteAssignmentWithSubmissions);
 router.delete("/submission/delete", isAuth, Edit.deleteSubmittedAssignment);
 
 
