@@ -17,7 +17,11 @@ import studentModel from "../../../../DB/models/student.model.js";
 
 export const createExam = asyncHandler(async (req, res, next) => {
   const { Name, startdate, enddate, grade, groupIds, exceptionStudents } = req.body;
-
+ 
+  const gradedoc= await gradeModel.findById(gradeId);
+  if(!gradedoc){
+      return next(new Error("wrong GradeId ", { cause: 400 }));
+  }
   // Validate groupIds
   if (!Array.isArray(groupIds) || groupIds.length === 0) {
     return next(new Error("Group IDs are required and should be an array", { cause: 400 }));

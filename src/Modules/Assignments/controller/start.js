@@ -8,6 +8,7 @@ import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
 import fs from "fs";
 import { promises as fsPromises } from 'fs';
+import { gradeModel } from "../../../../DB/models/grades.model.js";
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
   const { _id } = req.user; // The teacher creating the assignment
@@ -20,8 +21,10 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
     return next(new Error("Assignment name is already created for this group", { cause: 400 }));
   }
  
-  
-
+  const gradedoc= await gradeModel.findById(gradeId);
+  if(!gradedoc){
+      return next(new Error("wrong GradeId ", { cause: 400 }));
+  }
   if (!req.file) {
     return next(new Error("Please upload a PDF file", { cause: 400 }));
   }

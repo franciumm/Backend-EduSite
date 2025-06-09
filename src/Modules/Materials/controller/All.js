@@ -21,6 +21,12 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
   let groupIds = req.body.groupIds ?? req.body.groupId;  // accept either
 
   // ── 1) Validate groupIds as an array ─────────────────────────────────────────
+   
+  const gradedoc= await gradeModel.findById(gradeId);
+  if(!gradedoc){
+        return next(new Error("wrong GradeId ", { cause: 400 }));
+    } 
+
   if (!groupIds) {
     return next(new Error("At least one groupId is required", { cause: 400 }));
   }
@@ -38,7 +44,7 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
   if (existingCount !== groupIds.length) {
     return next(new Error("One or more groupIds do not exist", { cause: 404 }));
   }
-
+  
   // ── 2) File presence & read ───────────────────────────────────────────────────
   if (!req.file) {
     return next(new Error("Please upload a PDF file", { cause: 400 }));
