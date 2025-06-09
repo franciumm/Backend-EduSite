@@ -17,12 +17,17 @@ import studentModel from "../../../../DB/models/student.model.js";
 
 export const createExam = asyncHandler(async (req, res, next) => {
   const { Name, startdate, enddate, gradeId, exceptionStudents } = req.body;
-  let groupIds = req.body.groupIds ?? req.body["groupIds[]"];
 
   const gradedoc= await gradeModel.findById(gradeId);
   if(!gradedoc){
       return next(new Error("wrong GradeId ", { cause: 400 }));
   }
+    let raw = req.body.groupIds ?? req.body["groupIds[]"];
+  if (!raw) {
+    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
+  }
+
+  // ─── 2) If they sent JSON text, parse it  
   if (typeof raw === "string" && raw.trim().startsWith("[")) {
     try {
       raw = JSON.parse(raw);
@@ -30,8 +35,12 @@ export const createExam = asyncHandler(async (req, res, next) => {
       // not valid JSON – fall back below
     }
   }
+
+  // ─── 3) Now coerce to an array  
+  let groupIds = Array.isArray(raw) ? raw : [raw];
+
   // Validate groupIds
-  if (!Array.isArray(groupIds) || groupIds.length === 0) {
+  if ( groupIds.length === 0) {
     return next(new Error('Group IDs are required and should be an array ', { cause: 400 }));
   }
 
