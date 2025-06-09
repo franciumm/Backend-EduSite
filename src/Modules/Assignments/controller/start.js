@@ -9,6 +9,7 @@ import {groupModel} from "../../../../DB/models/groups.model.js";
 import fs from "fs";
 import { promises as fsPromises } from 'fs';
 import { gradeModel } from "../../../../DB/models/grades.model.js";
+import mongoose from "mongoose";
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
   const { _id } = req.user; // teacher ID
