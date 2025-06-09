@@ -1,17 +1,12 @@
 
 
-
 export const asyncHandler = (fn) => {
-    return (req,res,next)=>{
-        fn(req,res,next).catch(async (err) =>{
-            
-            return next(new Error ({Message : err.message  }, {cause : 500}))
-        })
-    }
-
-}
-
-
+  return (req, res, next) => {
+    Promise
+      .resolve(fn(req, res, next))
+      .catch(next);
+  };
+};
 
 
 export const globalerrorHandling = (error , req,res,next)=>{
