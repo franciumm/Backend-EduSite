@@ -56,7 +56,7 @@ export const CreateAssignment  = asyncHandler(async (req, res, next) => {
   // ── 4) Ensure all groups belong to that grade ─────────────────────────────
   const groupsInGrade = await groupModel.find({
     _id: { $in: validGroupIds },
-    gradeId: gradeDoc._id
+    gradeid: gradeDoc._id
   }).select("_id");
   if (groupsInGrade.length !== validGroupIds.length) {
     return next(new Error(
