@@ -14,51 +14,56 @@ import { pagination } from '../../../utils/pagination.js';
 
 
 function generateSlug(text) {
-return slugify(text, { lower: true, strict: true });}
+  return slugify(text, { lower: true, strict: true });
+}
 
 export const createMaterial = asyncHandler(async (req, res, next) => {
   const userId = req.user._id;
-  let { name, description,gradeId } = req.body;
-  let groupIds = req.body.groupIds ?? req.body.groupId;  // accept either
+  const { name, description, gradeId } = req.body;
 
-  // ── 1) Validate groupIds as an array ─────────────────────────────────────────
-   
-  const gradedoc= await gradeModel.findById(gradeId);
-  if(!gradedoc){
-        return next(new Error("wrong GradeId ", { cause: 400 }));
-    } 
+  // 1) Validate grade
+  const gradeDoc = await gradeModel.findById(gradeId);
+  if (!gradeDoc) {
+    return next(new Error("wrong GradeId", { cause: 400 }));
+  }
 
-  if (!groupIds) {
-    return next(new Error("At least one groupId is required", { cause: 400 }));
+  // 2) Normalize & validate groupIds
+  let raw = req.body.groupIds ?? req.body["groupIds[]"];
+  if (!raw) {
+    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
   }
-  if (!Array.isArray(groupIds)) {
-    groupIds = [groupIds];
+  if (typeof raw === "string" && raw.trim().startsWith("[")) {
+    try {
+      raw = JSON.parse(raw);
+    } catch {}
   }
-  // ensure each is a valid ObjectId
-  for (const id of groupIds) {
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return next(new Error(`Invalid groupId: ${id}`, { cause: 400 }));
-    }
+  const groupIdsArray = Array.isArray(raw) ? raw : [raw];
+  if (groupIdsArray.length === 0) {
+    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
   }
-  // ensure they all exist
-  const existingCount = await groupModel.countDocuments({ _id: { $in: groupIds } });
-  if (existingCount !== groupIds.length) {
-    return next(new Error("One or more groupIds do not exist", { cause: 404 }));
+  const invalid = groupIdsArray.filter(id => !mongoose.Types.ObjectId.isValid(id));
+  if (invalid.length) {
+    return next(new Error(`Invalid Group ID(s): ${invalid.join(", ")}`, { cause: 400 }));
   }
-  
-  // ── 2) File presence & read ───────────────────────────────────────────────────
+  const validGroupIds = groupIdsArray.map(id => new mongoose.Types.ObjectId(id));
+  const existCount = await groupModel.countDocuments({ _id: { $in: validGroupIds } });
+  if (existCount !== validGroupIds.length) {
+    return next(new Error("One or more Group IDs do not exist", { cause: 404 }));
+  }
+
+  // 3) Ensure file
   if (!req.file) {
     return next(new Error("Please upload a PDF file", { cause: 400 }));
   }
   const fileContent = fs.readFileSync(req.file.path);
 
-  // ── 3) Generate slug + S3 key ──────────────────────────────────────────────────
-  const slug     = generateSlug(name);
+  // 4) Generate slug and S3 key
+  const slug = generateSlug(`${name}-${Date.now()}`);
   const fileName = `${slug}-${Date.now()}.pdf`;
-  const s3Key    = `materials/${fileName}`;
+  const s3Key = `materials/${fileName}`;
 
   try {
-    // ── 4) Upload to S3 ─────────────────────────────────────────────────────────
+    // 5) Upload to S3
     await uploadFileToS3(
       process.env.S3_BUCKET_NAME,
       s3Key,
@@ -66,36 +71,32 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
       "application/pdf"
     );
 
-    // ── 5) Create DB record ─────────────────────────────────────────────────────
+    // 6) Create DB record
     const newMaterial = await MaterialModel.create({
       name,
       slug,
       description,
-      groupIds,
+      groupIds: validGroupIds,
       gradeId,
-      createdBy:  userId,
+      createdBy: userId,
       bucketName: process.env.S3_BUCKET_NAME,
-      key:        s3Key,
-      path:       `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-      status:     "Uploaded"
+      key: s3Key,
+      path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
+      status: "Uploaded"
     });
 
-    // ── 6) Success ──────────────────────────────────────────────────────────────
     res.status(201).json({
-      message:     "Material uploaded successfully",
-      material:    newMaterial
+      message: "Material uploaded successfully",
+      material: newMaterial
     });
   } catch (err) {
-    console.error("Error uploading material:", err);
-    // rollback on failure
+    console.error("createMaterial error:", err);
     await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key);
     return next(new Error("Failed to upload material", { cause: 500 }));
   } finally {
-    // cleanup local temp file
     fs.unlinkSync(req.file.path);
   }
 });
-
 
 
 // ── 2) List materials (students & teachers) ────────────────────────────────────
