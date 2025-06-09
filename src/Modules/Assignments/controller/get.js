@@ -1,13 +1,121 @@
 import { asyncHandler } from "../../../utils/erroHandling.js";
 import { assignmentModel } from "../../../../DB/models/assignment.model.js";
 import { s3 } from "../../../utils/S3Client.js";
-import { GetObjectCommand ,PutObjectCommand} from "@aws-sdk/client-s3";
+import { GetObjectCommand,getPresignedUrlForS3 ,PutObjectCommand} from "@aws-sdk/client-s3";
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
 import { PDFDocument, rgb } from "pdf-lib";
 import { pagination } from "../../../utils/pagination.js";
 import studentModel from "../../../../DB/models/student.model.js";
 
+export const getStudentsSubmission = asyncHandler(async (req, res, next) => {
+  const { assignmentId, groupId, status, page = 1, size = 10 } = req.query;
+
+  // 1️⃣ Validate assignmentId
+  if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
+    return next(new Error("Valid assignmentId is required", { cause: 400 }));
+  }
+  const aId = new mongoose.Types.ObjectId(assignmentId);
+
+  // 2️⃣ Load assignment
+  const assignment = await assignmentModel.findById(aId).lean();
+  if (!assignment) {
+    return next(new Error("Assignment not found", { cause: 404 }));
+  }
+
+  // 3️⃣ Derive the student list from assignment.enrolledStudents :contentReference[oaicite:0]{index=0}
+  //    and optionally filter by groupId
+  let studentFilter = { _id: { $in: assignment.enrolledStudents } };
+  if (groupId) {
+    if (!mongoose.Types.ObjectId.isValid(groupId)) {
+      return next(new Error("Valid groupId is required", { cause: 400 }));
+    }
+    const gId = new mongoose.Types.ObjectId(groupId);
+
+    // ensure this group is actually linked to the assignment
+    if (
+      !assignment.groupIds ||
+      !assignment.groupIds.some(g => g.equals(gId))
+    ) {
+      return next(
+        new Error("Invalid group ID with assignmentId", { cause: 400 })
+      );
+    }
+
+    // only include students whose current groupId matches  
+    studentFilter.groupId = gId;
+  }
+
+  // 4️⃣ Fetch student docs  
+  const studentsList = await studentModel
+    .find(studentFilter)
+    .select("_id userName firstName lastName")   // only needed fields :contentReference[oaicite:1]{index=1}
+    .lean();
+
+  // 5️⃣ No students attached?
+  if (studentsList.length === 0) {
+    return res.status(200).json({ Message: "No Student Attached to it" });
+  }
+
+  // 6️⃣ Fetch all submissions for these students & this assignment
+  const subs = await SubassignmentModel.find({
+    assignmentId: aId,
+    studentId: { $in: studentsList.map(s => s._id) }
+  })
+    .select("studentId createdAt")
+    .lean();  // createdAt gives us submission timestamp :contentReference[oaicite:2]{index=2}
+
+  // 7️⃣ Build a map: studentId → latestCreatedAt
+  const subMap = {};
+  for (const sub of subs) {
+    const sid = sub.studentId.toString();
+    const ts = sub.createdAt;
+    if (!subMap[sid] || ts > subMap[sid]) {
+      subMap[sid] = ts;
+    }
+  }
+
+  // 8️⃣ Merge into a single flat array with status + formatted submittedAt
+  const allStudents = studentsList.map(s => {
+    const sid = s._id.toString();
+    const has = Boolean(subMap[sid]);
+    return {
+      _id: s._id,
+      userName: s.userName,
+      firstName: s.firstName,
+      lastName: s.lastName,
+      status: has ? "submitted" : "not submitted",
+      submittedAt: has
+        ? new Date(subMap[sid]).toLocaleString()
+        : null
+    };
+  });
+
+  // 9️⃣ Apply status filter if requested
+  let filtered = allStudents;
+  if (status === "submitted") {
+    filtered = allStudents.filter(s => s.status === "submitted");
+  } else if (status === "not_submitted") {
+    filtered = allStudents.filter(s => s.status === "not submitted");
+  }
+
+  // 🔟 Paginate
+  const pg = Math.max(1, parseInt(page, 10) || 1);
+  const sz = Math.max(1, parseInt(size, 10) || 10);
+  const { limit, skip } = pagination({ page: pg, size: sz });
+
+  const total = filtered.length;
+  const paged = filtered.slice(skip, skip + limit);
+
+  // 🏁 Final response
+  res.status(200).json({
+    Message: "Submissions fetched successfully",
+    total,
+    totalPages: Math.ceil(total / limit),
+    currentPage: pg,
+    students: paged
+  });
+});
 
 
 export const GetAllByGroup = asyncHandler (async  (req, res, next) => {
