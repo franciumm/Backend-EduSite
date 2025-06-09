@@ -8,15 +8,27 @@ export const getall = asyncHandler(async(req,res,next)=>{
 }); 
 
 
+// controllers/group.controller.js
 
-export const Bygrade = asyncHandler(async(req,res,next)=>{
-    const {grade}= req.params ; 
-    const gradeM = await gradeModel.findOne({grade});
-    const groups = await groupModel.find({gradeId : gradeM._id}).populate("enrolledStudents", {_id :1 , userName:1,firstName :1});
-    res.status(201).json({Message : "Done", groups});
-}); 
+export const getGroupsByGrade = asyncHandler(async (req, res, next) => {
+  const { grade } = req.params;                            // e.g. “10”
+  
+  const gradeDoc = await gradeModel.findOne({ grade: grade });
+  if (!gradeDoc) {
+    return next(new Error(`Grade "${grade}" not found`, { cause: 404 }));
+  }
 
+  // 2️⃣ Fetch groups for that grade, populate students
+  const groups = await groupModel
+    .find({ gradeId: gradeDoc._id })
+    .populate("enrolledStudents", "_id userName firstName");
 
+  // 3️⃣ Return
+  res.status(200).json({
+    Message: "Groups fetched successfully",
+    groups
+  });
+});
 
 export const ById = asyncHandler(async(req,res,next)=>{
     const {_id}= req.query ; 
