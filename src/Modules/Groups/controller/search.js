@@ -20,7 +20,7 @@ export const Bygrade  = asyncHandler(async (req, res, next) => {
 
   // 2️⃣ Fetch groups for that grade, populate students
   const groups = await groupModel
-    .find({ gradeId: gradeDoc._id })
+    .find({ gradeid: gradeDoc._id })
     .populate("enrolledStudents", "_id userName firstName");
 
   // 3️⃣ Return
