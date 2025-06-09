@@ -77,7 +77,6 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
 
 
 
-const unlinkAsync = promisify(fs.unlink);
 
 export const submitAssignment = asyncHandler(async (req, res, next) => {
   const { assignmentId, notes } = req.body;
@@ -85,18 +84,18 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
   const userId = req.user._id;
   const isTeacher = req.isteacher?.teacher === true;
 
-  // 1) File check
+  // 1) File must be there
   if (!file) {
     return next(new Error("Please attach a PDF file under field name `file`", { cause: 400 }));
   }
 
-  // 2) Load assignment
+  // 2) Fetch assignment
   const assignment = await assignmentModel.findById(assignmentId);
   if (!assignment) {
     return next(new Error("Assignment not found", { cause: 404 }));
   }
 
-  // 3) Load student & group
+  // 3) Fetch student + group
   const student = await studentModel.findById(userId);
   if (!student) {
     return next(new Error("Student not found", { cause: 404 }));
@@ -107,7 +106,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     return next(new Error("Group not found", { cause: 404 }));
   }
 
-  // 4) Rejection & timeline
+  // 4) Rejection + timeline checks
   if (assignment.rejectedStudents?.includes(userId)) {
     return next(new Error("You’re blocked from submitting this assignment", { cause: 403 }));
   }
@@ -116,13 +115,11 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     return next(new Error("Submission window hasn’t opened yet", { cause: 403 }));
   }
   const isLate = !isTeacher && now > assignment.endDate;
-
-  // 5) Group match
   if (!isTeacher && assignment.groupId.toString() !== groupId.toString()) {
     return next(new Error("You’re not in the right group for this assignment", { cause: 403 }));
   }
 
-  // 6) Stream upload to S3
+  // 5) Stream upload to S3
   const timestamp = Date.now();
   const fileName = `${assignment.name}_${req.user.userName}_${timestamp}.pdf`;
   const key = `Submissions/${assignmentId}/${userId}/${fileName}`;
@@ -137,7 +134,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
       ACL: "private",
     }));
 
-    // 7) Persist submission record
+    // 6) Save record
     const submission = await SubassignmentModel.create({
       studentId: userId,
       assignmentId,
@@ -151,19 +148,21 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         : `Submitted on time at ${now.toISOString()}`),
     });
 
-    // 8) Mark on student doc
+    // 7) Track on student
     await studentModel.findByIdAndUpdate(userId, {
       $addToSet: { submittedassignments: assignmentId },
     });
 
-    // 9) Cleanup & response
-    await unlinkAsync(file.path);
+    // 8) Cleanup + respond
+    await fsPromises.unlink(file.path);
     res.status(200).json({
       message: "Assignment submitted successfully",
       data: submission,
     });
+
   } catch (err) {
-    await unlinkAsync(file.path);
+    // always cleanup
+    await fsPromises.unlink(file.path);
     console.error("Upload/DB error:", err);
     return next(new Error("Failed to submit the assignment", { cause: 500 }));
   }

@@ -84,58 +84,58 @@ export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
 
 export const getSubmissions = asyncHandler(async (req, res, next) => {
   const { assignmentId, submissionId } = req.query;
+  const userId = req.user._id;
+  const isTeacher = req.isteacher?.teacher === true;
 
-  // Ensure assignmentId is provided
+  // 1) assignmentId required
   if (!assignmentId) {
     return next(new Error("Assignment ID is required", { cause: 400 }));
   }
 
-  // Fetch the assignment details to validate access
+  // 2) load assignment
   const assignment = await assignmentModel.findById(assignmentId);
   if (!assignment) {
     return next(new Error("Assignment not found", { cause: 404 }));
   }
 
-  // Check if the user is authorized
-  const isTeacher = req.isteacher.teacher;
-  const isStudentInGroup =
-    !isTeacher && assignment.groupId.toString() === req.user.groupid.toString();
-
-  if (!isTeacher && !isStudentInGroup) {
-    return next(new Error("You are not authorized to view these submissions", { cause: 403 }));
+  // 3) if student, verify they’re in the assignment’s group
+  if (!isTeacher) {
+    const student = await studentModel.findById(userId);
+    if (!student) {
+      return next(new Error("Student record not found", { cause: 404 }));
+    }
+    if (!assignment.groupId.equals(student.groupId)) {
+      return next(new Error("You’re not authorized to view these submissions", { cause: 403 }));
+    }
   }
 
-  // Fetch submissions
   let submissions;
   if (submissionId) {
-    // Fetch a specific submission by ID
+    // 4a) single submission
     submissions = await SubassignmentModel.findOne({
       _id: submissionId,
       assignmentId,
     }).populate("studentId", "userName firstName lastName email");
-
-    // Ensure the submission exists and the user has access
     if (!submissions) {
       return next(new Error("Submission not found", { cause: 404 }));
     }
-    if (!isTeacher && submissions.studentId._id.toString() !== req.user._id.toString()) {
-      return next(new Error("You are not authorized to view this submission", { cause: 403 }));
+    if (
+      !isTeacher &&
+      submissions.studentId._id.toString() !== userId.toString()
+    ) {
+      return next(new Error("You’re not authorized to view this submission", { cause: 403 }));
     }
   } else {
-    // Fetch all submissions for the assignment
+    // 4b) all submissions (with pagination)
     const { limit, skip } = pagination(req.query);
     const query = { assignmentId };
-
-    // If the user is a student, filter by their submissions only
-    if (!isTeacher) {
-      query.studentId = req.user._id;
-    }
+    if (!isTeacher) query.studentId = userId;
 
     submissions = await SubassignmentModel.find(query)
       .populate("studentId", "userName firstName lastName email")
       .skip(skip)
       .limit(limit)
-      .sort({ isMarked: 1, createdAt: -1 }); // Unmarked first, then by submission date
+      .sort({ isMarked: 1, createdAt: -1 });
   }
 
   res.status(200).json({
@@ -143,7 +143,6 @@ export const getSubmissions = asyncHandler(async (req, res, next) => {
     submissions,
   });
 });
-
 
 export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
   const { page = 1, size = 10, status } = req.query;
