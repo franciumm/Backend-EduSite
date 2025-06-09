@@ -6,6 +6,7 @@ import MaterialModel from '../../../../DB/models/material.model.js';
 import { groupModel } from '../../../../DB/models/groups.model.js';
 import studentModel from '../../../../DB/models/student.model.js';
 import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3 } from '../../../utils/S3Client.js';
+import { gradeModel} from "../../../../DB/models/grades.model.js";
 
 
 import { pagination } from '../../../utils/pagination.js';
