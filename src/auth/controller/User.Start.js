@@ -6,7 +6,10 @@ import SendMail from "../../utils/Mailer.js";
 import { generateToken } from "../../utils/tokenFunctions.js";
 import { teacherModel } from "../../../DB/models/teacher.model.js";
 import { gradeModel } from "../../../DB/models/grades.model.js";
-import studentModel from "../../../DB/models/student.model.js";
+import  studentModel  from "../../../DB/models/student.model.js";
+import { groupModel } from "../../../DB/models/groups.model.js"; 
+
+
 export const Signup = asyncHandler(async(req,res,next)=>{
     const {email,parentemail,userName,firstName,lastName,password,grade ,  parentphone ,phone,cPassword}= req.body ;
     
@@ -196,6 +199,48 @@ signature:process.env.SIGN_IN_TOKEN_SECRET,
 
 
 
+export const getUnassignedByGrade = asyncHandler(async (req, res, next) => {
+  const gradeNum = parseInt(req.params.grade, 10);
+  if (isNaN(gradeNum)) {
+    return next(new Error("Grade must be a number", { cause: 400 }));
+  }
+
+  // 1️⃣ Find the Grade doc
+  const gradeDoc = await gradeModel.findOne({ grade: gradeNum });
+  if (!gradeDoc) {
+    return next(new Error(`Grade ${gradeNum} not found`, { cause: 404 }));
+  }
+
+  // 2️⃣ Find all groups in that grade
+  const groups = await groupModel.find({ gradeId: gradeDoc._id }).select("_id");
+  const groupIds = groups.map(g => g._id);
+
+  // 3️⃣ Pagination params
+  const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
+  const limit = Math.max(1, parseInt(req.query.limit, 10) || 10);
+  const skip  = (page - 1) * limit;
+
+  // 4️⃣ Query students not in any of those groups
+  const filter = { groupId: { $nin: groupIds } };
+  const [ total, students ] = await Promise.all([
+    studentModel.countDocuments(filter),
+    studentModel
+      .find(filter)
+      .skip(skip)
+      .limit(limit)
+      .select("_id userName firstName lastName email")
+  ]);
+
+  // 5️⃣ Response
+  res.status(200).json({
+    Message: "Unassigned students fetched successfully",
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+    total,
+    students
+  });
+});
 export const AdminLogin = asyncHandler(async(req,res,next)=>{
     const {email , password}= req.body;
     const user = await teacherModel.findOne({email});

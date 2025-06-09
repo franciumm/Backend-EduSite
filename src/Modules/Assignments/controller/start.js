@@ -7,7 +7,6 @@ import {SubassignmentModel}from "../../../../DB/models/submitted_assignment.mode
 import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
 import fs from "fs";
-
 import { promises as fsPromises } from 'fs';
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
@@ -50,7 +49,7 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
       startDate,
       endDate,
       groupId,
-      gradeId,
+      gradeId ,
       bucketName: process.env.S3_BUCKET_NAME,
       key: s3Key,
       path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`, // URL for accessing the file
