@@ -198,7 +198,6 @@ signature:process.env.SIGN_IN_TOKEN_SECRET,
 
 
 
-
 export const getUnassignedByGrade = asyncHandler(async (req, res, next) => {
   const gradeNum = parseInt(req.params.grade, 10);
   if (isNaN(gradeNum)) {
@@ -211,17 +210,17 @@ export const getUnassignedByGrade = asyncHandler(async (req, res, next) => {
     return next(new Error(`Grade ${gradeNum} not found`, { cause: 404 }));
   }
 
-  // 2️⃣ Find all groups in that grade
-  const groups = await groupModel.find({ gradeId: gradeDoc._id }).select("_id");
-  const groupIds = groups.map(g => g._id);
-
-  // 3️⃣ Pagination params
+  // 2️⃣ Pagination params
   const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
   const limit = Math.max(1, parseInt(req.query.limit, 10) || 10);
   const skip  = (page - 1) * limit;
 
-  // 4️⃣ Query students not in any of those groups
-  const filter = { groupId: { $nin: groupIds } };
+  // 3️⃣ Query students in this grade *and* NOT in any group
+  const filter = {
+    gradeId: gradeDoc._id,         // only this grade :contentReference[oaicite:0]{index=0}
+    groupId: null                  // unassigned to any group
+  };
+
   const [ total, students ] = await Promise.all([
     studentModel.countDocuments(filter),
     studentModel
@@ -229,11 +228,17 @@ export const getUnassignedByGrade = asyncHandler(async (req, res, next) => {
       .skip(skip)
       .limit(limit)
       .select("_id userName firstName lastName email")
+      .lean()
   ]);
+
+  // 4️⃣ If no students at all in this grade
+  if (total === 0) {
+    return res.status(200).json({ Message: "No Student Attached to it" });
+  }
 
   // 5️⃣ Response
   res.status(200).json({
-    Message: "Unassigned students fetched successfully",
+    Message:    "Unassigned students fetched successfully",
     page,
     limit,
     totalPages: Math.ceil(total / limit),
