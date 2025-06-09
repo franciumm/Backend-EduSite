@@ -9,14 +9,16 @@ import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3 } from '../../../
 import { gradeModel} from "../../../../DB/models/grades.model.js";
 import { pagination } from '../../../utils/pagination.js';
 import { asyncHandler } from "../../../utils/erroHandling.js";
+
 import { s3, uploadFileToS3, deleteFileFromS3 } from "../../../utils/S3Client.js";
 import { pagination } from "../../../utils/pagination.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { gradeModel} from "../../../../DB/models/grades.model.js";
+import {examModel} from "../../../../DB/models/exams.model.js";
+import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
 import fs from "fs";
 import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
-
 
 function generateSlug(text) {
   return slugify(text, { lower: true, strict: true });
@@ -24,63 +26,51 @@ function generateSlug(text) {
 
 export const createMaterial = asyncHandler(async (req, res, next) => {
   const userId = req.user._id;
-  let { name, description, gradeId } = req.body;
+  const { name, description, gradeId } = req.body;
 
-  // ── Grade validation (unchanged) ─────────────────────────────────────────────
-  const gradedoc = await gradeModel.findById(gradeId);
-  if (!gradedoc) {
+  // 1) Validate grade
+  const gradeDoc = await gradeModel.findById(gradeId);
+  if (!gradeDoc) {
     return next(new Error("wrong GradeId", { cause: 400 }));
   }
 
-  // ── 1) Normalize & validate groupIds exactly as in createExam ──────────────
+  // 2) Normalize & validate groupIds
   let raw = req.body.groupIds ?? req.body["groupIds[]"];
   if (!raw) {
     return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
   }
-  // parse JSON-stringified arrays
   if (typeof raw === "string" && raw.trim().startsWith("[")) {
     try {
       raw = JSON.parse(raw);
-    } catch {
-      // leave as-is
-    }
+    } catch {}
   }
-  // coerce to array
-  let groupIds = Array.isArray(raw) ? raw : [raw];
-
-  // array must not be empty
-  if (groupIds.length === 0) {
+  const groupIdsArray = Array.isArray(raw) ? raw : [raw];
+  if (groupIdsArray.length === 0) {
     return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
   }
-  // must all be valid ObjectIds
-  const invalidGroupIds = groupIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
-  if (invalidGroupIds.length > 0) {
-    return next(new Error(
-      `Invalid Group ID(s): ${invalidGroupIds.join(", ")}`,
-      { cause: 400 }
-    ));
+  const invalid = groupIdsArray.filter(id => !mongoose.Types.ObjectId.isValid(id));
+  if (invalid.length) {
+    return next(new Error(`Invalid Group ID(s): ${invalid.join(", ")}`, { cause: 400 }));
   }
-  // cast to ObjectId
-  const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
-  // ensure they all exist
+  const validGroupIds = groupIdsArray.map(id => new mongoose.Types.ObjectId(id));
   const existCount = await groupModel.countDocuments({ _id: { $in: validGroupIds } });
   if (existCount !== validGroupIds.length) {
     return next(new Error("One or more Group IDs do not exist", { cause: 404 }));
   }
 
-  // ── 2) File presence & read ───────────────────────────────────────────────────
+  // 3) Ensure file
   if (!req.file) {
     return next(new Error("Please upload a PDF file", { cause: 400 }));
   }
   const fileContent = fs.readFileSync(req.file.path);
 
-  // ── 3) Generate a **unique** slug + S3 key ────────────────────────────────────
-  const slug     = generateSlug(`${name}-${Date.now()}`);
+  // 4) Generate slug and S3 key
+  const slug = generateSlug(`${name}-${Date.now()}`);
   const fileName = `${slug}-${Date.now()}.pdf`;
-  const s3Key    = `materials/${fileName}`;
+  const s3Key = `materials/${fileName}`;
 
   try {
-    // ── 4) Upload to S3 ─────────────────────────────────────────────────────────
+    // 5) Upload to S3
     await uploadFileToS3(
       process.env.S3_BUCKET_NAME,
       s3Key,
@@ -88,27 +78,26 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
       "application/pdf"
     );
 
-    // ── 5) Create DB record with validated groupIds ─────────────────────────────
+    // 6) Create DB record
     const newMaterial = await MaterialModel.create({
       name,
       slug,
       description,
-      groupIds: validGroupIds,  // <— use the validated array here
+      groupIds: validGroupIds,
       gradeId,
       createdBy: userId,
       bucketName: process.env.S3_BUCKET_NAME,
-      key:        s3Key,
-      path:       `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-      status:     "Uploaded"
+      key: s3Key,
+      path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
+      status: "Uploaded"
     });
 
-    // ── 6) Success ──────────────────────────────────────────────────────────────
     res.status(201).json({
-      message:  "Material uploaded successfully",
+      message: "Material uploaded successfully",
       material: newMaterial
     });
   } catch (err) {
-    console.error("❌ createMaterial error:", err);
+    console.error("createMaterial error:", err);
     await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key);
     return next(new Error("Failed to upload material", { cause: 500 }));
   } finally {
