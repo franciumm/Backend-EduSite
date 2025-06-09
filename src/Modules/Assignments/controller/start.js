@@ -11,25 +11,31 @@ import { promises as fsPromises } from 'fs';
 import { gradeModel } from "../../../../DB/models/grades.model.js";
 import mongoose from "mongoose";
 
-export const CreateAssignment = asyncHandler(async (req, res, next) => {
-  const { _id } = req.user; // teacher ID
-  const { name, startDate, endDate, groupIds, gradeId } = req.body;
+
+export const CreateAssignment  = asyncHandler(async (req, res, next) => {
+  const teacherId = req.user._id;
+  const { name, startDate, endDate, gradeId } = req.body;
   const slug = slugify(name, "-");
 
-  // 🔹 Validate groupIds as non-empty array
-  if (!Array.isArray(groupIds) || groupIds.length === 0) {
+  // ── 1) Normalize & validate groupIds input ────────────────────────────────
+  let raw = req.body.groupIds ?? req.body["groupIds[]"];
+  if (!raw) {
     return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
   }
-  // 🔹 Filter out invalid ObjectIds
-  const invalidGroupIds = groupIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
-  if (invalidGroupIds.length > 0) {
-    return next(
-      new Error(`Invalid Group ID(s): ${invalidGroupIds.join(", ")}`, { cause: 400 })
-    );
+  if (typeof raw === "string" && raw.trim().startsWith("[")) {
+    try { raw = JSON.parse(raw); } catch {}
+  }
+  let groupIds = Array.isArray(raw) ? raw : [raw];
+  if (groupIds.length === 0) {
+    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
+  }
+  const invalid = groupIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
+  if (invalid.length) {
+    return next(new Error(`Invalid Group ID(s): ${invalid.join(", ")}`, { cause: 400 }));
   }
   const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
 
-  // 🔹 Ensure none of these groups already has an assignment with this name
+  // ── 2) Check duplicate assignment name in any of these groups ─────────────
   const duplicate = await assignmentModel.findOne({
     name,
     groupIds: { $in: validGroupIds }
@@ -41,22 +47,33 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
     ));
   }
 
-  // 🔹 Validate gradeId
-  const gradedoc = await gradeModel.findById(gradeId);
-  if (!gradedoc) {
+  // ── 3) Validate gradeId exists ─────────────────────────────────────────────
+  const gradeDoc = await gradeModel.findById(gradeId);
+  if (!gradeDoc) {
     return next(new Error("Wrong GradeId", { cause: 400 }));
   }
 
-  // 🔹 File must be present
+  // ── 4) Ensure all groups belong to that grade ─────────────────────────────
+  const groupsInGrade = await groupModel.find({
+    _id: { $in: validGroupIds },
+    gradeId: gradeDoc._id
+  }).select("_id");
+  if (groupsInGrade.length !== validGroupIds.length) {
+    return next(new Error(
+      "One or more groups are not in the specified grade",
+      { cause: 400 }
+    ));
+  }
+
+  // ── 5) File must be present ────────────────────────────────────────────────
   if (!req.file) {
     return next(new Error("Please upload a PDF file", { cause: 400 }));
   }
 
-  // Read & upload file
+  // ── 6) Read & upload to S3 ────────────────────────────────────────────────
   const fileContent = fs.readFileSync(req.file.path);
   const fileName = `${slug}-${Date.now()}.pdf`;
   const s3Key = `Assignments/${fileName}`;
-
   try {
     await uploadFileToS3(
       process.env.S3_BUCKET_NAME,
@@ -65,18 +82,18 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
       "application/pdf"
     );
 
-    // 🔹 Create with groupIds array
+    // ── 7) Persist the assignment with validated groupIds ────────────────────
     const newAssignment = await assignmentModel.create({
       name,
       slug,
       startDate,
       endDate,
-      groupIds: validGroupIds,    // <-- switched from single groupId
       gradeId,
+      groupIds: validGroupIds,
       bucketName: process.env.S3_BUCKET_NAME,
       key: s3Key,
       path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-      createdBy: _id,
+      createdBy: teacherId,
     });
 
     if (!newAssignment) {
@@ -84,20 +101,17 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
       return next(new Error("Error while creating the assignment", { cause: 400 }));
     }
 
-    res.status(200).json({
+    res.status(201).json({
       message: "Assignment created successfully",
       newAssignment
     });
-  } catch (error) {
-    console.error("Error uploading file to S3:", error);
+  } catch (err) {
+    console.error("Error uploading assignment to S3:", err);
     return next(new Error("Error while uploading file to S3", { cause: 500 }));
   } finally {
     fs.unlinkSync(req.file.path);
   }
 });
-// controllers/assignment.controller.js
-
-
 
 
 export const submitAssignment = asyncHandler(async (req, res, next) => {
