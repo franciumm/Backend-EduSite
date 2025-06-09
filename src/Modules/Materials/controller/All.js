@@ -8,17 +8,7 @@ import studentModel from '../../../../DB/models/student.model.js';
 import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3 } from '../../../utils/S3Client.js';
 import { gradeModel} from "../../../../DB/models/grades.model.js";
 import { pagination } from '../../../utils/pagination.js';
-import { asyncHandler } from "../../../utils/erroHandling.js";
 
-import { s3, uploadFileToS3, deleteFileFromS3 } from "../../../utils/S3Client.js";
-import { pagination } from "../../../utils/pagination.js";
-import { groupModel } from "../../../../DB/models/groups.model.js";
-import { gradeModel} from "../../../../DB/models/grades.model.js";
-import {examModel} from "../../../../DB/models/exams.model.js";
-import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
-import fs from "fs";
-import mongoose from "mongoose";
-import studentModel from "../../../../DB/models/student.model.js";
 
 function generateSlug(text) {
   return slugify(text, { lower: true, strict: true });
