@@ -8,6 +8,8 @@ import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
 import fs from "fs";
 
+import { promisify } from "util";
+
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
   const { _id } = req.user; // The teacher creating the assignment
   const { name, startDate, endDate, groupId, gradeId } = req.body;
