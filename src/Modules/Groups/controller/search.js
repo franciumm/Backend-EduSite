@@ -10,7 +10,7 @@ export const getall = asyncHandler(async(req,res,next)=>{
 
 // controllers/group.controller.js
 
-export const getGroupsByGrade = asyncHandler(async (req, res, next) => {
+export const Bygrade  = asyncHandler(async (req, res, next) => {
   const { grade } = req.params;                            // e.g. “10”
   
   const gradeDoc = await gradeModel.findOne({ grade: grade });
