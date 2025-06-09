@@ -225,9 +225,8 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
     const query = {};
 
     if (isTeacher) {
-      // If the user is a teacher, fetch assignments they created or all assignments
-      if (req.query.groupId && mongoose.Types.ObjectId.isValid(req.query.groupId)) {
-        query.groupId = req.query.groupId; // Filter by group if specified
+        if (req.query.groupId && mongoose.Types.ObjectId.isValid(req.query.groupId)) {
+        query.groupIds = mongoose.Types.ObjectId(req.query.groupId);
       }
     } else {
       // For students, filter by their group
@@ -236,7 +235,7 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
           if (!student) {
         return res.status(404).json({ message: "Student not found" });
       }
-      query.groupId = student.groupId;
+      query.groupIds  = student.groupId;
     }
 
 
@@ -260,8 +259,8 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
       .sort({ startDate: 1 }) // Sort by start date
       .skip(skip)
       .limit(limit)
-      .select("name startDate endDate groupId rejectedStudents enrolledStudents") // Select specific fields
-      .populate("groupId", "name"); // Populate group details
+      .select("name startDate endDate groupIds rejectedStudents enrolledStudents")
+      .populate("groupIds", "groupname"); 
 
     // Total count for pagination
     const totalAssignments = await assignmentModel.countDocuments(query);
