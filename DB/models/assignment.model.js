@@ -4,10 +4,7 @@ const assignmentSchema = new Schema({
     name: { type: String, required: true },
     startDate: Date,
     endDate: Date,
-    groupId: {
-      type: Schema.Types.ObjectId,
-      ref: 'group',
-    },
+    groupIds: [{ type: Schema.Types.ObjectId, ref: "group" }],
     gradeId: {
       type: Schema.Types.ObjectId,
       ref: 'grade',
