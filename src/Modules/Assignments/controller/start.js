@@ -7,7 +7,8 @@ import {SubassignmentModel}from "../../../../DB/models/submitted_assignment.mode
 import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
 import fs from "fs";
-import { promisify } from "util";
+
+import { promises as fsPromises } from 'fs';
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
   const { _id } = req.user; // The teacher creating the assignment
