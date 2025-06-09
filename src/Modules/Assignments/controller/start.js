@@ -72,110 +72,30 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
   }
 });
 // controllers/assignment.controller.js
-// export const submitAssignment = asyncHandler(async (req, res, next) => {
-//   const { assignmentId, notes } = req.body;
 
-//   // 1) Fetch the assignment
-//   const assignment = await assignmentModel.findById(assignmentId);
-//   if (!assignment) {
-//     return next(new Error("Assignment not found", { cause: 404 }));
-//   }
 
-//   // 2) Fetch the student and their groupId
-//   const student = await studentModel.findById(req.user._id);
-//   if (!student) {
-//     return next(new Error("Student not found", { cause: 404 }));
-//   }
-//   const groupId = student.groupId;
 
-//   // 3) Verify the group exists
-//   const group = await groupModel.findById(groupId);
-//   if (!group) {
-//     return next(new Error("Group not found", { cause: 404 }));
-//   }
-
-//   // 4) Check rejection list
-//   if (assignment.rejectedStudents?.includes(req.user._id)) {
-//     return next(new Error("You are not allowed to submit this assignment", { cause: 403 }));
-//   }
-
-//   // 5) Timeline validation
-//   const now = new Date();
-//   let isLate = false;
-//   if (!req.isteacher.teacher && now < assignment.startDate) {
-//     return next(new Error("Submission window hasn’t opened yet", { cause: 403 }));
-//   }
-//   if (!req.isteacher.teacher && now > assignment.endDate) {
-//     isLate = true;
-//   }
-
-//   // 6) Group check (use student.groupId, not req.user.groupid)
-//   if (!req.isteacher.teacher && assignment.groupId.toString() !== groupId.toString()) {
-//     return next(new Error("You’re not in the group for this assignment", { cause: 403 }));
-//   }
-
-//   // 7) Ensure file
-//   if (!req.file) {
-//     return next(new Error("Please upload a PDF file", { cause: 400 }));
-//   }
-
-//   // 8) Upload to S3
-//   const fileContent = fs.readFileSync(req.file.path);
-//   const fileName = `${assignment.name}_${req.user.userName}_${Date.now()}.pdf`;
-//   const s3Key = `Submissions/${assignmentId}/${req.user._id}/${fileName}`;
-//   try {
-//     await s3.send(new PutObjectCommand({
-//       Bucket: process.env.S3_BUCKET_NAME,
-//       Key: s3Key,
-//       Body: fileContent,
-//       ContentType: "application/pdf",
-//       ACL: "private",
-//     }));
-
-//     // 9) Save in DB
-//     const submission = await SubassignmentModel.create({
-//       studentId: req.user._id,
-//       assignmentId,
-//       bucketName: process.env.S3_BUCKET_NAME,
-//       groupId,
-//       key: s3Key,
-//       path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-//       isLate,
-//       notes: notes || (isLate ? `Late submission on ${now.toISOString()}` : `Submitted on time`),
-//     });
-
-//     // 10) Track on student doc
-//     await studentModel.findByIdAndUpdate(req.user._id, {
-//       $addToSet: { submittedassignments: assignmentId },
-//     });
-
-//     // 11) Cleanup & respond
-//     fs.unlinkSync(req.file.path);
-//     res.status(200).json({
-//       message: "Assignment submitted successfully",
-//       data: { submission, isLate },
-//     });
-//   } catch (err) {
-//     // ensure cleanup
-//     fs.unlinkSync(req.file.path);
-//     console.error(err);
-//     return next(new Error("Failed to submit the assignment", { cause: 500 }));
-//   }
-// });
+const unlinkAsync = promisify(fs.unlink);
 
 export const submitAssignment = asyncHandler(async (req, res, next) => {
-  
-  const { notes,assignmentId } = req.body;
+  const { assignmentId, notes } = req.body;
   const file = req.file;
+  const userId = req.user._id;
+  const isTeacher = req.isteacher?.teacher === true;
 
-  // 1) Validate assignment
+  // 1) File check
+  if (!file) {
+    return next(new Error("Please attach a PDF file under field name `file`", { cause: 400 }));
+  }
+
+  // 2) Load assignment
   const assignment = await assignmentModel.findById(assignmentId);
   if (!assignment) {
     return next(new Error("Assignment not found", { cause: 404 }));
   }
 
-  // 2) Validate student & group
-  const student = await studentModel.findById(req.user._id);
+  // 3) Load student & group
+  const student = await studentModel.findById(userId);
   if (!student) {
     return next(new Error("Student not found", { cause: 404 }));
   }
@@ -185,47 +105,39 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     return next(new Error("Group not found", { cause: 404 }));
   }
 
-  // 3) Rejection check
-  if (assignment.rejectedStudents?.includes(req.user._id)) {
-    return next(new Error("You are blocked from submitting this assignment", { cause: 403 }));
+  // 4) Rejection & timeline
+  if (assignment.rejectedStudents?.includes(userId)) {
+    return next(new Error("You’re blocked from submitting this assignment", { cause: 403 }));
   }
-
-  // 4) Timeline check
   const now = new Date();
-  let isLate = false;
-  if (!req.isteacher.teacher && now < assignment.startDate) {
+  if (!isTeacher && now < assignment.startDate) {
     return next(new Error("Submission window hasn’t opened yet", { cause: 403 }));
   }
-  if (!req.isteacher.teacher && now > assignment.endDate) {
-    isLate = true;
-  }
+  const isLate = !isTeacher && now > assignment.endDate;
 
   // 5) Group match
-  if (!req.isteacher.teacher && assignment.groupId.toString() !== groupId.toString()) {
+  if (!isTeacher && assignment.groupId.toString() !== groupId.toString()) {
     return next(new Error("You’re not in the right group for this assignment", { cause: 403 }));
   }
 
-  // 6) File check
-  if (!file) {
-    return next(new Error("Please attach a PDF file under field name `file`", { cause: 400 }));
-  }
+  // 6) Stream upload to S3
+  const timestamp = Date.now();
+  const fileName = `${assignment.name}_${req.user.userName}_${timestamp}.pdf`;
+  const key = `Submissions/${assignmentId}/${userId}/${fileName}`;
+  const fileStream = fs.createReadStream(file.path);
 
-  // 7) Upload to S3
-  const buffer = fs.readFileSync(file.path);
-  const fileName = `${assignment.name}_${req.user.userName}_${Date.now()}.pdf`;
-  const key = `Submissions/${assignmentId}/${req.user._id}/${fileName}`;
   try {
     await s3.send(new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
       Key: key,
-      Body: buffer,
+      Body: fileStream,
       ContentType: "application/pdf",
       ACL: "private",
     }));
 
-    // 8) Record in DB
+    // 7) Persist submission record
     const submission = await SubassignmentModel.create({
-      studentId: req.user._id,
+      studentId: userId,
       assignmentId,
       bucketName: process.env.S3_BUCKET_NAME,
       groupId,
@@ -237,23 +149,19 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         : `Submitted on time at ${now.toISOString()}`),
     });
 
-    // 9) Track on student doc
-    await studentModel.findByIdAndUpdate(req.user._id, {
+    // 8) Mark on student doc
+    await studentModel.findByIdAndUpdate(userId, {
       $addToSet: { submittedassignments: assignmentId },
     });
 
-    // 10) Cleanup tmp file
-    fs.unlinkSync(file.path);
-
-    // 11) Send back
+    // 9) Cleanup & response
+    await unlinkAsync(file.path);
     res.status(200).json({
       message: "Assignment submitted successfully",
       data: submission,
     });
-
   } catch (err) {
-    // ensure we don’t leave stale files
-    fs.unlinkSync(file.path);
+    await unlinkAsync(file.path);
     console.error("Upload/DB error:", err);
     return next(new Error("Failed to submit the assignment", { cause: 500 }));
   }
