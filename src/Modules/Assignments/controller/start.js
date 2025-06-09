@@ -74,13 +74,15 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
 
 
 export const submitAssignment = asyncHandler(async (req, res, next) => {
-  const { assignmentId, notes,groupId } = req.body;
+  const { assignmentId, notes } = req.body;
 
   // Check if the assignment exists
   const assignment = await assignmentModel.findById(assignmentId);
   if (!assignment) {
     return next(new Error("Assignment not found", { cause: 404 }));
   }
+  const groupId= await studentModel.findById(req.user._id);
+  groupId= groupId.groupId;
   const group = await groupModel.findById(groupId);
   if (!group) {
     return next(new Error("Group not found", { cause: 404 }));
