@@ -8,6 +8,7 @@ import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.m
 
 import { pagination } from "../../../utils/pagination.js";
 import studentModel from "../../../../DB/models/student.model.js";
+import { groupModel } from "../../../../DB/models/groups.model.js";
 
 export const GetAllByGroup = asyncHandler (async  (req, res, next) => {
   const {groupId}= req.body ;
