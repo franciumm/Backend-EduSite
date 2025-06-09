@@ -10,9 +10,9 @@ export const getall = asyncHandler(async(req,res,next)=>{
 
 
 export const Bygrade = asyncHandler(async(req,res,next)=>{
-    const {gradeid}= req.query ; 
-
-    const groups = await groupModel.find({gradeid}).populate("enrolledStudents", {_id :1 , userName:1,firstName :1});
+    const {grade}= req.params ; 
+    const gradeM = await gradeModel.findOne({grade});
+    const groups = await groupModel.find({gradeId : gradeM._id}).populate("enrolledStudents", {_id :1 , userName:1,firstName :1});
     res.status(201).json({Message : "Done", groups});
 }); 
 
