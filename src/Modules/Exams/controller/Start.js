@@ -16,7 +16,7 @@ import studentModel from "../../../../DB/models/student.model.js";
 
 
 export const createExam = asyncHandler(async (req, res, next) => {
-  const { Name, startdate, enddate, grade, groupIds, exceptionStudents } = req.body;
+  const { Name, startdate, enddate, gradeId, groupIds, exceptionStudents } = req.body;
  
   const gradedoc= await gradeModel.findById(gradeId);
   if(!gradedoc){
@@ -108,7 +108,7 @@ export const createExam = asyncHandler(async (req, res, next) => {
       Name,
       startdate,
       enddate,
-      grade,
+      grade: gradeId,
       groupIds: validGroupIds,
       bucketName: process.env.S3_BUCKET_NAME,
       key: s3Key,
