@@ -17,7 +17,7 @@ return slugify(text, { lower: true, strict: true });}
 
 export const createMaterial = asyncHandler(async (req, res, next) => {
   const userId = req.user._id;
-  let { name, description } = req.body;
+  let { name, description,gradeId } = req.body;
   let groupIds = req.body.groupIds ?? req.body.groupId;  // accept either
 
   // ── 1) Validate groupIds as an array ─────────────────────────────────────────
@@ -65,6 +65,7 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
       slug,
       description,
       groupIds,
+      gradeId,
       createdBy:  userId,
       bucketName: process.env.S3_BUCKET_NAME,
       key:        s3Key,

@@ -7,6 +7,7 @@ const materialSchema = new Schema(
     slug: { type: String, required: true, unique: true },
     description: { type: String },
     groupIds: [{ type: Schema.Types.ObjectId, ref: "group", required: true }],
+    gradeId: { type: Schema.Types.ObjectId, ref: "grade" },
     bucketName: { type: String, required: true },
     key: { type: String, required: true },
     path: { type: String, required: true },
