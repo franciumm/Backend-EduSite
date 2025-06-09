@@ -16,8 +16,9 @@ import studentModel from "../../../../DB/models/student.model.js";
 
 
 export const createExam = asyncHandler(async (req, res, next) => {
-  const { Name, startdate, enddate, gradeId, groupIds, exceptionStudents } = req.body;
- 
+  const { Name, startdate, enddate, gradeId, exceptionStudents } = req.body;
+  let groupIds = req.body.groupIds ?? req.body["groupIds[]"];
+  
   const gradedoc= await gradeModel.findById(gradeId);
   if(!gradedoc){
       return next(new Error("wrong GradeId ", { cause: 400 }));
