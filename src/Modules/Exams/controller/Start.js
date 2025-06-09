@@ -204,6 +204,7 @@ await s3.send(new DeleteObjectCommand({
       { new: true, upsert: true }
     );
 a7a.submittedexams.push(updatedSubmission._id);
+await a7a.save();
     res.status(200).json({
       message: "Exam submitted successfully",
       submission: updatedSubmission,
