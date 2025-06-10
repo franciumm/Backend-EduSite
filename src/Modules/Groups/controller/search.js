@@ -15,30 +15,25 @@ export const Bygrade = asyncHandler(async (req, res, next) => {
   }
 
   // 2️⃣ Fetch groups and populate students with their submission details
-  // const groups = await groupModel
-  //   .find({ gradeid: gradeDoc._id })
-  //   .populate({
-  //     path: "enrolledStudents",
-  //     // Select all the fields you want from the student document
-  //     select: "_id userName firstName lastName phone email parentPhone submittedassignments submittedexams",
-  //     // Now, populate the fields *within* the student documents
-  //     populate: [
-  //       {
-  //         path: "submittedassignments", // This path must exist in the student schema
-  //         select: "assignmentId -_id"   // Select ONLY the assignmentId, exclude the submission's _id
-  //       },
-  //       {
-  //         path: "submittedexams",       // This path must also exist
-  //         select: "examId -_id"         // Select ONLY the examId, exclude the submission's _id
-  //       }
-  //     ]
-  //   });
-const groups = await groupModel
-  .find({ gradeid: gradeDoc._id })
-  .populate(
-    "enrolledStudents",
-    "_id userName firstName lastName phone email parentPhone"
-  );
+  const groups = await groupModel
+    .find({ gradeid: gradeDoc._id })
+    .populate({
+      path: "enrolledStudents",
+      // Select all the fields you want from the student document
+      select: "_id userName firstName lastName phone email parentPhone submittedassignments submittedexams",
+      // Now, populate the fields *within* the student documents
+      populate: [
+        {
+          path: "submittedassignments", // This path must exist in the student schema
+          select: "assignmentId -_id"   // Select ONLY the assignmentId, exclude the submission's _id
+        },
+        {
+          path: "submittedexams",       // This path must also exist
+          select: "examId -_id"         // Select ONLY the examId, exclude the submission's _id
+        }
+      ]
+    });
+
   // 3️⃣ Return
   res.status(200).json({
     Message: "Groups fetched successfully",
