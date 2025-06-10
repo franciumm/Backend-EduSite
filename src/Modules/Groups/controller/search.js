@@ -25,11 +25,11 @@ export const Bygrade = asyncHandler(async (req, res, next) => {
       populate: [
         {
           path: "submittedassignments", // This path must exist in the student schema
-          select: "assignmentId -_id"   // Select ONLY the assignmentId, exclude the submission's _id
+          select: "assignmentId "   // Select ONLY the assignmentId, exclude the submission's _id
         },
         {
           path: "submittedexams",       // This path must also exist
-          select: "examId -_id"         // Select ONLY the examId, exclude the submission's _id
+          select: "examId "         // Select ONLY the examId, exclude the submission's _id
         }
       ]
     });
