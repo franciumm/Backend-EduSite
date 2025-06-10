@@ -9,7 +9,6 @@ export const getall = asyncHandler(async(req,res,next)=>{
 
 
 // controllers/group.controller.js
-
 export const Bygrade  = asyncHandler(async (req, res, next) => {
   const { grade } = req.query;                            // e.g. “10”
   
@@ -18,10 +17,23 @@ export const Bygrade  = asyncHandler(async (req, res, next) => {
     return next(new Error(`Grade "${grade}" not found`, { cause: 404 }));
   }
 
-  // 2️⃣ Fetch groups for that grade, populate students
+  // 2️⃣ Fetch groups and populate students with their submission details
   const groups = await groupModel
     .find({ gradeid: gradeDoc._id })
-    .populate("enrolledStudents", "_id userName firstName lastName phone email parentPhone submittedassignments submittedexams ");
+    .populate({
+      path: "enrolledStudents",
+      select: "_id userName firstName lastName phone email parentPhone submittedassignments submittedexams",
+      populate: [
+        {
+          path: "submittedassignments", // Populate the 'submittedassignments' field in the Student model
+          select: "assignmentId"        // And from that collection, select only the 'assignmentId' field
+        },
+        {
+          path: "submittedexams",       // Populate the 'submittedexams' field in the Student model
+          select: "examId"              // And from that collection, select only the 'examId' field
+        }
+      ]
+    });
 
   // 3️⃣ Return
   res.status(200).json({
