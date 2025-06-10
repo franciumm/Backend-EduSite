@@ -7,7 +7,6 @@ export const getall = asyncHandler(async(req,res,next)=>{
     res.status(201).json({Message : "Done", groups});
 }); 
 
-
 export const Bygrade  = asyncHandler(async (req, res, next) => {
   const { grade } = req.query;
   
