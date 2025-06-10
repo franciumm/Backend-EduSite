@@ -45,11 +45,11 @@ const studentSchema = new Schema(
     },
     submittedassignments: {
       type: [Schema.Types.ObjectId],
-      ref: "assignment",
+      ref: "subassignment",
     },
     submittedexams: {
       type: [Schema.Types.ObjectId],
-      ref: "exam",
+      ref: "subexam",
     },
   },
   { timestamps: true }
