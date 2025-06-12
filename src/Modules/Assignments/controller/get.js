@@ -10,17 +10,34 @@ import { pagination } from "../../../utils/pagination.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 
-export const GetAllByGroup = asyncHandler (async  (req, res, next) => {
-  const {groupId}= req.body ;
-  if(req.isteacher.teacher== false){req.user.groupId = await groupModel.findById(user._Id);}
-  if(req.isteacher.teacher== false&& req.user.groupId ==groupId){
-    return next(new Error("The Studednt no in This group", { cause: 401 }));
-    ;
-  }
-  const ass = await assignmentModel.find({groupId:groupId});
-  res.status(201).json(ass)
-})
+export const GetAllByGroup = asyncHandler(async (req, res, next) => {
+  // Get groupId from request parameters or body. Using params is common for GET requests.
+  // Let's assume it's in the body as per your original code.
+  const { groupId } = req.body;
 
+  if (!groupId) {
+    return next(new Error("Group ID is required.", { cause: 400 }));
+  }
+
+  // Authorization check for students
+  // Note: We assume that an auth middleware has already populated req.user for students.
+  if (req.isTeacher === false) {
+    // The logic was inverted. We should check if the student is NOT in the requested group.
+    // Also, a student might belong to multiple groups, so req.user.groupIds should be an array.
+    // For this example, we'll assume req.user.groupId holds their single group ID.
+    if (req.user.groupId.toString() !== groupId) {
+      return next(new Error("Unauthorized: You do not have access to this group's assignments.", { cause: 403 }));
+    }
+  }
+
+  // **THE FIX**: To find if a single value exists within an array in a document,
+  // you can query it directly. Mongoose is smart enough to translate this
+  // into a query that checks for the element in the array.
+  const assignments = await assignmentModel.find({ groupIds: groupId });
+
+  // Use 200 OK for a successful GET request, not 201 Created.
+  res.status(200).json({ message: "Assignments fetched successfully", data: assignments });
+});
 
 export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
   const { groupId, assignmentId, status, page = 1, size = 10 } = req.query;
