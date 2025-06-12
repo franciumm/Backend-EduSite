@@ -391,3 +391,165 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
     currentPage: parseInt(page, 10),
   });
 });
+
+
+
+
+export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
+  const { groupId, examId, status, page = 1, size = 10 } = req.query;
+
+  // 1) Validate groupId - Common for both scenarios
+  if (!groupId || !mongoose.Types.ObjectId.isValid(groupId)) {
+    return next(new Error("A valid Group ID is required", { cause: 400 }));
+  }
+  const gId = new mongoose.Types.ObjectId(groupId);
+
+  // Pagination helpers - Common for both scenarios
+  const pg = parseInt(page, 10);
+  const { limit, skip } = pagination({ page: pg, size: parseInt(size, 10) });
+
+  // --- LOGIC PATH 1: NO EXAM ID (Get all submissions in the group) ---
+  if (!examId) {
+    const matchQuery = {};
+    // Optional status filter on whether the submission has a score
+    if (status === "marked") matchQuery.score = { $ne: null };
+    else if (status === "unmarked") matchQuery.score = { $eq: null };
+
+    // This pipeline correctly finds submissions by looking up the exam's groupIds
+    const pipeline = [
+      // Step A: Join subexam with the exams collection
+      {
+        $lookup: {
+          from: "exams", // The actual collection name for exams
+          localField: "examId",
+          foreignField: "_id",
+          as: "exam",
+        },
+      },
+      // Step B: Filter to only include submissions whose exam belongs to the target group
+      { $match: { "exam.groupIds": gId } },
+      // Step C: Apply optional status filter (marked/unmarked)
+      { $match: matchQuery },
+    ];
+    
+    // Execute pipelines for both data and total count
+    const [submissions, totalResult] = await Promise.all([
+        SubexamModel.aggregate([
+            ...pipeline,
+            { $sort: { createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+            // Populate student and exam details
+            { $lookup: { from: 'students', localField: 'studentId', foreignField: '_id', as: 'studentId' } },
+            { $unwind: '$studentId' },
+            { $unwind: '$exam' },
+            { $project: { 'studentId.password': 0, 'studentId.otp': 0 } } // Exclude sensitive fields
+        ]),
+        SubexamModel.aggregate([...pipeline, { $count: "total" }])
+    ]);
+
+    const totalSubmissions = totalResult[0]?.total || 0;
+
+    return res.status(200).json({
+      message: "All exam submissions for group fetched successfully",
+      totalSubmissions,
+      totalPages: Math.ceil(totalSubmissions / limit),
+      currentPage: pg,
+      submissions,
+    });
+  }
+
+  // --- LOGIC PATH 2: EXAM ID PROVIDED (Get status for every student in group) ---
+
+  // 2) Validate examId
+  if (!mongoose.Types.ObjectId.isValid(examId)) {
+    return next(new Error("A valid exam ID is required", { cause: 400 }));
+  }
+  const eId = new mongoose.Types.ObjectId(examId);
+
+  // 3) Ensure exam exists and is linked to this group (fail-fast)
+  const exam = await examModel.findOne({ _id: eId, groupIds: gId }).lean();
+  if (!exam) {
+    return next(new Error("Exam not found or not assigned to this group", { cause: 404 }));
+  }
+
+  // 4) Build the main aggregation pipeline
+  // This starts from the group, finds all students, and "left-joins" their submission status
+  let aggregationPipeline = [
+    // Step A: Start with the specific group
+    { $match: { _id: gId } },
+    // Step B: Deconstruct the enrolledStudents array to process each student
+    { $unwind: "$enrolledStudents" },
+    // Step C: Look up full student details
+    {
+      $lookup: {
+        from: "students",
+        localField: "enrolledStudents",
+        foreignField: "_id",
+        as: "studentInfo",
+      },
+    },
+    { $unwind: "$studentInfo" },
+    // Step D: The crucial "left join" to find the latest submission for this student and exam
+    {
+      $lookup: {
+        from: "subexams",
+        let: { student_id: "$studentInfo._id" },
+        pipeline: [
+          {
+            $match: {
+              examId: eId,
+              $expr: { $eq: ["$studentId", "$$student_id"] },
+            },
+          },
+          { $sort: { createdAt: -1 } }, // Get the most recent one first
+          { $limit: 1 }, // We only care about the latest submission
+        ],
+        as: "submission",
+      },
+    },
+    // Step E: Unpack the submission (if it exists) while keeping students who didn't submit
+    { $unwind: { path: "$submission", preserveNullAndEmptyArrays: true } },
+    // Step F: Create the status fields based on whether a submission was found
+    {
+      $project: {
+        _id: "$studentInfo._id",
+        userName: "$studentInfo.userName",
+        firstName: "$studentInfo.firstName",
+        lastName: "$studentInfo.lastName",
+        status: { $cond: { if: "$submission", then: "submitted", else: "not submitted" } },
+        submittedAt: "$submission.createdAt", // Will be null if no submission
+        score: "$submission.score", // Include score
+      },
+    },
+  ];
+
+  // 5) Add optional status filter to the pipeline
+  if (status === "submitted") {
+    aggregationPipeline.push({ $match: { status: "submitted" } });
+  } else if (status === "not_submitted") {
+    aggregationPipeline.push({ $match: { status: "not submitted" } });
+  }
+
+  // 6) Use $facet to get both total count and paginated data in one query
+  const results = await groupModel.aggregate([
+    ...aggregationPipeline,
+    {
+      $facet: {
+        metadata: [{ $count: "total" }],
+        data: [{ $skip: skip }, { $limit: limit }],
+      },
+    },
+  ]);
+
+  const students = results[0].data;
+  const totalStudents = results[0].metadata[0]?.total || 0;
+
+  res.status(200).json({
+    message: "Student submission statuses fetched successfully",
+    totalStudents,
+    totalPages: Math.ceil(totalStudents / limit),
+    currentPage: pg,
+    students,
+  });
+});
