@@ -12,7 +12,7 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 
 export const GetAllByGroup = asyncHandler (async  (req, res, next) => {
   const {groupId}= req.body ;
-  req.user.groupId = await groupModel.findById(user._Id);
+  if(req.isteacher.teacher== false){req.user.groupId = await groupModel.findById(user._Id);}
   if(req.isteacher.teacher== false&& req.user.groupId ==groupId){
     return next(new Error("The Studednt no in This group", { cause: 401 }));
     ;
