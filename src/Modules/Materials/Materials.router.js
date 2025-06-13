@@ -26,7 +26,7 @@ router.post(
 
 // Route to view material (students can view if enrolled, teachers can view any)
 router.get('/:materialId', isAuth, materialsController.viewMaterial);
-router.get('group/:groupId', isAuth, materialsController.viewGroupsMaterial);
+router.get('/group/:groupId', isAuth, materialsController.viewGroupsMaterial);
 
   // Delete a material by its ID (teachers only)
   router.delete(
