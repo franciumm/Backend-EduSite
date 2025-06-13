@@ -29,7 +29,8 @@ export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
     // We assume the student's group ID is available in req.user.groupId after auth.
     // NOTE: If a student can be in multiple groups, req.user.groups should be an array
     // and the logic would be: !req.user.groups.includes(groupId)
-    req.user.groupId = await groupModel.findById(req.user.groupId);
+    const groupId = await studentModel.findById(req.user._id).groupId;
+    req.user.groupId = groupId;
     
     if (req.user.groupId.toString() !== groupId) {
       return next(new Error("Unauthorized: You do not have access to this group's materials.", { cause: 403 }));
