@@ -13,7 +13,7 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 export const GetAllByGroup = asyncHandler(async (req, res, next) => {
   // Get groupId from request parameters or body. Using params is common for GET requests.
   // Let's assume it's in the body as per your original code.
-  const { groupId } = req.body;
+  const { groupId } = req.query;
 
   if (!groupId) {
     return next(new Error("Group ID is required.", { cause: 400 }));
