@@ -148,91 +148,106 @@ export const createExam = asyncHandler(async (req, res, next) => {
 
 
 export const submitExam = asyncHandler(async (req, res, next) => {
-  const { examId } = req.body;
-  const notes = req.body.notes || "";
-  const user = req.user;
-  const isTeacher = req.isteacher.teacher;
- const Date = new Date();
+  // --- 1. INITIAL SETUP & VALIDATION ---
+  const { examId, notes = "" } = req.body;
+  const { user, isteacher } = req;
+  const isTeacher = isteacher.teacher;
+  const submissionTime = new Date(); // Use a single, consistent timestamp
+
   if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
-    return next(new Error("Valid examId is required", { cause: 400 }));
+    return next(new Error("A valid Exam ID is required.", { cause: 400 }));
   }
 
   if (!req.file) {
-    return next(new Error("Please upload a PDF file for submission", { cause: 400 }));
+    return next(new Error("Please upload a PDF file for submission.", { cause: 400 }));
   }
 
   const exam = await examModel.findById(examId);
   if (!exam) {
-    return next(new Error("Exam not found", { cause: 404 }));
+    return next(new Error("Exam not found.", { cause: 404 }));
   }
 
-  let studentId;
-  if (isTeacher) {
-    studentId = user._id;
-  } else {
-    studentId = user._id;
-    var a7a = await studentModel.findById(user._id);
-    const isInGroup = exam.groupIds.some((gid) => gid.toString() === a7a.groupId?.toString());
-    const exceptionEntry = exam.exceptionStudents.find(
-      (ex) => ex.studentId.toString() === studentId.toString()
-    );
+  // --- 2. AUTHORIZATION & TIMELINE LOGIC ---
+  const studentId = user._id;
 
-    if (!isInGroup && !exceptionEntry) {
-      return next(new Error("You are not authorized to submit for this exam.", { cause: 403 }));
+  // Find if the student has a special exception timeline
+  const exceptionEntry = exam.exceptionStudents.find(
+    (ex) => ex.studentId.toString() === studentId.toString()
+  );
+
+  // If the user is an exception student, they can submit anytime as per your rule.
+  // Otherwise, we must check the timeline for both students and teachers.
+  if (!exceptionEntry) {
+    // For regular students, check if they are in an assigned group
+    if (!isTeacher) {
+      const student = user; // user object from isAuth middleware
+      const isInGroup = exam.groupIds.some((gid) => gid.toString() === student.groupId?.toString());
+      if (!isInGroup) {
+        return next(new Error("You are not authorized to submit for this exam.", { cause: 403 }));
+      }
     }
-
-    const now = new Date();
-    if (exceptionEntry) {
-      if (now < exceptionEntry.startdate || now > exceptionEntry.enddate) {
-        return next(new Error("Exam submission is not allowed (exception timeline).", { cause: 403 }));
-      }
-    } else {
-      if (now < exam.startdate || now > exam.enddate) {
-        return next(new Error("Exam submission is not allowed (main timeline).", { cause: 403 }));
-      }
+    
+    // Check if the submission is within the allowed exam timeline for all non-exception users
+    if (submissionTime < exam.startdate || submissionTime > exam.enddate) {
+      return next(new Error("Exam submission is not within the allowed time frame.", { cause: 403 }));
     }
   }
 
-  const fileContent = fs.readFileSync(req.file.path);
-  const fileName = `Submission_${examId}_${studentId}_${Date.now()}.pdf`;
-  const s3Key = `ExamSubmissions/${fileName}`;
+  // --- 3. S3 FILE UPLOAD ---
+  const s3Key = `ExamSubmissions/Submission_${examId}_${studentId}_${submissionTime.getTime()}.pdf`;
 
   try {
-    await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
+    const fileContent = fs.readFileSync(req.file.path);
+    await uploadFileToS3(
+      process.env.S3_BUCKET_NAME,
+      s3Key,
+      fileContent,
+      "application/pdf"
+    );
+  } catch (err) {
+    console.error("Failed to upload file to S3:", err);
+    return next(new Error("File upload failed. Please try again.", { cause: 500 }));
+  } finally {
+    // Always clean up the local temporary file
     fs.unlinkSync(req.file.path);
+  }
 
+
+  // --- 4. DATABASE OPERATION WITH ROLLBACK ---
+  try {
+    // On re-submission, find the old entry to delete its S3 file
     const existingSubmission = await SubexamModel.findOne({ examId, studentId });
 
     if (existingSubmission?.fileKey) {
-await s3.send(new DeleteObjectCommand({
-  Bucket: process.env.S3_BUCKET_NAME,
-  Key: exam.key
-}));await deleteFileFromS3(process.env.S3_BUCKET_NAME, existingSubmission.fileKey);
-    } 
-   
+      // **FIXED BUG**: Delete the student's *previous submission*, not the exam paper.
+      await deleteFileFromS3(process.env.S3_BUCKET_NAME, existingSubmission.fileKey);
+    }
 
+    // Atomically find and update (or create) the submission record
     const updatedSubmission = await SubexamModel.findOneAndUpdate(
-      { examId, studentId },
-      {
-        examId,
-        studentId,
-              SubmitDate:Date,
-
+      { examId, studentId }, // Query
+      { // Data to update/insert
+        SubmitDate: submissionTime,
         notes,
         fileBucket: process.env.S3_BUCKET_NAME,
         fileKey: s3Key,
         filePath: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
       },
-      { new: true, upsert: true }
+      { new: true, upsert: true } // Options: return the new doc, and create if it doesn't exist
     );
-a7a.submittedexams.push(updatedSubmission._id);
-await a7a.save();
+
+    // **REMOVED**: The unnecessary two-way binding. The code is now simpler and more efficient.
+    // student.submittedexams.push(updatedSubmission._id);
+    // await student.save();
+
     res.status(200).json({
-      message: "Exam submitted successfully",
+      message: "Exam submitted successfully.",
       submission: updatedSubmission,
     });
   } catch (err) {
-    console.error("Error during submission:", err);
-    return next(new Error("Failed to submit the exam", { cause: 500 }));
+    // **NEW**: If the database fails, roll back by deleting the file just uploaded to S3
+    console.error("Database error during submission. Rolling back S3 upload.", err);
+    await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key);
+    return next(new Error("Failed to save the submission. Please try again.", { cause: 500 }));
   }
 });
