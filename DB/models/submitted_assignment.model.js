@@ -11,7 +11,8 @@ const submittedAssignmentSchema = new Schema(
     path: String, // New Field for S3 file path (public or signed URL)
     notes: String, // Notes about submission (e.g., "Late submission")
     isLate: Boolean, // Indicates if the submission was late
-    isMarked :{type:Boolean,  default: false}
+    isMarked :{type:Boolean,  default: false},
+    SubmitDate: Date
 
   },
   { timestamps: true }

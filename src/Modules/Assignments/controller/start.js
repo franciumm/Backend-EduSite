@@ -169,7 +169,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
       ContentType: "application/pdf",
       ACL: "private",
     }));
-
+    const Date = new Date();
     // 6) Save record
     const submission = await SubassignmentModel.create({
       studentId: userId,
@@ -177,6 +177,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
       bucketName: process.env.S3_BUCKET_NAME,
       groupId,
       key,
+      SubmitDate:Date,
       path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`,
       isLate,
       notes: notes || (isLate 

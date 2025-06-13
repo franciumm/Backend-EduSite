@@ -152,7 +152,7 @@ export const submitExam = asyncHandler(async (req, res, next) => {
   const notes = req.body.notes || "";
   const user = req.user;
   const isTeacher = req.isteacher.teacher;
-
+ const Date = new Date();
   if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
     return next(new Error("Valid examId is required", { cause: 400 }));
   }
@@ -208,13 +208,16 @@ await s3.send(new DeleteObjectCommand({
   Bucket: process.env.S3_BUCKET_NAME,
   Key: exam.key
 }));await deleteFileFromS3(process.env.S3_BUCKET_NAME, existingSubmission.fileKey);
-    }
+    } 
+   
 
     const updatedSubmission = await SubexamModel.findOneAndUpdate(
       { examId, studentId },
       {
         examId,
         studentId,
+              SubmitDate:Date,
+
         notes,
         fileBucket: process.env.S3_BUCKET_NAME,
         fileKey: s3Key,

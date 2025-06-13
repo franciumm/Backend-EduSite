@@ -11,7 +11,7 @@ const submittedExamSchema = new Schema(
     fileBucket: String,
     fileKey: String,
     filePath: String,
-
+ SubmitDate: Date,
     // teacher’s optional feedback text
     teacherFeedback: { type: String, default: "" },
   },
