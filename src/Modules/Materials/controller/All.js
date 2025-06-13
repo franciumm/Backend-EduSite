@@ -8,11 +8,41 @@ import studentModel from '../../../../DB/models/student.model.js';
 import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3 } from '../../../utils/S3Client.js';
 import { gradeModel} from "../../../../DB/models/grades.model.js";
 
-
 import { pagination } from '../../../utils/pagination.js';
 
 
+export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
+  // 1. Get groupId from request parameters, as defined in the route.
+  const { groupId } = req.params;
 
+  if (!groupId) {
+    // This check is good practice, though a route like '/group/:groupId'
+    // usually won't match if the ID is missing.
+    return next(new Error("Group ID is required.", { cause: 400 }));
+  }
+
+  // 2. Authorization check for students.
+  // We assume an 'isAuth' middleware has populated req.user and req.isTeacher.
+  if (req.isTeacher === false) {
+    // A student can only view materials for the group they are in.
+    // We assume the student's group ID is available in req.user.groupId after auth.
+    // NOTE: If a student can be in multiple groups, req.user.groups should be an array
+    // and the logic would be: !req.user.groups.includes(groupId)
+    req.user.groupId = await groupModel.findById(req.user.groupId);
+    
+    if (req.user.groupId.toString() !== groupId) {
+      return next(new Error("Unauthorized: You do not have access to this group's materials.", { cause: 403 }));
+    }
+  }
+
+  // 3. Database Query: Find all materials where the 'groupIds' array contains the requested groupId.
+  // Mongoose handles searching for an element within an array field directly.
+  const materials = await materialModel.find({ groupIds: groupId });
+
+  // 4. Send a success response.
+  // Use 200 OK for a successful GET request.
+  res.status(200).json({ message: "Materials fetched successfully for the group", data: materials });
+});
 function generateSlug(text) {
   return slugify(text, { lower: true, strict: true });
 }

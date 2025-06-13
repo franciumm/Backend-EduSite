@@ -25,6 +25,7 @@ export const GetAllByGroup = asyncHandler(async (req, res, next) => {
     // The logic was inverted. We should check if the student is NOT in the requested group.
     // Also, a student might belong to multiple groups, so req.user.groupIds should be an array.
     // For this example, we'll assume req.user.groupId holds their single group ID.
+    req.user.groupId = await groupModel.findById(req.user.groupId);
     if (req.user.groupId.toString() !== groupId) {
       return next(new Error("Unauthorized: You do not have access to this group's assignments.", { cause: 403 }));
     }
