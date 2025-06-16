@@ -49,10 +49,11 @@ import studentModel from "../../../../DB/models/student.model.js";
 // });
 
 
-export const downloadAssignment = asyncHandler(async (req, res, next) => {
+
+    export const downloadAssignment = asyncHandler(async (req, res, next) => {
   const { assignmentId } = req.query;
 
-  // 1. Fetch assignment  
+  // 1. Fetch assignment
   const assignment = await assignmentModel.findById(assignmentId);
   if (!assignment) {
     return next(new Error("Assignment not found", { cause: 404 }));
@@ -63,14 +64,21 @@ export const downloadAssignment = asyncHandler(async (req, res, next) => {
   if (!student) {
     return next(new Error("Student record not found", { cause: 404 }));
   }
-  const studentGroupId = student.groupId; // this is a Mongoose ObjectId
 
   // 3. Check authorization
   const isTeacher = req.isteacher.teacher === true;
-  // use .toString() (or assignment.groupId.equals(studentGroupId))
-  if (!isTeacher && studentGroupId.toString() !== assignment.groupId.toString()) {
-    return next(new Error("Student not in the same group", { cause: 403 }));
+  if (!isTeacher) {
+    // FIX: Check if the student is assigned to a group BEFORE comparing IDs
+    if (!student.groupId) {
+      return next(new Error("You are not assigned to any group.", { cause: 403 }));
+    }
+
+    // Now it's safe to compare
+    if (student.groupId.toString() !== assignment.groupId.toString()) {
+      return next(new Error("You are not authorized to download this assignment.", { cause: 403 }));
+    }
   }
+
 
   // 4. Proceed with S3 download
   const { bucketName, key } = assignment;
