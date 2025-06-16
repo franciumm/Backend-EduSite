@@ -273,40 +273,87 @@ export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, nex
 
 
 // --- Fully Refactored User/Teacher Delete Function ---
+
 export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => {
+    // --- 1. Input Validation ---
     const { submissionId } = req.body;
     if (!submissionId) {
-        return next(new Error("Submission ID is required", { cause: 400 }));
+        return next(new Error("Submission ID is required.", { cause: 400 }));
+    }
+    // FIX: Validate that the ID is a valid MongoDB ObjectId format before querying the DB.
+    if (!mongoose.Types.ObjectId.isValid(submissionId)) {
+        return next(new Error("Invalid Submission ID format.", { cause: 400 }));
     }
 
-    const submission = await SubassignmentModel.findById(submissionId).populate('assignmentId', 'createdBy');
+    // --- 2. Fetch Data ---
+    // Fetch the submission and the necessary related data for authorization.
+    const submission = await SubassignmentModel.findById(submissionId)
+        .populate({ path: 'assignmentId', select: 'createdBy' }); // Populate creator of the assignment
+
     if (!submission) {
-        return next(new Error("Submission not found", { cause: 404 }));
+        return next(new Error("Submission not found.", { cause: 404 }));
     }
 
-    // FIX 4 (CRITICAL): Fixed authorization logic.
-    const isStudentOwner = req.user._id.equals(submission.studentId);
-    const isTeacherOwner = req.isteacher?.teacher === true && req.user._id.equals(submission.assignmentId?.createdBy);
+    // --- 3. Authorization Logic (Clear and Explicit) ---
+    let isAuthorized = false;
+    const { user, isteacher } = req; // Destructure for cleaner access
 
-    if (!isStudentOwner && !isTeacherOwner) {
-        return next(new Error("You are not authorized to delete this submission", { cause: 403 }));
+    // Condition 1: The user is the student who made the submission.
+    if (user._id.equals(submission.studentId)) {
+        isAuthorized = true;
+    }
+    // Condition 2: The user is a teacher AND is the one who created the original assignment.
+    else if (isteacher?.teacher === true && submission.assignmentId?.createdBy.equals(user._id)) {
+        isAuthorized = true;
     }
 
-    // Delete file from S3
-    if (submission.key) {
-        await s3.send(new DeleteObjectCommand({
-            Bucket: submission.bucketName,
-            Key: submission.key,
-        }));
+    if (!isAuthorized) {
+        return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
     }
+    
+    // --- 4. Deletion Logic with Guaranteed Integrity (Using a Transaction) ---
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    // FIX 5 (CRITICAL): Remove the dangling reference from the student document.
-    await studentModel.findByIdAndUpdate(submission.studentId, {
-        $pull: { submittedassignments: submission._id }
-    });
+    try {
+        // First, delete the file from S3. If this fails, we don't touch the database.
+        if (submission.key) {
+            await s3.send(new DeleteObjectCommand({
+                Bucket: submission.bucketName,
+                Key: submission.key,
+            }));
+        }
 
-    // Delete the submission document
-    await SubassignmentModel.findByIdAndDelete(submissionId);
+        // DB Operation 1: Remove the reference from the student's document.
+        // This is the CRITICAL data integrity fix you requested.
+        const updateStudent = await studentModel.findByIdAndUpdate(
+            submission.studentId,
+            { $pull: { submittedassignments: submission._id } },
+            { new: true, session } // Pass the session to include this in the transaction
+        );
+        
+        if (!updateStudent) {
+            // This is an edge case where the student was deleted after submission.
+            // We should abort to prevent leaving an orphaned submission document.
+            throw new Error(`Student with ID ${submission.studentId} not found. Cannot remove submission reference.`);
+        }
 
-    res.status(200).json({ message: "Submission deleted successfully" });
+        // DB Operation 2: Delete the submission document itself.
+        await SubassignmentModel.findByIdAndDelete(submission._id, { session });
+
+        // If both database operations succeed, commit the transaction.
+        await session.commitTransaction();
+
+        res.status(200).json({ message: "Submission deleted successfully." });
+
+    } catch (error) {
+        // If any error occurs (S3 or DB), abort the entire transaction.
+        await session.abortTransaction();
+        console.error("Transaction aborted:", error);
+        // Pass the error to the global error handler.
+        return next(new Error("Failed to delete the submission due to a server error.", { cause: 500 }));
+    } finally {
+        // Always end the session to clean up resources.
+        session.endSession();
+    }
 });
