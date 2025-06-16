@@ -74,10 +74,14 @@ import studentModel from "../../../../DB/models/student.model.js";
     }
 
     // Now it's safe to compare
-    if (student.groupId.toString() !== assignment.groupId.toString()) {
-      return next(new Error("You are not authorized to download this assignment.", { cause: 403 }));
-    }
-  }
+    const studentGroupIdStr = groupId.toString();
+// Convert the array of ObjectId to an array of strings for comparison
+const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
+
+// FIX: Check if the student's group is in the assignment's list of allowed groups
+if (!isTeacher && !assignmentGroupIdsStr.includes(studentGroupIdStr)) {
+    return next(new Error("You’re not in the right group for this assignment", { cause: 403 }));
+}
 
 
   // 4. Proceed with S3 download
