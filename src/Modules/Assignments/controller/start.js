@@ -3,6 +3,7 @@ import { asyncHandler } from "../../../utils/erroHandling.js";
 import { assignmentModel } from "../../../../DB/models/assignment.model.js";
 import { s3, uploadFileToS3, deleteFileFromS3 } from "../../../utils/S3Client.js";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { uploadFileToS3, deleteFileFromS3 } from '../../../utils/S3Client.js';
 import {SubassignmentModel}from "../../../../DB/models/submitted_assignment.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
@@ -12,70 +13,82 @@ import { gradeModel } from "../../../../DB/models/grades.model.js";
 import mongoose from "mongoose";
 import path from 'path'; // To handle file extensions
 
-
-export const CreateAssignment  = asyncHandler(async (req, res, next) => {
+export const CreateAssignment = asyncHandler(async (req, res, next) => {
   const teacherId = req.user._id;
   const { name, startDate, endDate, gradeId } = req.body;
-  const slug = slugify(name, "-");
 
-  // ── 1) Normalize & validate groupIds input ────────────────────────────────
+  // ── 1) File must be present before any other operation ─────────────────────
+  if (!req.file) {
+    return next(new Error("Please upload the assignment file (PDF).", { cause: 400 }));
+  }
+
+  // ── 2) Normalize & validate groupIds input ────────────────────────────────
+  // This logic is kept similar but can be simplified on the frontend.
   let raw = req.body.groupIds ?? req.body["groupIds[]"];
   if (!raw) {
-    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
+    // Cleanup the uploaded file if input is invalid early
+    await fs.unlink(req.file.path);
+    return next(new Error("Group IDs are required.", { cause: 400 }));
   }
   if (typeof raw === "string" && raw.trim().startsWith("[")) {
-    try { raw = JSON.parse(raw); } catch {}
+    try { raw = JSON.parse(raw); } catch { /* ignore parse error, handle below */ }
   }
-  let groupIds = Array.isArray(raw) ? raw : [raw];
-  if (groupIds.length === 0) {
-    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
-  }
-  const invalid = groupIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
-  if (invalid.length) {
-    return next(new Error(`Invalid Group ID(s): ${invalid.join(", ")}`, { cause: 400 }));
+  const groupIds = Array.isArray(raw) ? raw : [raw];
+  if (groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
+    await fs.unlink(req.file.path);
+    return next(new Error("One or more Group IDs are invalid.", { cause: 400 }));
   }
   const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
 
-  // ── 2) Check duplicate assignment name in any of these groups ─────────────
+  // ── 3) Check for duplicate assignment name (efficiently) ──────────────────
   const duplicate = await assignmentModel.findOne({
     name,
     groupIds: { $in: validGroupIds }
   });
   if (duplicate) {
-    return next(new Error(
-      "An assignment with this name already exists for one of the selected groups",
-      { cause: 400 }
-    ));
+    await fs.unlink(req.file.path);
+    return next(new Error("An assignment with this name already exists in one of the selected groups.", { cause: 400 }));
   }
 
-  // ── 3) Validate gradeId exists ─────────────────────────────────────────────
-  const gradeDoc = await gradeModel.findById(gradeId);
-  if (!gradeDoc) {
-    return next(new Error("Wrong GradeId", { cause: 400 }));
+  // ── 4) EFFICIENTLY validate Grade and Group association in ONE query ───────
+  const groups = await groupModel.find({ _id: { $in: validGroupIds } }).select('gradeid');
+  
+  if (groups.length !== validGroupIds.length) {
+    await fs.unlink(req.file.path);
+    return next(new Error("One or more group IDs were not found.", { cause: 404 }));
+  }
+  
+  const allGroupsInGrade = groups.every(g => g.gradeid.toString() === gradeId);
+  if (!allGroupsInGrade) {
+    await fs.unlink(req.file.path);
+    return next(new Error("One or more groups do not belong to the specified grade.", { cause: 400 }));
   }
 
-  // ── 4) Ensure all groups belong to that grade ─────────────────────────────
-  const groupsInGrade = await groupModel.find({
-    _id: { $in: validGroupIds },
-    gradeid: gradeDoc._id
-  }).select("_id");
-  if (groupsInGrade.length !== validGroupIds.length) {
-    return next(new Error(
-      "One or more groups are not in the specified grade",
-      { cause: 400 }
-    ));
+  // ── 5) REVISED LOGIC: Create DB record FIRST ───────────────────────────────
+  const slug = slugify(name, { lower: true, strict: true });
+  const s3Key = `assignments/${slug}-${Date.now()}.pdf`;
+
+  const newAssignment = await assignmentModel.create({
+    name,
+    slug,
+    startDate,
+    endDate,
+    gradeId,
+    groupIds: validGroupIds,
+    bucketName: process.env.S3_BUCKET_NAME,
+    key: s3Key,
+    path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
+    createdBy: teacherId,
+  });
+
+  if (!newAssignment) {
+      await fs.unlink(req.file.path); // Cleanup local file
+      return next(new Error("Error while creating the assignment record in DB.", { cause: 500 }));
   }
 
-  // ── 5) File must be present ────────────────────────────────────────────────
-  if (!req.file) {
-    return next(new Error("Please upload a PDF file", { cause: 400 }));
-  }
-
-  // ── 6) Read & upload to S3 ────────────────────────────────────────────────
-  const fileContent = fs.readFileSync(req.file.path);
-  const fileName = `${slug}-${Date.now()}.pdf`;
-  const s3Key = `Assignments/${fileName}`;
+  // ── 6) Upload to S3 AFTER DB record is secure ──────────────────────────────
   try {
+    const fileContent = await fs.readFile(req.file.path); // Use async read
     await uploadFileToS3(
       process.env.S3_BUCKET_NAME,
       s3Key,
@@ -83,36 +96,22 @@ export const CreateAssignment  = asyncHandler(async (req, res, next) => {
       "application/pdf"
     );
 
-    // ── 7) Persist the assignment with validated groupIds ────────────────────
-    const newAssignment = await assignmentModel.create({
-      name,
-      slug,
-      startDate,
-      endDate,
-      gradeId,
-      groupIds: validGroupIds,
-      bucketName: process.env.S3_BUCKET_NAME,
-      key: s3Key,
-      path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-      createdBy: teacherId,
-    });
-
-    if (!newAssignment) {
-      await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key);
-      return next(new Error("Error while creating the assignment", { cause: 400 }));
-    }
-
     res.status(201).json({
       message: "Assignment created successfully",
-      newAssignment
+      assignment: newAssignment // Send the created object
     });
   } catch (err) {
-    console.error("Error uploading assignment to S3:", err);
-    return next(new Error("Error while uploading file to S3", { cause: 500 }));
+    console.error("S3 Upload Failed. Rolling back database entry.", err);
+    // CRITICAL: Rollback the database entry if S3 upload fails.
+    await assignmentModel.findByIdAndDelete(newAssignment._id);
+    return next(new Error("Failed to upload file. The operation has been rolled back.", { cause: 500 }));
   } finally {
-    fs.unlinkSync(req.file.path);
+    // ALWAYS cleanup the local temporary file.
+    await fs.unlink(req.file.path);
   }
 });
+
+
 
 export const submitAssignment = asyncHandler(async (req, res, next) => {
   const { assignmentId, notes } = req.body;
