@@ -6,7 +6,6 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import {SubassignmentModel}from "../../../../DB/models/submitted_assignment.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
-
 import mongoose from "mongoose";
 import path from 'path'; // To handle file extensions
 import { promises as fs } from 'fs';
@@ -21,7 +20,28 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
   const { name, startDate, endDate, gradeId } = req.body;
   const teacherId = req.user._id;
 
-  // ── 2) Normalize & validate groupIds input ────────────────────────────────
+  // ── 2) NEW: Validate the assignment timeline ──────────────────────────────
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const now = new Date();
+
+  // Check for valid date formats first
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    await fs.unlink(req.file.path);
+    return next(new Error("Invalid format for start or end date.", { cause: 400 }));
+  }
+  // Check that the assignment ends in the future
+  if (end < now) {
+    await fs.unlink(req.file.path);
+    return next(new Error("The assignment's end date cannot be in the past.", { cause: 400 }));
+  }
+  // Check that start comes before end
+  if (start >= end) {
+    await fs.unlink(req.file.path);
+    return next(new Error("The assignment's start date must be before its end date.", { cause: 400 }));
+  }
+
+  // ── 3) Normalize & validate groupIds input ────────────────────────────────
   let raw = req.body.groupIds ?? req.body["groupIds[]"];
   if (!raw) {
     await fs.unlink(req.file.path);
@@ -37,7 +57,7 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
   }
   const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
 
-  // ── 3) Perform all database validations before proceeding ───────────────────
+  // ── 4) Perform all database validations before proceeding ───────────────────
   const duplicate = await assignmentModel.findOne({ name, groupIds: { $in: validGroupIds } });
   if (duplicate) {
     await fs.unlink(req.file.path);
@@ -54,12 +74,13 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
     return next(new Error("One or more groups do not belong to the specified grade.", { cause: 400 }));
   }
 
-  // ── 4) Create DB record FIRST (for transactional safety) ─────────────────
+  // ── 5) Create DB record FIRST (for transactional safety) ─────────────────
   const slug = slugify(name, { lower: true, strict: true });
   const s3Key = `assignments/${slug}-${Date.now()}.pdf`;
 
   const newAssignment = await assignmentModel.create({
-    name, slug, startDate, endDate, gradeId,
+    name, slug, startDate: start, endDate: end, // Use the validated Date objects
+    gradeId,
     groupIds: validGroupIds,
     bucketName: process.env.S3_BUCKET_NAME,
     key: s3Key,
@@ -72,7 +93,7 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
     return next(new Error("Error while creating the assignment record in DB.", { cause: 500 }));
   }
 
-  // ── 5) Read file and upload to S3 AFTER DB record is secure ──────────────
+  // ── 6) Read file and upload to S3 AFTER DB record is secure ──────────────
   let fileContent;
   try {
     fileContent = await fs.readFile(req.file.path);
@@ -105,85 +126,76 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
   }
 });
 
-
 export const submitAssignment = asyncHandler(async (req, res, next) => {
   const { assignmentId, notes } = req.body;
   const file = req.file;
   const { _id: userId, userName } = req.user;
 
-  // FIX 1: A file must be attached. If not, we don't need to proceed.
+  // 1. Fail Fast: Validate all inputs before proceeding
   if (!file) {
-    return next(new Error("Please attach a file under the field name `file`", { cause: 400 }));
+    return next(new Error("A file must be attached for submission.", { cause: 400 }));
+  }
+  if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
+    await fs.unlink(file.path); // Cleanup file if input is bad
+    return next(new Error("A valid assignmentId is required.", { cause: 400 }));
   }
 
-  // FIX 2: Use a try...finally block to GUARANTEE temporary file cleanup, preventing resource leaks.
+  // 2. Use a Database Transaction for All-or-Nothing Integrity
+  const session = await mongoose.startSession();
   try {
-    // FIX 3: Explicitly check the user's role. Block non-students immediately.
-    // This is clearer and fails faster.
-    if (req.isteacher?.teacher === true) {
-        return next(new Error("Teachers are not permitted to submit assignments.", { cause: 403 }));
-    }
+    session.startTransaction();
 
-    // FIX 4: Validate required input from req.body.
-    if (!assignmentId) {
-        return next(new Error("Required field `assignmentId` is missing.", { cause: 400 }));
-    }
-    
-    // --- Database Queries and Validation ---
-    const [assignment, student] = await Promise.all([
-        assignmentModel.findById(assignmentId),
-        studentModel.findById(userId).select('groupId submittedassignments')
+    // 3. Perform all validation and business logic inside the transaction
+    const [assignment, student, existingSubmission] = await Promise.all([
+      assignmentModel.findById(assignmentId).session(session),
+      studentModel.findById(userId).select('groupId submittedassignments').session(session),
+      SubassignmentModel.findOne({ studentId: userId, assignmentId }).session(session)
     ]);
 
-    // FIX 5: Move all validation checks together for clarity.
-    if (!assignment) {
-      return next(new Error("Assignment not found", { cause: 404 }));
-    }
+    // Validation checks
     if (!student) {
-      // This case is unlikely if isAuth is correct, but it's good practice to keep it.
-      return next(new Error("Student not found", { cause: 404 }));
+      // This is our primary security check. If the user isn't a student, they can't proceed.
+      return next(new Error("Authenticated user is not a valid student.", { cause: 403 }));
+    }
+    if (!assignment) {
+      return next(new Error("Assignment not found.", { cause: 404 }));
+    }
+    if (existingSubmission) {
+      return next(new Error("You have already submitted this assignment.", { cause: 409 })); // 409 Conflict
     }
 
-    // --- Business Logic Checks ---
+    // Business logic checks
     if (assignment.rejectedStudents?.some(id => id.equals(userId))) {
-      return next(new Error("You are blocked from submitting this assignment", { cause: 403 }));
+      return next(new Error("You are blocked from submitting this assignment.", { cause: 403 }));
     }
-
-    const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
-    if (!assignmentGroupIdsStr.includes(student.groupId.toString())) {
-        return next(new Error("You are not in the right group for this assignment", { cause: 403 }));
+    if (!assignment.groupIds.some(gid => gid.equals(student.groupId))) {
+      return next(new Error("You are not in the correct group for this assignment.", { cause: 403 }));
     }
-    
     const now = new Date();
     if (now < assignment.startDate) {
-      return next(new Error("The submission window has not opened yet", { cause: 403 }));
+      return next(new Error("The submission window has not yet opened.", { cause: 403 }));
     }
     const isLate = now > assignment.endDate;
 
-    // --- File Upload Logic ---
-    // FIX 6: Dynamically get the file extension from the original uploaded file.
-    const fileExtension = path.extname(file.originalname); 
-    const timestamp = Date.now();
-    const fileName = `${assignment.name}_${userName}_${timestamp}${fileExtension}`;
+    // 4. S3 Upload (occurs only if all validations pass)
+    const fileExtension = path.extname(file.originalname);
+    const fileName = `${assignment.name}_${userName}_${Date.now()}${fileExtension}`;
     const key = `Submissions/${assignmentId}/${userId}/${fileName}`;
 
-    // Use a stream for efficient memory usage
-    const fileStream = fsSync.createReadStream(file.path);
+    // Read file content using the promise-based fs module provided in imports.
+    // This is memory-safe for typical document sizes and avoids import conflicts.
+    const fileContent = await fs.readFile(file.path);
 
     await s3.send(new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
       Key: key,
-      Body: fileStream,
-      // FIX 7: Use the MIME type detected by multer.
+      Body: fileContent,
       ContentType: file.mimetype,
-      // Note: ACL is deprecated. Prefer using Bucket Policies for access control.
     }));
 
-    // FIX 8: Do not shadow the global `Date` object.
+    // 5. Create and update database records *within the transaction*
     const submissionDate = new Date();
-
-    // --- Database Update Logic ---
-    const submission = await SubassignmentModel.create({
+    const [submission] = await SubassignmentModel.create([{
       studentId: userId,
       assignmentId,
       bucketName: process.env.S3_BUCKET_NAME,
@@ -192,26 +204,28 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
       SubmitDate: submissionDate,
       path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`,
       isLate,
-      notes: notes || (isLate 
-        ? `Late submission on ${submissionDate.toISOString()}` 
-        : `Submitted on time at ${submissionDate.toISOString()}`),
-    });
+      notes: notes || (isLate ? "Late submission" : "Submitted on time"),
+    }], { session });
 
-    student.submittedassignments.addToSet(assignmentId);
-    await student.save();
+    student.submittedassignments.addToSet(submission._id); // Use the new submission ID
+    await student.save({ session });
 
-    // --- Success Response ---
-    res.status(200).json({
+    // If all operations succeed, commit the transaction
+    await session.commitTransaction();
+
+    res.status(201).json({ // Use 201 Created for a new resource
       message: "Assignment submitted successfully",
       data: submission,
     });
 
   } catch (err) {
-    console.error("Error in submitAssignment:", err);
+    // If any error occurs (DB or S3), abort the transaction to roll back all DB changes
+    await session.abortTransaction();
+    console.error("Error in submitAssignment, transaction rolled back:", err);
     return next(new Error("Failed to submit the assignment due to a server error.", { cause: 500 }));
   } finally {
-    // This block will run whether the try block succeeded or failed.
-    // It ensures we always clean up the uploaded file from the server's temp directory.
-    await fs.unlink(file.path).catch(err => console.error(`Failed to delete temp file: ${file.path}`, err));
+    // This block ALWAYS runs, ensuring the temp file is deleted and the session ends
+    await session.endSession();
+    await fs.unlink(file.path).catch(unlinkErr => console.error(`Failed to delete temp file: ${file.path}`, unlinkErr));
   }
 });
