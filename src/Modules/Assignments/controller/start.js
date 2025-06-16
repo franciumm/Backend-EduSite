@@ -6,34 +6,27 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import {SubassignmentModel}from "../../../../DB/models/submitted_assignment.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
-
 import mongoose from "mongoose";
 import path from 'path'; // To handle file extensions
-import { promises as fs } from 'fs';
-
+import    fs  from 'fs';
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
-  console.log("--- [DEBUG] CreateAssignment request started ---");
-  console.log("[DEBUG 1] Initial request body:", req.body);
-  console.log("[DEBUG 2] Multer file object:", req.file); // VERY IMPORTANT LOG
-
   // ── 1) File must be present before any other operation ─────────────────────
   if (!req.file) {
-    console.error("[FATAL] Step 2 Failed: req.file is missing.");
     return next(new Error("Please upload the assignment file.", { cause: 400 }));
   }
 
-  const teacherId = req.user._id;
   const { name, startDate, endDate, gradeId } = req.body;
-  
-  // ... (groupId parsing logic remains the same)
+  const teacherId = req.user._id;
+
+  // ── 2) Normalize & validate groupIds input ────────────────────────────────
   let raw = req.body.groupIds ?? req.body["groupIds[]"];
   if (!raw) {
     await fs.unlink(req.file.path);
     return next(new Error("Group IDs are required.", { cause: 400 }));
   }
   if (typeof raw === "string" && raw.trim().startsWith("[")) {
-    try { raw = JSON.parse(raw); } catch {}
+    try { raw = JSON.parse(raw); } catch { /* ignore parse error */ }
   }
   const groupIds = Array.isArray(raw) ? raw : [raw];
   if (groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
@@ -41,22 +34,29 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
     return next(new Error("One or more Group IDs are invalid.", { cause: 400 }));
   }
   const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
-  console.log("[DEBUG 3] Validated Group IDs:", validGroupIds);
 
-
-  // ... (Database validation logic remains the same)
+  // ── 3) Check for duplicate assignment name ────────────────────────────────
   const duplicate = await assignmentModel.findOne({ name, groupIds: { $in: validGroupIds } });
-  if (duplicate) { /* ... error handling ... */ }
+  if (duplicate) {
+    await fs.unlink(req.file.path);
+    // MODIFIED: Changed the error message as requested.
+    return next(new Error("The Name already exists", { cause: 400 }));
+  }
+
+  // ── 4) Efficiently validate Grade and Group association in ONE query ─────
   const groups = await groupModel.find({ _id: { $in: validGroupIds } }).select('gradeid');
-  if (groups.length !== validGroupIds.length) { /* ... error handling ... */ }
-  const allGroupsInGrade = groups.every(g => g.gradeid.toString() === gradeId);
-  if (!allGroupsInGrade) { /* ... error handling ... */ }
+  if (groups.length !== validGroupIds.length) {
+    await fs.unlink(req.file.path);
+    return next(new Error("One or more group IDs were not found.", { cause: 404 }));
+  }
+  if (!groups.every(g => g.gradeid.toString() === gradeId)) {
+    await fs.unlink(req.file.path);
+    return next(new Error("One or more groups do not belong to the specified grade.", { cause: 400 }));
+  }
 
-
-  // ── 5) REVISED LOGIC: Create DB record FIRST ───────────────────────────────
+  // ── 5) Create DB record FIRST (for transactional safety) ─────────────────
   const slug = slugify(name, { lower: true, strict: true });
   const s3Key = `assignments/${slug}-${Date.now()}.pdf`;
-  console.log("[DEBUG 4] Generated S3 Key:", s3Key);
 
   const newAssignment = await assignmentModel.create({
     name, slug, startDate, endDate, gradeId,
@@ -68,60 +68,39 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
   });
 
   if (!newAssignment) {
-      await fs.unlink(req.file.path);
-      return next(new Error("Error while creating the assignment record in DB.", { cause: 500 }));
+    await fs.unlink(req.file.path);
+    return next(new Error("Error while creating the assignment record in DB.", { cause: 500 }));
   }
-  console.log("[DEBUG 5] Database record created successfully. ID:", newAssignment._id);
 
-  // ── 6) PREPARE FOR S3 UPLOAD - THE CRITICAL PART ───────────────────────────
+  // ── 6) Read file and upload to S3 AFTER DB record is secure ──────────────
   let fileContent;
   try {
-    console.log(`[DEBUG 6] Reading file from path: ${req.file.path}`);
     fileContent = await fs.readFile(req.file.path);
-    console.log(`[DEBUG 7] File read successfully. File size: ${fileContent.length} bytes.`);
-    
     if (fileContent.length === 0) {
-        console.error("[FATAL] Step 7 Failed: File is empty (0 bytes).");
-        // We must manually trigger the rollback
-        throw new Error("Cannot upload an empty file."); 
+      throw new Error("Cannot upload an empty file.");
     }
-
   } catch (readError) {
-    console.error("[FATAL] Step 6/7 Failed: Could not read the file from disk.", readError);
-    await assignmentModel.findByIdAndDelete(newAssignment._id);
+    await assignmentModel.findByIdAndDelete(newAssignment._id); // Rollback
     return next(new Error("Server failed to read the uploaded file.", { cause: 500 }));
   }
 
-  // ── 7) Upload to S3 AFTER DB record is secure ──────────────────────────────
   try {
-    console.log("--- [DEBUG] Calling uploadFileToS3 with these parameters: ---");
-    console.log("  > bucketName:", process.env.S3_BUCKET_NAME);
-    console.log("  > key:", s3Key);
-    console.log("  > body (type):", typeof fileContent);
-    console.log("  > contentType:", "application/pdf");
-    console.log("----------------------------------------------------------");
-    
-    // The actual call
     await uploadFileToS3(
       process.env.S3_BUCKET_NAME,
       s3Key,
-      fileContent, // The file buffer from fs.readFile
+      fileContent,
       "application/pdf"
     );
 
-    console.log("[SUCCESS] S3 upload completed.");
     res.status(201).json({
       message: "Assignment created successfully",
-      assignment: newAssignment
+      assignment: newAssignment,
     });
-
-  } catch (err) {
-    // This will now log the REAL error from AWS
-    console.error("[FATAL] S3 Upload Failed. Rolling back database entry.", err); 
-    await assignmentModel.findByIdAndDelete(newAssignment._id);
+  } catch (s3Error) {
+    console.error("S3 Upload Failed. Rolling back database entry.", s3Error);
+    await assignmentModel.findByIdAndDelete(newAssignment._id); // Rollback
     return next(new Error("Failed to upload file. The operation has been rolled back.", { cause: 500 }));
   } finally {
-    console.log(`[DEBUG] Cleaning up local file: ${req.file.path}`);
     await fs.unlink(req.file.path);
   }
 });
