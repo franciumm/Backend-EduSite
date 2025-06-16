@@ -6,9 +6,11 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import {SubassignmentModel}from "../../../../DB/models/submitted_assignment.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
+
 import mongoose from "mongoose";
 import path from 'path'; // To handle file extensions
-import    fs  from 'fs';
+import { promises as fs } from 'fs';
+
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
   // ── 1) File must be present before any other operation ─────────────────────
@@ -35,15 +37,13 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
   }
   const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
 
-  // ── 3) Check for duplicate assignment name ────────────────────────────────
+  // ── 3) Perform all database validations before proceeding ───────────────────
   const duplicate = await assignmentModel.findOne({ name, groupIds: { $in: validGroupIds } });
   if (duplicate) {
     await fs.unlink(req.file.path);
-    // MODIFIED: Changed the error message as requested.
     return next(new Error("The Name already exists", { cause: 400 }));
   }
 
-  // ── 4) Efficiently validate Grade and Group association in ONE query ─────
   const groups = await groupModel.find({ _id: { $in: validGroupIds } }).select('gradeid');
   if (groups.length !== validGroupIds.length) {
     await fs.unlink(req.file.path);
@@ -54,7 +54,7 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
     return next(new Error("One or more groups do not belong to the specified grade.", { cause: 400 }));
   }
 
-  // ── 5) Create DB record FIRST (for transactional safety) ─────────────────
+  // ── 4) Create DB record FIRST (for transactional safety) ─────────────────
   const slug = slugify(name, { lower: true, strict: true });
   const s3Key = `assignments/${slug}-${Date.now()}.pdf`;
 
@@ -72,7 +72,7 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
     return next(new Error("Error while creating the assignment record in DB.", { cause: 500 }));
   }
 
-  // ── 6) Read file and upload to S3 AFTER DB record is secure ──────────────
+  // ── 5) Read file and upload to S3 AFTER DB record is secure ──────────────
   let fileContent;
   try {
     fileContent = await fs.readFile(req.file.path);
@@ -101,9 +101,10 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
     await assignmentModel.findByIdAndDelete(newAssignment._id); // Rollback
     return next(new Error("Failed to upload file. The operation has been rolled back.", { cause: 500 }));
   } finally {
-    await fs.unlink(req.file.path);
+    await fs.unlink(req.file.path); // Always cleanup the local temporary file
   }
 });
+
 
 export const submitAssignment = asyncHandler(async (req, res, next) => {
   const { assignmentId, notes } = req.body;
