@@ -97,7 +97,7 @@ if (!isTeacher && !assignmentGroupIdsStr.includes(studentGroupIdStr)) {
     console.error("Error downloading file from S3:", error);
     next(new Error("Error downloading file from S3", { cause: 500 }));
   }
-});
+}});
 
 export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) => {
   const { submissionId } = req.query;
