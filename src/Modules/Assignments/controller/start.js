@@ -151,9 +151,14 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     return next(new Error("Submission window hasn’t opened yet", { cause: 403 }));
   }
   const isLate = !isTeacher && now > assignment.endDate;
-  if (!isTeacher && assignment.groupId.toString() !== groupId.toString()) {
+  const studentGroupIdStr = groupId.toString();
+// Convert the array of ObjectId to an array of strings for comparison
+const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
+
+// FIX: Check if the student's group is in the assignment's list of allowed groups
+if (!isTeacher && !assignmentGroupIdsStr.includes(studentGroupIdStr)) {
     return next(new Error("You’re not in the right group for this assignment", { cause: 403 }));
-  }
+}
 
   // 5) Stream upload to S3
   const timestamp = Date.now();
