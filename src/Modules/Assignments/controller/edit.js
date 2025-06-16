@@ -74,7 +74,7 @@ import studentModel from "../../../../DB/models/student.model.js";
     }
 
     // Now it's safe to compare
-    const studentGroupIdStr = groupId.toString();
+    const studentGroupIdStr = student.groupId.toString();
 // Convert the array of ObjectId to an array of strings for comparison
 const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
 
