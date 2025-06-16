@@ -84,7 +84,7 @@ const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
 if (!isTeacher && !assignmentGroupIdsStr.includes(studentGroupIdStr)) {
     return next(new Error("You’re not in the right group for this assignment", { cause: 403 }));
 }
-
+  }
 
   // 4. Proceed with S3 download
   const { bucketName, key } = assignment;
@@ -99,7 +99,10 @@ if (!isTeacher && !assignmentGroupIdsStr.includes(studentGroupIdStr)) {
     console.error("Error downloading file from S3:", error);
     next(new Error("Error downloading file from S3", { cause: 500 }));
   }
-}});
+}
+
+
+);
 
 export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) => {
   const { submissionId } = req.query;
