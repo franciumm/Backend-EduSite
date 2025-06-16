@@ -10,6 +10,7 @@ import fs from "fs";
 import { promises as fsPromises } from 'fs';
 import { gradeModel } from "../../../../DB/models/grades.model.js";
 import mongoose from "mongoose";
+import path from 'path'; // To handle file extensions
 
 
 export const CreateAssignment  = asyncHandler(async (req, res, next) => {
@@ -113,99 +114,112 @@ export const CreateAssignment  = asyncHandler(async (req, res, next) => {
   }
 });
 
-
 export const submitAssignment = asyncHandler(async (req, res, next) => {
   const { assignmentId, notes } = req.body;
   const file = req.file;
-  const userId = req.user._id;
-  const isTeacher = req.isteacher?.teacher === true;
+  const { _id: userId, userName } = req.user;
 
-  // 1) File must be there
+  // FIX 1: A file must be attached. If not, we don't need to proceed.
   if (!file) {
-    return next(new Error("Please attach a PDF file under field name `file`", { cause: 400 }));
+    return next(new Error("Please attach a file under the field name `file`", { cause: 400 }));
   }
 
-  // 2) Fetch assignment
-  const assignment = await assignmentModel.findById(assignmentId);
-  if (!assignment) {
-    return next(new Error("Assignment not found", { cause: 404 }));
-  }
-
-  // 3) Fetch student + group
-  const student = await studentModel.findById(userId);
-  if (!student) {
-    return next(new Error("Student not found", { cause: 404 }));
-  }
-  const groupId = student.groupId;
-  const group = await groupModel.findById(groupId);
-  if (!group) {
-    return next(new Error("Group not found", { cause: 404 }));
-  }
-
-  // 4) Rejection + timeline checks
-  if (assignment.rejectedStudents?.includes(userId)) {
-    return next(new Error("You’re blocked from submitting this assignment", { cause: 403 }));
-  }
-  const now = new Date();
-  if (!isTeacher && now < assignment.startDate) {
-    return next(new Error("Submission window hasn’t opened yet", { cause: 403 }));
-  }
-  const isLate = !isTeacher && now > assignment.endDate;
-  const studentGroupIdStr = groupId.toString();
-// Convert the array of ObjectId to an array of strings for comparison
-const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
-
-// FIX: Check if the student's group is in the assignment's list of allowed groups
-if (!isTeacher && !assignmentGroupIdsStr.includes(studentGroupIdStr)) {
-    return next(new Error("You’re not in the right group for this assignment", { cause: 403 }));
-}
-
-  // 5) Stream upload to S3
-  const timestamp = Date.now();
-  const fileName = `${assignment.name}_${req.user.userName}_${timestamp}.pdf`;
-  const key = `Submissions/${assignmentId}/${userId}/${fileName}`;
-  const fileStream = fs.createReadStream(file.path);
-
+  // FIX 2: Use a try...finally block to GUARANTEE temporary file cleanup, preventing resource leaks.
   try {
+    // FIX 3: Explicitly check the user's role. Block non-students immediately.
+    // This is clearer and fails faster.
+    if (req.isteacher?.teacher === true) {
+        return next(new Error("Teachers are not permitted to submit assignments.", { cause: 403 }));
+    }
+
+    // FIX 4: Validate required input from req.body.
+    if (!assignmentId) {
+        return next(new Error("Required field `assignmentId` is missing.", { cause: 400 }));
+    }
+    
+    // --- Database Queries and Validation ---
+    const [assignment, student] = await Promise.all([
+        assignmentModel.findById(assignmentId),
+        studentModel.findById(userId).select('groupId submittedassignments')
+    ]);
+
+    // FIX 5: Move all validation checks together for clarity.
+    if (!assignment) {
+      return next(new Error("Assignment not found", { cause: 404 }));
+    }
+    if (!student) {
+      // This case is unlikely if isAuth is correct, but it's good practice to keep it.
+      return next(new Error("Student not found", { cause: 404 }));
+    }
+
+    // --- Business Logic Checks ---
+    if (assignment.rejectedStudents?.some(id => id.equals(userId))) {
+      return next(new Error("You are blocked from submitting this assignment", { cause: 403 }));
+    }
+
+    const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
+    if (!assignmentGroupIdsStr.includes(student.groupId.toString())) {
+        return next(new Error("You are not in the right group for this assignment", { cause: 403 }));
+    }
+    
+    const now = new Date();
+    if (now < assignment.startDate) {
+      return next(new Error("The submission window has not opened yet", { cause: 403 }));
+    }
+    const isLate = now > assignment.endDate;
+
+    // --- File Upload Logic ---
+    // FIX 6: Dynamically get the file extension from the original uploaded file.
+    const fileExtension = path.extname(file.originalname); 
+    const timestamp = Date.now();
+    const fileName = `${assignment.name}_${userName}_${timestamp}${fileExtension}`;
+    const key = `Submissions/${assignmentId}/${userId}/${fileName}`;
+
+    // Use a stream for efficient memory usage
+    const fileStream = fsSync.createReadStream(file.path);
+
     await s3.send(new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
       Key: key,
       Body: fileStream,
-      ContentType: "application/pdf",
-      ACL: "private",
+      // FIX 7: Use the MIME type detected by multer.
+      ContentType: file.mimetype,
+      // Note: ACL is deprecated. Prefer using Bucket Policies for access control.
     }));
-    const Date = new Date();
-    // 6) Save record
+
+    // FIX 8: Do not shadow the global `Date` object.
+    const submissionDate = new Date();
+
+    // --- Database Update Logic ---
     const submission = await SubassignmentModel.create({
       studentId: userId,
       assignmentId,
       bucketName: process.env.S3_BUCKET_NAME,
-      groupId,
+      groupId: student.groupId,
       key,
-      SubmitDate:Date,
+      SubmitDate: submissionDate,
       path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`,
       isLate,
       notes: notes || (isLate 
-        ? `Late submission on ${now.toISOString()}` 
-        : `Submitted on time at ${now.toISOString()}`),
+        ? `Late submission on ${submissionDate.toISOString()}` 
+        : `Submitted on time at ${submissionDate.toISOString()}`),
     });
 
-    // 7) Track on student
-    await studentModel.findByIdAndUpdate(userId, {
-      $addToSet: { submittedassignments: assignmentId },
-    });
+    student.submittedassignments.addToSet(assignmentId);
+    await student.save();
 
-    // 8) Cleanup + respond
-    await fsPromises.unlink(file.path);
+    // --- Success Response ---
     res.status(200).json({
       message: "Assignment submitted successfully",
       data: submission,
     });
 
   } catch (err) {
-    // always cleanup
-    await fsPromises.unlink(file.path);
-    console.error("Upload/DB error:", err);
-    return next(new Error("Failed to submit the assignment", { cause: 500 }));
+    console.error("Error in submitAssignment:", err);
+    return next(new Error("Failed to submit the assignment due to a server error.", { cause: 500 }));
+  } finally {
+    // This block will run whether the try block succeeded or failed.
+    // It ensures we always clean up the uploaded file from the server's temp directory.
+    await fs.unlink(file.path).catch(err => console.error(`Failed to delete temp file: ${file.path}`, err));
   }
 });
