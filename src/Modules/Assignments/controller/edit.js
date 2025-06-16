@@ -215,107 +215,98 @@ export const markAssignment = asyncHandler(async (req, res, next) => {
 });
 
 export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, next) => {
-  const { assignmentId } = req.body;
+    const { assignmentId } = req.body;
+    if (!assignmentId) {
+        return next(new Error("Assignment ID is required", { cause: 400 }));
+    }
 
-  // Ensure assignmentId is provided
-  if (!assignmentId) {
-    return next(new Error("Assignment ID is required", { cause: 400 }));
-  }
-
-  try {
-    // Fetch the assignment to validate its existence
     const assignment = await assignmentModel.findById(assignmentId);
     if (!assignment) {
-      return next(new Error("Assignment not found", { cause: 404 }));
+        return next(new Error("Assignment not found", { cause: 404 }));
     }
 
-    // Get all related submissions for the assignment
-    const submissions = await SubassignmentModel.find({ assignmentId });
+    const submissions = await SubassignmentModel.find({ assignmentId }).select('key studentId');
 
-    // Delete all related submissions
-    for (const submission of submissions) {
-      try {
-        // Delete the submission's file from S3
-        if (submission.bucketName && submission.key) {
-          await s3.send(
-            new DeleteObjectCommand({
-              Bucket: submission.bucketName,
-              Key: submission.key,
-            })
-          );
+    // --- S3 Cleanup ---
+    const objectsToDelete = [];
+    // Add the main assignment file to the list
+    if (assignment.key) {
+        objectsToDelete.push({ Key: assignment.key });
+    }
+    // Add all submission files to the list
+    submissions.forEach(sub => {
+        if (sub.key) {
+            objectsToDelete.push({ Key: sub.key });
         }
+    });
 
-        // Delete the submission from the database
-        await SubassignmentModel.findByIdAndDelete(submission._id);
-      } catch (error) {
-        console.error(`Failed to delete submission with ID ${submission._id}:`, error);
-      }
+    // FIX 1: Batch delete S3 objects for efficiency and atomicity.
+    if (objectsToDelete.length > 0) {
+        await s3.send(new DeleteObjectsCommand({
+            Bucket: process.env.S3_BUCKET_NAME, // Assuming one bucket for all
+            Delete: { Objects: objectsToDelete },
+        }));
     }
 
-    // Delete the assignment's file from S3
-    try {
-      if (assignment.bucketName && assignment.key) {
-        await s3.send(
-          new DeleteObjectCommand({
-            Bucket: assignment.bucketName,
-            Key: assignment.key,
-          })
+    // --- Database Cleanup ---
+    // FIX 2: Use bulk operations for efficiency.
+    // Delete all submission documents for this assignment
+    await SubassignmentModel.deleteMany({ assignmentId });
+
+    // FIX 3 (CRITICAL): Remove dangling references from all affected students.
+    // This maintains data integrity.
+    const submissionIds = submissions.map(s => s._id);
+    if (submissionIds.length > 0) {
+        await studentModel.updateMany(
+            { submittedassignments: { $in: submissionIds } },
+            { $pull: { submittedassignments: { $in: submissionIds } } }
         );
-      }
-    } catch (error) {
-      console.error(`Failed to delete assignment file from S3:`, error);
     }
-
-    // Delete the assignment from the database
+    
+    // Finally, delete the assignment itself
     await assignmentModel.findByIdAndDelete(assignmentId);
 
-    // Return success response
     res.status(200).json({
-      message: "Assignment and all related submissions deleted successfully.",
+        message: "Assignment and all related submissions deleted successfully.",
     });
-  } catch (error) {
-    console.error("Error deleting assignment and submissions:", error);
-    return next(new Error("Failed to delete assignment and submissions", { cause: 500 }));
-  }
 });
 
 
+// --- Fully Refactored User/Teacher Delete Function ---
 export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => {
-  const { submissionId } = req.body;
+    const { submissionId } = req.body;
+    if (!submissionId) {
+        return next(new Error("Submission ID is required", { cause: 400 }));
+    }
 
-  if (!submissionId) {
-    return next(new Error("Submission ID is required", { cause: 400 }));
-  }
+    const submission = await SubassignmentModel.findById(submissionId).populate('assignmentId', 'createdBy');
+    if (!submission) {
+        return next(new Error("Submission not found", { cause: 404 }));
+    }
 
-  // Fetch the submission
-  const submission = await SubassignmentModel.findById(submissionId);
-  if (!submission) {
-    return next(new Error("Submission not found", { cause: 404 }));
-  }
+    // FIX 4 (CRITICAL): Fixed authorization logic.
+    const isStudentOwner = req.user._id.equals(submission.studentId);
+    const isTeacherOwner = req.isteacher?.teacher === true && req.user._id.equals(submission.assignmentId?.createdBy);
 
-  // Authorization: Allow only the teacher or the student who submitted it to delete
-  if (
-    req.isteacher.teacher === false &&
-    submission.studentId.toString() !== req.user._id.toString()
-  ) {
-    return next(new Error("You are not authorized to delete this submission", { cause: 403 }));
-  }
+    if (!isStudentOwner && !isTeacherOwner) {
+        return next(new Error("You are not authorized to delete this submission", { cause: 403 }));
+    }
 
-  try {
     // Delete file from S3
-    await s3.send(
-      new DeleteObjectCommand({
-        Bucket: submission.bucketName,
-        Key: submission.key,
-      })
-    );
+    if (submission.key) {
+        await s3.send(new DeleteObjectCommand({
+            Bucket: submission.bucketName,
+            Key: submission.key,
+        }));
+    }
 
-    // Delete submission from the database
+    // FIX 5 (CRITICAL): Remove the dangling reference from the student document.
+    await studentModel.findByIdAndUpdate(submission.studentId, {
+        $pull: { submittedassignments: submission._id }
+    });
+
+    // Delete the submission document
     await SubassignmentModel.findByIdAndDelete(submissionId);
 
     res.status(200).json({ message: "Submission deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting submission:", error);
-    next(new Error("Failed to delete the submission", { cause: 500 }));
-  }
 });
