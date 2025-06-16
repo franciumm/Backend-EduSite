@@ -3,7 +3,6 @@ import { asyncHandler } from "../../../utils/erroHandling.js";
 import { assignmentModel } from "../../../../DB/models/assignment.model.js";
 import { s3, uploadFileToS3, deleteFileFromS3 } from "../../../utils/S3Client.js";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { uploadFileToS3, deleteFileFromS3 } from '../../../utils/S3Client.js';
 import {SubassignmentModel}from "../../../../DB/models/submitted_assignment.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
