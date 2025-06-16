@@ -60,14 +60,16 @@ import studentModel from "../../../../DB/models/student.model.js";
   }
 
   // 2. Fetch student and get their group
-  const student = await studentModel.findById(req.user._id);
+  
+  // 3. Check authorization
+  const isTeacher = req.isteacher.teacher === true;
+  if (!isTeacher) {
+    var student = await studentModel.findById(req.user._id);
+  
   if (!student) {
     return next(new Error("Student record not found", { cause: 404 }));
   }
 
-  // 3. Check authorization
-  const isTeacher = req.isteacher.teacher === true;
-  if (!isTeacher) {
     // FIX: Check if the student is assigned to a group BEFORE comparing IDs
     if (!student.groupId) {
       return next(new Error("You are not assigned to any group.", { cause: 403 }));
