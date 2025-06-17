@@ -2,6 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import bootstrape from "../src/index.router.js"; // Import the setup function
+import DBConnect from "../DB/DB.Connect.js";
 
 dotenv.config();
 
@@ -12,10 +13,7 @@ const startServer = async () => {
     console.log("Connecting to database...");
     
     // 1. Connect to the database directly.
-    await mongoose.connect(process.env.MONGOCONNECT, {
-      serverSelectionTimeoutMS: 30000, 
-    });
-
+    await DBConnect;
     console.log("DB Connected successfully.");
 
     // 2. Now that the connection is live, set up the Express app.
