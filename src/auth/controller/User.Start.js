@@ -15,10 +15,15 @@ import { SubexamModel } from "../../../DB/models/submitted_exams.model.js";
 export const Signup = asyncHandler(async(req,res,next)=>{
     const {email,parentemail,userName,firstName,lastName,password,grade ,  parentphone ,phone,cPassword}= req.body ;
     
-    if(await UserModel.findOne({$or:[{email},{userName},{phone}]})){
-        return next( Error( 'User Email or Username or phone Exists', {cause:409}));
-    } 
-    const  gradeOBJ = await gradeModel.findOne({grade});
+    if (password !== cPassword) {
+        return next(new Error("Passwords do not match.", { cause: 400 }));
+    }
+
+     const userExists = await studentModel.findOne({ $or: [{ email }, { userName }, { phone }] });
+    if (userExists) {
+        return next(new Error('User with this email, username, or phone already exists.', { cause: 409 }));
+    }
+    const  gradeOBJ =  await gradeModel.findOne({ grade }).lean();
     if(!(gradeOBJ)){
         return next( Error('Invalid Grade Id ', {cause:409}));
     }
@@ -26,9 +31,9 @@ export const Signup = asyncHandler(async(req,res,next)=>{
         return next( Error('Password Doesn`t match'), {cause:403});
     }
     
-  
+    const newUser ={firstName,lastName,email,parentemail,gradeId: gradeOBJ._id, userName,password ,parentPhone: parentphone , phone ,confirmEmail:true };
     
-    const token = jwt.sign({  email, user:{firstName,lastName,email,parentemail,gradeId: gradeOBJ._id, userName,password ,parentPhone: parentphone , phone ,confirmEmail:true } }, process.env.EMAIL_SIG, { expiresIn: 60 * 120 });
+    const token = jwt.sign({  email, user:newUser }, process.env.EMAIL_SIG, { expiresIn: 60 * 120 });
     
    
     const newConfirmEmailToken = jwt.sign({  email }, process.env.EMAIL_SIG);
