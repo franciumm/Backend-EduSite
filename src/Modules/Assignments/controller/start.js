@@ -19,11 +19,7 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
 
   const { name, startDate, endDate, gradeId } = req.body;
   const teacherId = req.user._id;
-const duplicate = await assignmentModel.findOne({ name, groupIds: { $in: validGroupIds } });
-  if (duplicate) {
-    await fs.unlink(req.file.path);
-    return next(new Error("The Name already exists", { cause: 400 }));
-  }
+
   // ── 2) NEW: Validate the assignment timeline ──────────────────────────────
   const start = new Date(startDate);
   const end = new Date(endDate);
@@ -44,7 +40,6 @@ const duplicate = await assignmentModel.findOne({ name, groupIds: { $in: validGr
     await fs.unlink(req.file.path);
     return next(new Error("The assignment's start date must be before its end date.", { cause: 400 }));
   }
-  
 
   // ── 3) Normalize & validate groupIds input ────────────────────────────────
   let raw = req.body.groupIds ?? req.body["groupIds[]"];
@@ -63,7 +58,11 @@ const duplicate = await assignmentModel.findOne({ name, groupIds: { $in: validGr
   const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
 
   // ── 4) Perform all database validations before proceeding ───────────────────
-  
+  const duplicate = await assignmentModel.findOne({ name, groupIds: { $in: validGroupIds } });
+  if (duplicate) {
+    await fs.unlink(req.file.path);
+    return next(new Error("The Name already exists", { cause: 400 }));
+  }
 
   const groups = await groupModel.find({ _id: { $in: validGroupIds } }).select('gradeid');
   if (groups.length !== validGroupIds.length) {
