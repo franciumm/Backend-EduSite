@@ -133,6 +133,123 @@ export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
         data: submissions
     });
 });
+export const findSubmissions = asyncHandler(async (req, res, next) => {
+    const { groupId, assignmentId, studentId, status, page = 1, size = 10 } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10));
+    const limit = Math.max(1, parseInt(size, 10));
+    const skip = (pageNum - 1) * limit;
+
+    const filter = {};
+    // ... (The dynamic filter construction from the previous answer remains the same) ...
+    if (groupId) {
+        if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("Invalid Group ID format.", { cause: 400 }));
+        filter.groupId = new mongoose.Types.ObjectId(groupId);
+    }
+    if (assignmentId) {
+        if (!mongoose.Types.ObjectId.isValid(assignmentId)) return next(new Error("Invalid Assignment ID format.", { cause: 400 }));
+        filter.assignmentId = new mongoose.Types.ObjectId(assignmentId);
+    }
+    if (studentId) {
+        if (!mongoose.Types.ObjectId.isValid(studentId)) return next(new Error("Invalid Student ID format.", { cause: 400 }));
+        filter.studentId = new mongoose.Types.ObjectId(studentId);
+    }
+    if (status && ['marked', 'unmarked'].includes(status)) {
+        filter.isMarked = (status === 'marked');
+    }
+
+    // --- Special Case: "Group Status View" requires rich hydration ---
+    if (groupId && assignmentId && !studentId) {
+        const [assignment, group] = await Promise.all([
+            assignmentModel.findById(filter.assignmentId).lean(),
+            groupModel.findById(filter.groupId).lean()
+        ]);
+        if (!assignment) return next(new Error("Assignment not found.", { cause: 404 }));
+        if (!group) return next(new Error("Group not found.", { cause: 404 }));
+
+        const [students, total] = await Promise.all([
+            studentModel.find({ groupId: filter.groupId }).select('_id userName firstName lastName').sort({ firstName: 1 }).skip(skip).limit(limit).lean(),
+            studentModel.countDocuments({ groupId: filter.groupId })
+        ]);
+        
+        let hydratedData = [];
+        if (students.length > 0) {
+            const studentIdsOnPage = students.map(s => s._id);
+
+            // --- THE FIX IS HERE ---
+            // Fetch the FULL submission documents and populate them.
+            const submissions = await SubassignmentModel.find({
+                assignmentId: filter.assignmentId,
+                studentId: { $in: studentIdsOnPage }
+            })
+            .populate('studentId', 'userName firstName lastName') // Although we already have this, it can be useful
+            .populate('assignmentId', 'name')
+            .lean();
+
+            const submissionMap = new Map(submissions.map(sub => [sub.studentId._id.toString(), sub]));
+
+            hydratedData = students.map(student => {
+                const submission = submissionMap.get(student._id.toString());
+                if (submission) {
+                    // If they submitted, return the full, rich submission object.
+                    return {
+                        _id: student._id,
+                        userName: student.userName,
+                        firstName: student.firstName,
+                        lastName: student.lastName,
+                        status: 'submitted',
+                        submissionDetails: submission // Embed the entire submission object
+                    };
+                } else {
+                    // If they haven't submitted, return the lean status object.
+                    return {
+                        _id: student._id,
+                        userName: student.userName,
+                        firstName: student.firstName,
+                        lastName: student.lastName,
+                        status: 'not submitted',
+                        submissionDetails: null
+                    };
+                }
+            });
+        }
+        
+        if (status && ['submitted', 'not submitted'].includes(status)) {
+            hydratedData = hydratedData.filter(s => s.status === status);
+        }
+
+        return res.status(200).json({
+            message: "Submission status for group fetched successfully.",
+            assignmentName: assignment.name,
+            total,
+            totalPages: Math.ceil(total / limit),
+            currentPage: pageNum,
+            data: hydratedData
+        });
+    }
+
+    // --- Path B: All Other Queries (Direct Find on Submissions) ---
+    if (Object.keys(filter).length === 0) {
+        return next(new Error("At least one query parameter (groupId, assignmentId, or studentId) is required.", { cause: 400 }));
+    }
+
+    const [submissions, total] = await Promise.all([
+        SubassignmentModel.find(filter)
+            .sort({ createdAt: -1 }).skip(skip).limit(limit)
+            .populate('studentId', 'userName firstName lastName')
+            .populate('assignmentId', 'name')
+            .populate('groupId', 'groupname')
+            .lean(),
+        SubassignmentModel.countDocuments(filter)
+    ]);
+    
+    res.status(200).json({
+        message: "Submissions fetched successfully.",
+        total,
+        totalPages: Math.ceil(total / limit),
+        currentPage: pageNum,
+        data: submissions
+    });
+});
 export const getSubmissions = asyncHandler(async (req, res, next) => {
   const { assignmentId, submissionId } = req.query;
   const userId = req.user._id;
