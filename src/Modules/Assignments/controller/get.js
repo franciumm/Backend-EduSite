@@ -42,111 +42,104 @@ export const GetAllByGroup = asyncHandler(async (req, res, next) => {
 
 
 export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
-    const { groupId, assignmentId, studentId, status, page = 1, size = 10 } = req.query;
+    const { groupId, assignmentId, studentId, status } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const size = Math.max(1, parseInt(req.query.limit, 10) || 10);
+    const limit = size;
+    const skip = (page - 1) * limit;
 
-    // --- Phase 1: Fail Fast - Pre-flight Validation ---
+    // --- Phase 1: Fail Fast & Pre-flight Validation ---
     if (!groupId || !mongoose.Types.ObjectId.isValid(groupId)) {
         return next(new Error("A valid Group ID is required.", { cause: 400 }));
     }
     const gId = new mongoose.Types.ObjectId(groupId);
 
-    // This is the "all submissions" case, which is fundamentally different. Handle it separately.
+    const validationPromises = [groupModel.findById(gId).select('_id').lean()];
+    if (assignmentId) {
+        if (!mongoose.Types.ObjectId.isValid(assignmentId)) return next(new Error("Invalid Assignment ID format.", { cause: 400 }));
+        validationPromises.push(assignmentModel.findById(assignmentId).select('name').lean());
+    }
+    const [group, assignment] = await Promise.all(validationPromises);
+
+    if (!group) return next(new Error("Group not found.", { cause: 404 }));
+    if (assignmentId && !assignment) return next(new Error("Assignment not found.", { cause: 404 }));
+
+    // --- Phase 2: Build the Base Query and Handle Different Logic Paths ---
+    let response;
+
     if (!assignmentId) {
-        // ... (This logic block from before is correct and remains)
-        const query = { groupId: gId };
-        // ... (rest of the logic for this specific case)
-        return; 
-    }
-    
-    // For all other cases, we need an assignmentId.
-    if (!mongoose.Types.ObjectId.isValid(assignmentId)) {
-        return next(new Error("A valid Assignment ID is required for this query.", { cause: 400 }));
-    }
-    const aId = new mongoose.Types.ObjectId(assignmentId);
+        // --- Path A: All Submissions in a Group (No Assignment Context) ---
+        const filter = { groupId: gId };
+        if (status) filter.isMarked = (status === 'marked');
+        
+        const [submissions, total] = await Promise.all([
+            SubassignmentModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit)
+                .populate('studentId', 'userName firstName lastName')
+                .populate('assignmentId', 'name')
+                .lean(),
+            SubassignmentModel.countDocuments(filter)
+        ]);
+        response = { total, data: submissions };
 
-    // Perform all necessary validation checks in parallel for maximum speed.
-    const validationPromises = [
-        groupModel.findById(gId).lean(),
-        assignmentModel.findOne({ _id: aId, groupIds: gId }).lean()
-    ];
-    if (studentId) {
-        if (!mongoose.Types.ObjectId.isValid(studentId)) {
-            return next(new Error("Invalid Student ID format.", { cause: 400 }));
+    } else {
+        // --- Path B, C, D: Assignment Context (Group, Student, or Both) ---
+        // This is the core of the "Hydration" pattern to prevent timeouts.
+        const studentFilter = { groupId: gId };
+        if (studentId) {
+            if (!mongoose.Types.ObjectId.isValid(studentId)) return next(new Error("Invalid Student ID format.", { cause: 400 }));
+            studentFilter._id = new mongoose.Types.ObjectId(studentId);
         }
-        // Validate that the student is actually in the group. This is our authorization check.
-        validationPromises.push(studentModel.findOne({ _id: studentId, groupId: gId }).lean());
-    }
-    
-    const [group, assignment, student] = await Promise.all(validationPromises);
 
-    if (!group) { return next(new Error("Group not found.", { cause: 404 })); }
-    if (!assignment) { return next(new Error("Assignment not found or not assigned to this group.", { cause: 404 })); }
-    if (studentId && !student) { return next(new Error("The specified student was not found within this group.", { cause: 404 })); }
+        const [students, total] = await Promise.all([
+            studentModel.find(studentFilter)
+                .select('_id userName firstName lastName')
+                .sort({ firstName: 1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            studentModel.countDocuments(studentFilter)
+        ]);
 
-    // --- Phase 2: Build The Dynamic Aggregation Pipeline ---
-    const studentMatchStage = { groupId: gId };
-    if (studentId) {
-        studentMatchStage._id = new mongoose.Types.ObjectId(studentId);
-    }
-    
-    const aggregationPipeline = [
-        // 1. Start with a precise set of students.
-        { $match: studentMatchStage },
-        // 2. Perform an efficient "left join" to find their submission for THIS assignment.
-        {
-            $lookup: {
-                from: "subassignments", // The collection name in MongoDB
-                let: { student_id: "$_id" },
-                pipeline: [
-                    { $match: { $expr: { $and: [ { $eq: ["$studentId", "$$student_id"] }, { $eq: ["$assignmentId", aId] } ] } } },
-                    { $project: { _id: 1, SubmitDate: 1, isLate: 1 } } // Only bring back needed data
-                ],
-                as: "submissionDetails"
-            }
-        },
-        // 3. Reshape the data for a clean output.
-        { $addFields: { submission: { $first: "$submissionDetails" } } },
-        { $addFields: { status: { $cond: { if: "$submission", then: "submitted", else: "not submitted" } } } },
-        // 4. Conditionally add a stage to filter by submission status.
-        ...(status && ["submitted", "not submitted"].includes(status) ? [{ $match: { status } }] : []),
-        // 5. Project the final fields.
-        {
-            $project: {
-                _id: 1,
-                userName: 1,
-                firstName: 1,
-                lastName: 1,
-                status: 1,
-                submittedAt: "$submission.SubmitDate",
-                isLate: "$submission.isLate",
-                submissionId: "$submission._id"
-            }
+        let hydratedData = [];
+        if (students.length > 0) {
+            const studentIdsOnPage = students.map(s => s._id);
+
+            // Fetch submissions ONLY for the students on the current page.
+            const submissions = await SubassignmentModel.find({
+                assignmentId: assignment._id,
+                studentId: { $in: studentIdsOnPage }
+            }).select('studentId SubmitDate isLate').lean();
+
+            // Create a Map for instant lookups (O(1) complexity).
+            const submissionMap = new Map(submissions.map(sub => [sub.studentId.toString(), sub]));
+
+            // Hydrate the student data.
+            hydratedData = students.map(student => {
+                const submission = submissionMap.get(student._id.toString());
+                return {
+                    ...student,
+                    status: submission ? 'submitted' : 'not submitted',
+                    submittedAt: submission?.SubmitDate || null,
+                    isLate: submission?.isLate ?? null
+                };
+            });
         }
-    ];
+        
+        // Final status filter on the hydrated data.
+        if (status && ["submitted", "not submitted"].includes(status)) {
+            hydratedData = hydratedData.filter(s => s.status === status);
+        }
+        response = { total, data: studentId ? hydratedData[0] || null : hydratedData };
+    }
 
-    // --- Phase 3: Execute Pipeline with Pagination ---
-    const pageNum = Math.max(1, parseInt(page, 10));
-    const sizeNum = Math.max(1, parseInt(size, 10));
-    const skip = (pageNum - 1) * sizeNum;
-
-    // Create a parallel pipeline to get the total count for accurate pagination.
-    const countPipeline = [...aggregationPipeline, { $count: 'total' }];
-
-    const [[countResult], studentResults] = await Promise.all([
-        studentModel.aggregate(countPipeline),
-        studentModel.aggregate(aggregationPipeline).sort({ firstName: 1 }).skip(skip).limit(sizeNum)
-    ]);
-    
-    const total = countResult?.total || 0;
-
-    // --- Phase 4: Respond ---
+    // --- Phase 3: Respond ---
     res.status(200).json({
-        message: "Submission status fetched successfully",
-        assignmentName: assignment.name,
-        total,
-        totalPages: Math.ceil(total / sizeNum),
-        currentPage: pageNum,
-        data: studentId ? studentResults[0] || null : studentResults // Return single object or array
+        message: "Data fetched successfully",
+        assignmentName: assignment?.name || null,
+        total: response.total,
+        totalPages: Math.ceil(response.total / limit),
+        currentPage: page,
+        data: response.data
     });
 });
 export const getSubmissions = asyncHandler(async (req, res, next) => {
