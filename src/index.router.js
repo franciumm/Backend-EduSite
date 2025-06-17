@@ -10,7 +10,7 @@ import { requestTimeout } from './middelwares/requestTimeout.js';
 import DBConnect from '../DB/DB.Connect.js';
 
 const bootstrape = async (app, express) => {
-    await DBConnect();
+
     // --- 2. Global Middlewares (apply to every request) ---
     // CORS Configuration: Use your whitelist properly.
     const whitelist = ["http://127.0.0.1:5500" , "http://localhost:3000"]; // Example: Add your frontend dev server
@@ -28,7 +28,7 @@ const bootstrape = async (app, express) => {
     // Body Parsers
     app.use(express.json());
     app.use(express.urlencoded({ extended: false }));
-    
+    await DBConnect();
     // Global Request Timeout: Protects all subsequent routes.
     app.use(requestTimeout(15000)); // Using 15s as a safe global default
 
