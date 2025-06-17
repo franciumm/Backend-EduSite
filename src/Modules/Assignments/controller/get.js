@@ -42,104 +42,95 @@ export const GetAllByGroup = asyncHandler(async (req, res, next) => {
 
 
 export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
-    const { groupId, assignmentId, studentId, status } = req.query;
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const size = Math.max(1, parseInt(req.query.limit, 10) || 10);
-    const limit = size;
-    const skip = (page - 1) * limit;
+    const { groupId, assignmentId, studentId, status, page = 1, size = 10 } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10));
+    const limit = Math.max(1, parseInt(size, 10));
+    const skip = (pageNum - 1) * limit;
 
-    // --- Phase 1: Fail Fast & Pre-flight Validation ---
-    if (!groupId || !mongoose.Types.ObjectId.isValid(groupId)) {
-        return next(new Error("A valid Group ID is required.", { cause: 400 }));
+    // --- Phase 1: Dynamically Construct the Core Filter ---
+    const filter = {};
+    if (groupId) {
+        if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("Invalid Group ID format.", { cause: 400 }));
+        filter.groupId = new mongoose.Types.ObjectId(groupId);
     }
-    const gId = new mongoose.Types.ObjectId(groupId);
-
-    const validationPromises = [groupModel.findById(gId).select('_id').lean()];
     if (assignmentId) {
         if (!mongoose.Types.ObjectId.isValid(assignmentId)) return next(new Error("Invalid Assignment ID format.", { cause: 400 }));
-        validationPromises.push(assignmentModel.findById(assignmentId).select('name').lean());
+        filter.assignmentId = new mongoose.Types.ObjectId(assignmentId);
     }
-    const [group, assignment] = await Promise.all(validationPromises);
+    if (studentId) {
+        if (!mongoose.Types.ObjectId.isValid(studentId)) return next(new Error("Invalid Student ID format.", { cause: 400 }));
+        filter.studentId = new mongoose.Types.ObjectId(studentId);
+    }
+    if (status && ['marked', 'unmarked'].includes(status)) {
+        filter.isMarked = (status === 'marked');
+    }
 
-    if (!group) return next(new Error("Group not found.", { cause: 404 }));
-    if (assignmentId && !assignment) return next(new Error("Assignment not found.", { cause: 404 }));
+    // --- Phase 2: Execute the Correct Logic Path ---
 
-    // --- Phase 2: Build the Base Query and Handle Different Logic Paths ---
-    let response;
-
-    if (!assignmentId) {
-        // --- Path A: All Submissions in a Group (No Assignment Context) ---
-        const filter = { groupId: gId };
-        if (status) filter.isMarked = (status === 'marked');
-        
-        const [submissions, total] = await Promise.all([
-            SubassignmentModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit)
-                .populate('studentId', 'userName firstName lastName')
-                .populate('assignmentId', 'name')
-                .lean(),
-            SubassignmentModel.countDocuments(filter)
+    // Special Case: "Group Status View" requires hydration to find "not submitted" students.
+    if (groupId && assignmentId && !studentId) {
+        // --- Path A: Group Status View (The "Hydration" Logic) ---
+        const [assignment, group] = await Promise.all([
+            assignmentModel.findById(filter.assignmentId).lean(),
+            groupModel.findById(filter.groupId).lean()
         ]);
-        response = { total, data: submissions };
+        if (!assignment) return next(new Error("Assignment not found.", { cause: 404 }));
+        if (!group) return next(new Error("Group not found.", { cause: 404 }));
 
-    } else {
-        // --- Path B, C, D: Assignment Context (Group, Student, or Both) ---
-        // This is the core of the "Hydration" pattern to prevent timeouts.
-        const studentFilter = { groupId: gId };
-        if (studentId) {
-            if (!mongoose.Types.ObjectId.isValid(studentId)) return next(new Error("Invalid Student ID format.", { cause: 400 }));
-            studentFilter._id = new mongoose.Types.ObjectId(studentId);
-        }
+        const studentsInGroup = await studentModel.find({ groupId: filter.groupId }).select('_id userName firstName lastName').sort({ firstName: 1 }).lean();
+        const studentIds = studentsInGroup.map(s => s._id);
 
-        const [students, total] = await Promise.all([
-            studentModel.find(studentFilter)
-                .select('_id userName firstName lastName')
-                .sort({ firstName: 1 })
-                .skip(skip)
-                .limit(limit)
-                .lean(),
-            studentModel.countDocuments(studentFilter)
-        ]);
+        const submissions = await SubassignmentModel.find({ assignmentId: filter.assignmentId, studentId: { $in: studentIds } }).select('studentId SubmitDate isLate').lean();
+        const submissionMap = new Map(submissions.map(sub => [sub.studentId.toString(), sub]));
 
-        let hydratedData = [];
-        if (students.length > 0) {
-            const studentIdsOnPage = students.map(s => s._id);
+        let hydratedData = studentsInGroup.map(student => ({
+            ...student,
+            status: submissionMap.has(student._id.toString()) ? 'submitted' : 'not submitted',
+            submissionDetails: submissionMap.get(student._id.toString()) || null
+        }));
 
-            // Fetch submissions ONLY for the students on the current page.
-            const submissions = await SubassignmentModel.find({
-                assignmentId: assignment._id,
-                studentId: { $in: studentIdsOnPage }
-            }).select('studentId SubmitDate isLate').lean();
-
-            // Create a Map for instant lookups (O(1) complexity).
-            const submissionMap = new Map(submissions.map(sub => [sub.studentId.toString(), sub]));
-
-            // Hydrate the student data.
-            hydratedData = students.map(student => {
-                const submission = submissionMap.get(student._id.toString());
-                return {
-                    ...student,
-                    status: submission ? 'submitted' : 'not submitted',
-                    submittedAt: submission?.SubmitDate || null,
-                    isLate: submission?.isLate ?? null
-                };
-            });
-        }
-        
-        // Final status filter on the hydrated data.
-        if (status && ["submitted", "not submitted"].includes(status)) {
+        if (status && ['submitted', 'not submitted'].includes(status)) {
             hydratedData = hydratedData.filter(s => s.status === status);
         }
-        response = { total, data: studentId ? hydratedData[0] || null : hydratedData };
+        
+        const total = hydratedData.length;
+        const paginatedData = hydratedData.slice(skip, skip + limit);
+
+        return res.status(200).json({
+            message: "Submission status for group fetched successfully.",
+            assignmentName: assignment.name,
+            total,
+            totalPages: Math.ceil(total / limit),
+            currentPage: pageNum,
+            data: paginatedData
+        });
     }
 
-    // --- Phase 3: Respond ---
+    // --- Path B: All Other Queries (Direct Find on Submissions) ---
+    // This handles: assignmentId only, studentId only, groupId only, and any combination thereof.
+    // This is hyper-efficient as it only queries the submission collection.
+    if (Object.keys(filter).length === 0) {
+        return next(new Error("At least one query parameter (groupId, assignmentId, or studentId) is required.", { cause: 400 }));
+    }
+
+    const [submissions, total] = await Promise.all([
+        SubassignmentModel.find(filter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .populate('studentId', 'userName firstName lastName')
+            .populate('assignmentId', 'name')
+            .populate('groupId', 'groupname')
+            .lean(),
+        SubassignmentModel.countDocuments(filter)
+    ]);
+    
     res.status(200).json({
-        message: "Data fetched successfully",
-        assignmentName: assignment?.name || null,
-        total: response.total,
-        totalPages: Math.ceil(response.total / limit),
-        currentPage: page,
-        data: response.data
+        message: "Submissions fetched successfully.",
+        total,
+        totalPages: Math.ceil(total / limit),
+        currentPage: pageNum,
+        data: submissions
     });
 });
 export const getSubmissions = asyncHandler(async (req, res, next) => {
