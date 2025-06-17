@@ -7,9 +7,10 @@ import exam  from './Modules/Exams/Exams.router.js';
 import mater from "./Modules/Materials/Materials.router.js";
 // Make sure you import requestTimeout here!
 import { requestTimeout } from './middelwares/requestTimeout.js'; 
+import DBConnect from '../DB/DB.Connect.js';
 
 const bootstrape = async (app, express) => {
-   
+    await DBConnect();
     // --- 2. Global Middlewares (apply to every request) ---
     // CORS Configuration: Use your whitelist properly.
     const whitelist = ["http://127.0.0.1:5500" , "http://localhost:3000"]; // Example: Add your frontend dev server

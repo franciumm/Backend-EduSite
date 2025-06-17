@@ -14,7 +14,7 @@ const startServer = async () => {
     console.log("Connecting to database...");
     
     // 1. Connect to the database directly.
-    await DBConnect();
+   
     console.log("DB Connected successfully.");
 
     // 2. Now that the connection is live, set up the Express app.
