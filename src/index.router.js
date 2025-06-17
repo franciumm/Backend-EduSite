@@ -7,7 +7,7 @@ import assg from './Modules/Assignments/Assg.router.js';
 import exam  from './Modules/Exams/Exams.router.js';
 import mater from "./Modules/Materials/Materials.router.js";
 // Make sure you import requestTimeout here!
-import { requestTimeout } from './utils/requestTimeout.js'; // Assuming this is the correct path
+import { requestTimeout } from './middelwares/requestTimeout.js'; // Assuming this is the correct path
 
 const bootstrape = async (app, express) => {
     
