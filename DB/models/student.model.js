@@ -47,10 +47,7 @@ const studentSchema = new Schema(
       type: [Schema.Types.ObjectId],
       ref: "subassignment",
     },
-    submittedexams: {
-      type: [Schema.Types.ObjectId],
-      ref: "subexam",
-    },
+   
   },
   { timestamps: true }
 );

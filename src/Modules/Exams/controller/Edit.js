@@ -185,6 +185,9 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
 });
 
 
+
+
+
 export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
   const { submissionId, score, feedback } = req.body;
 
@@ -447,4 +450,77 @@ export const deleteExam = asyncHandler(async (req, res, next) => {
     console.error("Error deleting exam or submissions:", error);
     return next(new Error("Failed to delete exam and its submissions", { cause: 500 }));
   }
+});
+
+
+
+
+
+
+
+export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
+    // --- Phase 1: Fail Fast - Input Validation ---
+    const { submissionId } = req.body;
+    const { user, isteacher } = req;
+
+    if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
+        return next(new Error("A valid Submission ID is required.", { cause: 400 }));
+    }
+
+    // --- Phase 2: Prepare - Data Fetching ---
+    // Fetch the full submission document. We need its details for authorization and cleanup.
+    // Use .lean() for a fast, read-only query.
+    const submission = await SubexamModel.findById(submissionId).lean();
+    
+    if (!submission) {
+        return next(new Error("Submission not found.", { cause: 404 }));
+    }
+
+    // --- Phase 3: Robust Authorization (Implementing Your Business Rules) ---
+    let isAuthorized = false;
+    // Condition 1: The user is a teacher. (Your rule: "any teacher can delete")
+    if (isteacher?.teacher === true) {
+        isAuthorized = true;
+    }
+    // Condition 2: The user is the student who made the submission.
+    else if (user._id.equals(submission.studentId)) {
+        isAuthorized = true;
+    }
+
+    if (!isAuthorized) {
+        return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
+    }
+    
+    // --- Phase 4: Execute - Atomic Database Transaction ---
+    // The transaction is now extremely simple and fast, containing only one essential operation.
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
+        await SubexamModel.findByIdAndDelete(submission._id, { session });
+        await session.commitTransaction();
+    } catch (error) {
+        await session.abortTransaction();
+        console.error("Database transaction failed during submission deletion:", error);
+        return next(new Error("Failed to delete submission due to a database error. Operation rolled back.", { cause: 500 }));
+    } finally {
+        await session.endSession();
+    }
+
+    // --- Phase 5: Post-Commit Cleanup - S3 Deletion ---
+    // This runs only after the database transaction was successful, ensuring data integrity.
+    if (submission.fileKey) {
+        try {
+            await s3.send(new DeleteObjectCommand({
+                Bucket: submission.fileBucket,
+                Key: submission.fileKey,
+            }));
+        } catch (s3Error) {
+            // If the file is already gone, that's okay. Log other S3 errors as critical.
+            if (s3Error.name !== 'NoSuchKey') {
+                console.error(`CRITICAL: DB record for submission ${submission._id} was deleted, but S3 cleanup failed for key ${submission.fileKey}.`, s3Error);
+            }
+        }
+    }
+
+    res.status(200).json({ message: "Submission deleted successfully." });
 });
