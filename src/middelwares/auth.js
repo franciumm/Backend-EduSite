@@ -101,74 +101,57 @@ export const isAuth = asyncHandler(async (req, res, next) => {
 
 export const AdminAuth = asyncHandler(async (req, res, next) => {
     try {
-    
-    const { authorization } = req.headers
-    if (!authorization ) {
-        return next(new Error('Please login first', { cause: 400 }))
-    }
+        const { authorization } = req.headers;
 
-    if (!authorization.startsWith('MonaEdu')) {
-        return next(new Error('invalid token prefix', { cause: 400 }))
-    }
-
-    const splitedToken = authorization.split(' ')[1]
-    
-
-    try {
-        const decodedData = verifyToken({
-        token: splitedToken,
-        signature: process.env.SIGN_IN_TOKEN_SECRET,
-        })
-
-            
-    if (!mongoose.Types.ObjectId.isValid(decodedData._id)) {
-        return next(new Error('invalid UserId', { cause: 400 }))
-    }
-        const findteacher = await teacherModel.findById(
-        decodedData._id,
-        'email userName role',
-        )
-        if (!findteacher) {
-        return next(new Error('Please SignUp', { cause: 400 }))
+        if (!authorization || !authorization.startsWith(process.env.BEARER_TOKEN)) {
+            return next(new Error('Invalid authorization header.', { cause: 401 }));
         }
-        req.user = findteacher;
-        next()
-    } catch (error) {
-        // token  => search in db
-        if (error == 'TokenExpiredError: jwt expired') {
-          // refresh token
-        const user = await teacherModel.findOne({ token: splitedToken })
-        if (!user) {
-            return next(new Error('Wrong token', { cause: 400 }))
+
+        const token = authorization.split(' ')[1];
+        if (!token) {
+            return next(new Error('Token is required.', { cause: 401 }));
         }
-          // generate new token
-        const userToken = generateToken({
-            payload: {
-            email: user.email,
-            _id: user._id,
-            },
+
+        // 1. Verify the token's signature and expiration
+        const decoded = verifyToken({
+            token,
             signature: process.env.SIGN_IN_TOKEN_SECRET,
-            expiresIn: '2h',
-        })
+        });
 
-        if (!userToken) {
-            return next(
-            new Error('token generation fail, payload canot be empty', {
-                cause: 400,
-            }),
-            )
+        if (!decoded?._id) {
+            return next(new Error('Invalid token payload.', { cause: 401 }));
         }
 
-        user.token = userToken
-        await user.save()
-        return res.status(200).json({ message: 'Token refreshed', userToken })
+        // 2. Check if the user still exists in the database
+        const teacher = await teacherModel.findById(decoded._id).select('email userName role');
+        if (!teacher) {
+            return next(new Error('User not found. Please sign up or log in again.', { cause: 404 }));
         }
-        return next(new Error('invalid token', { cause: 500 }))
-    }
+
+        // 3. (Optional but Recommended) Check if the user has the 'Admin' role
+        // if (teacher.role !== 'Admin') {
+        //   return next(new Error('You are not authorized to perform this action.', { cause: 403 })); // 403 Forbidden
+        // }
+
+        // 4. Attach user to the request and proceed
+        req.user = teacher;
+        next();
+        
     } catch (error) {
-    console.log(error)
-    next(new Error('catch error in auth', { cause: 500 }))
+        // This catch block now handles errors gracefully and provides clear messages.
+        
+        // If JWT throws a "token expired" error
+        if (error.name === 'TokenExpiredError') {
+            return next(new Error('Token has expired. Please log in again.', { cause: 401 }));
+        }
+
+        // If JWT throws any other verification error (e.g., invalid signature)
+        if (error.name === 'JsonWebTokenError') {
+            return next(new Error('Invalid token or signature.', { cause: 401 }));
+        }
+        
+        // For any other unexpected errors (like a DB failure), pass it to the global handler
+        console.error("Unexpected error in AdminAuth:", error);
+        return next(new Error('Authentication failed due to a server error.', { cause: 500 }));
     }
-})
-
-
+});
