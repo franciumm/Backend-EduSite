@@ -21,7 +21,6 @@ router.put("/mark", AdminAuth, multerCloudFunction(allowedExtensions.Files).sing
 router.get("/submissions/View/:assignmentId", isAuth, Get.ViewSub);
 
 router.get("/submissions/download", isAuth, Edit.downloadSubmittedAssignment);
-router.get("/submissions/assignment", AdminAuth, Get.getSubmissionsByGroup);
 router.get("/submissions", isAuth, Get.getSubmissionsByGroup);
 router.get('/download',isAuth,Edit.downloadAssignment );
 router.get('/all',isAuth,Get.getAssignmentsForStudent );
