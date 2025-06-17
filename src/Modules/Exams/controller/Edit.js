@@ -104,66 +104,74 @@ export const downloadExam = [
     asyncHandler(authorizeAndEnrollUser),
     asyncHandler(streamExamFile),
 ];
+
 export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
-  const { submissionId } = req.query;
+    // --- Phase 1: Fail Fast - Input Validation ---
+    const { submissionId } = req.query;
+    const { user, isteacher } = req;
 
-  // 1. Validate submission ID
-  if (!submissionId) {
-    return next(new Error("Submission ID is required", { cause: 400 }));
-  }
-
-  // 2. Fetch the submitted exam details
-  const submission = await SubexamModel.findById(submissionId).populate("examId");
-  if (!submission) {
-    return next(new Error("Submitted exam not found", { cause: 404 }));
-  }
-
-  const exam = submission.examId;
-
-  // 3. If user is a teacher, allow access to the submitted exam
-  if (req.isteacher.teacher) {
-    // Teachers can access any submitted exam without further checks
-  } else {
-    // 4. For students, ensure they are the one who submitted it
-    if (submission.studentId.toString() !== req.user._id.toString()) {
-      return next(new Error("You are not authorized to access this submission.", { cause: 403 }));
+    if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
+        return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
 
-    // 5. Timeline check (only for the main exam timeline or exception)
-    const now = new Date();
-    const exceptionEntry = exam.exceptionStudents.find(
-      (ex) => ex.studentId.toString() === req.user._id.toString()
-    );
+    // --- Phase 2: Data Fetching ---
+    // Fetch the submission. No need to populate as the authorization logic is simpler now.
+    // Use .lean() for a fast, read-only query since we don't need a full Mongoose document.
+    const submission = await SubexamModel.findById(submissionId).lean();
 
-    const examStart = exceptionEntry ? exceptionEntry.startdate : exam.startdate;
-    const examEnd = exceptionEntry ? exceptionEntry.enddate : exam.enddate;
-
-    if (now < examStart || now > examEnd) {
-      return next(new Error("This submission is not available at the moment.", { cause: 403 }));
+    if (!submission) {
+        return next(new Error("Submission not found.", { cause: 404 }));
     }
-  }
 
-  // 6. Fetch the submitted exam file from S3
-  const { fileBucket: bucketName, fileKey: key } = submission;
-  try {
-    const command = new GetObjectCommand({
-      Bucket: bucketName,
-      Key: key,
-    });
+    // --- Phase 3: Robust Authorization (Implementing Your Business Rule) ---
+    if (isteacher?.teacher !== true) {
+        // If the user is NOT a teacher, they must be the owner of the submission.
+        if (!submission.studentId.equals(user._id)) {
+            return next(new Error("You are not authorized to access this submission.", { cause: 403 }));
+        }
+    }
+    // If we reach here, the user is either a teacher (who can access anything)
+    // or the student who owns the submission. Access is granted.
 
-    const response = await s3.send(command);
+    // --- Phase 4: S3 File Streaming ---
+    const { fileBucket, fileKey } = submission;
 
-    // 7. Set headers for file download
-    const filename = key.split("/").pop(); // Extract filename from the S3 key
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.setHeader("Content-Type", response.ContentType);
+    // Pre-flight check: Ensure there is actually a file to download.
+    if (!fileBucket || !fileKey) {
+        return next(new Error("This submission record has no associated file, it may have been corrupted or uploaded incorrectly.", { cause: 404 }));
+    }
 
-    // 8. Stream the file to the response
-    response.Body.pipe(res);
-  } catch (error) {
-    console.error("Error fetching submitted exam from S3:", error);
-    return next(new Error("Failed to download the submitted exam.", { cause: 500 }));
-  }
+    try {
+        const command = new GetObjectCommand({
+            Bucket: fileBucket,
+            Key: fileKey,
+        });
+
+        const s3Response = await s3.send(command);
+
+        // Sanitize filename to prevent security vulnerabilities and ensure compatibility.
+        const originalFilename = fileKey.split("/").pop() || 'submission.pdf';
+        const safeFilename = encodeURIComponent(originalFilename.replace(/[^a-zA-Z0-9.\-_]/g, '_'));
+
+        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeFilename}`);
+        res.setHeader('Content-Type', s3Response.ContentType || "application/octet-stream"); // Fallback MIME type
+        if (s3Response.ContentLength) {
+            res.setHeader('Content-Length', s3Response.ContentLength);
+        }
+
+        s3Response.Body.pipe(res);
+        
+    } catch (error) {
+        console.error("Error fetching submitted exam from S3:", error);
+        
+        // Provide a more specific error to the client if the file doesn't exist on S3
+        if (error.name === 'NoSuchKey') {
+            return next(new Error("The submitted file could not be found in storage.", { cause: 404 }));
+        }
+        
+        // For all other S3 errors (AccessDenied, etc.), return a generic server error.
+        return next(new Error("Failed to download the submitted exam due to a storage error.", { cause: 500 }));
+    }
 });
 
 
