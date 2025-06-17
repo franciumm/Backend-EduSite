@@ -1,7 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-import bootstrape from "../src/index.router.js";
+import bootstrape from "../src/index.router.js"; // Import the setup function
 
 dotenv.config();
 
@@ -10,6 +10,7 @@ const app = express();
 const startServer = async () => {
   try {
     console.log("Connecting to database...");
+    
     // 1. Connect to the database directly.
     await mongoose.connect(process.env.MONGOCONNECT, {
       serverSelectionTimeoutMS: 30000, 
@@ -30,8 +31,8 @@ const startServer = async () => {
   }
 };
 
-
+// Start the entire process.
 startServer();
 
-
+// Export the app instance for the serverless environment (e.g., Vercel).
 export default app;
