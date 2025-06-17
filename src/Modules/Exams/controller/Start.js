@@ -10,7 +10,6 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 import { gradeModel} from "../../../../DB/models/grades.model.js";
 import {examModel} from "../../../../DB/models/exams.model.js";
 import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
-import fs from "fs";
 import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
 import { promises as fs } from 'fs';
