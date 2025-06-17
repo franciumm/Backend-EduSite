@@ -40,6 +40,7 @@ export const GetAllByGroup = asyncHandler(async (req, res, next) => {
   res.status(200).json({ message: "Assignments fetched successfully", data: assignments });
 });
 
+
 export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
     const { groupId, assignmentId, studentId, status, page = 1, size = 10 } = req.query;
 
@@ -136,6 +137,8 @@ export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
         students
     });
 });
+
+
 export const getSubmissions = asyncHandler(async (req, res, next) => {
   const { assignmentId, submissionId } = req.query;
   const userId = req.user._id;
