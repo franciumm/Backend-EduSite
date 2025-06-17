@@ -52,7 +52,22 @@ export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
     // --- Phase 2: Handle "All Submissions for Group" Case ---
     if (!assignmentId) {
         // ... (This logic remains the same)
-        const query = { groupId: gId };
+        const query ={};   
+          if(gId){
+         const groupWithStudent = await groupModel.findById(gId ).lean();
+ 
+        if (!groupWithStudent) {
+            return next(new Error("The specified group was not found .", { cause: 404 }));
+        }
+        query= { groupId: gId }
+       }
+       if(studentId){
+        const Stud = await studentModel.findById(studentId);
+         if (!Stud) {
+            return next(new Error("The specified student was not found .", { cause: 404 }));
+        }
+        query.studentId = studentId;
+       }
         if (status === "marked") query.isMarked = true;
         else if (status === "unmarked") query.isMarked = false;
         const limit = Math.max(1, parseInt(size, 10));
