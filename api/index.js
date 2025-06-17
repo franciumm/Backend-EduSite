@@ -1,31 +1,37 @@
-
- import dotenv from "dotenv";
- import bootstrape from "../src/index.router.js"; 
-import DBConnect from '../DB/DB.Connect.js';
-
-
-  dotenv.config();
-
-
-
 import express from "express";
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+import bootstrape from "../src/index.router.js";
+
+dotenv.config();
 
 const app = express();
 
-(async () => {
+const startServer = async () => {
   try {
-    console.log("Starting application bootstrap...");
-    // AWAITING HERE is the key. Nothing after this line will run
-    // until the database is connected and all middlewares are set up.
-    await DBConnect();
-    
-    console.log("Bootstrap complete. Application is ready.");
-  } catch (error) {
-    console.error("Failed to bootstrap the application:", error);
-  }
-})();
+    console.log("Connecting to database...");
+    // 1. Connect to the database directly.
+    await mongoose.connect(process.env.MONGOCONNECT, {
+      serverSelectionTimeoutMS: 30000, 
+    });
 
-await bootstrape(app, express);
-// When using @vercel/node and a file in the /api directory,
-// exporting the app instance directly allows Vercel to handle wrapping it.
+    console.log("DB Connected successfully.");
+
+    // 2. Now that the connection is live, set up the Express app.
+    // This will now safely import all your routers and models.
+    bootstrape(app, express);
+
+    console.log("Application bootstrap complete. Server is ready for requests.");
+
+  } catch (error) {
+    console.error("Failed to start server:", error);
+    // If the DB connection fails, the app should not start.
+    process.exit(1);
+  }
+};
+
+
+startServer();
+
+
 export default app;
