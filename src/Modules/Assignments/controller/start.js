@@ -12,7 +12,7 @@ import { promises as fs } from 'fs';
 
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
-  // ── 1) File must be present before any other operation ─────────────────────
+  // ── 1) Perform all initial SYNCHRONOUS validations first (Fail-Fast) ──────
   if (!req.file) {
     return next(new Error("Please upload the assignment file.", { cause: 400 }));
   }
@@ -20,67 +20,49 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
   const { name, startDate, endDate, gradeId } = req.body;
   const teacherId = req.user._id;
 
-  // ── 2) NEW: Validate the assignment timeline ──────────────────────────────
   const start = new Date(startDate);
   const end = new Date(endDate);
-  const now = new Date();
-
-  // Check for valid date formats first
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || new Date() > end || start >= end) {
     await fs.unlink(req.file.path);
-    return next(new Error("Invalid format for start or end date.", { cause: 400 }));
-  }
-  // Check that the assignment ends in the future
-  if (end < now) {
-    await fs.unlink(req.file.path);
-    return next(new Error("The assignment's end date cannot be in the past.", { cause: 400 }));
-  }
-  // Check that start comes before end
-  if (start >= end) {
-    await fs.unlink(req.file.path);
-    return next(new Error("The assignment's start date must be before its end date.", { cause: 400 }));
+    return next(new Error("Invalid assignment timeline. Ensure dates are valid, the end date is in the future, and the start date is before the end date.", { cause: 400 }));
   }
 
-  // ── 3) Normalize & validate groupIds input ────────────────────────────────
   let raw = req.body.groupIds ?? req.body["groupIds[]"];
-  if (!raw) {
-    await fs.unlink(req.file.path);
-    return next(new Error("Group IDs are required.", { cause: 400 }));
-  }
-  if (typeof raw === "string" && raw.trim().startsWith("[")) {
-    try { raw = JSON.parse(raw); } catch { /* ignore parse error */ }
-  }
+  if (!raw) { await fs.unlink(req.file.path); return next(new Error("Group IDs are required.", { cause: 400 })); }
+  if (typeof raw === "string" && raw.trim().startsWith("[")) { try { raw = JSON.parse(raw); } catch {} }
   const groupIds = Array.isArray(raw) ? raw : [raw];
-  if (groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
-    await fs.unlink(req.file.path);
-    return next(new Error("One or more Group IDs are invalid.", { cause: 400 }));
-  }
+  if (groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) { await fs.unlink(req.file.path); return next(new Error("One or more Group IDs are invalid.", { cause: 400 })); }
   const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
 
-  // ── 4) Perform all database validations before proceeding ───────────────────
-  const duplicate = await assignmentModel.findOne({ name, groupIds: { $in: validGroupIds } });
-  if (duplicate) {
+  // ── 2) OPTIMIZATION: Execute independent I/O tasks in PARALLEL ─────────────
+  let results;
+  try {
+    const [duplicate, groups, fileContent] = await Promise.all([
+      assignmentModel.findOne({ name, groupIds: { $in: validGroupIds } }),
+      groupModel.find({ _id: { $in: validGroupIds } }).select('gradeid'),
+      fs.readFile(req.file.path)
+    ]);
+    results = { duplicate, groups, fileContent }; // Group results for the next step
+  } catch (parallelError) {
     await fs.unlink(req.file.path);
-    return next(new Error("The Name already exists", { cause: 400 }));
+    console.error("Error during parallel validation phase:", parallelError);
+    return next(new Error("A server error occurred during validation.", { cause: 500 }));
   }
 
-  const groups = await groupModel.find({ _id: { $in: validGroupIds } }).select('gradeid');
-  if (groups.length !== validGroupIds.length) {
-    await fs.unlink(req.file.path);
-    return next(new Error("One or more group IDs were not found.", { cause: 404 }));
-  }
-  if (!groups.every(g => g.gradeid.toString() === gradeId)) {
-    await fs.unlink(req.file.path);
-    return next(new Error("One or more groups do not belong to the specified grade.", { cause: 400 }));
-  }
+  // ── 3) Process results from the parallel phase ────────────────────────────
+  const { duplicate, groups, fileContent } = results;
 
-  // ── 5) Create DB record FIRST (for transactional safety) ─────────────────
+  if (duplicate) { await fs.unlink(req.file.path); return next(new Error("The Name already exists", { cause: 400 })); }
+  if (groups.length !== validGroupIds.length) { await fs.unlink(req.file.path); return next(new Error("One or more group IDs were not found.", { cause: 404 })); }
+  if (!groups.every(g => g.gradeid.toString() === gradeId)) { await fs.unlink(req.file.path); return next(new Error("One or more groups do not belong to the specified grade.", { cause: 400 })); }
+  if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot create an assignment with an empty file.", { cause: 400 })); }
+
+  // ── 4) Begin SEQUENTIAL transaction: DB Create -> S3 Upload ───────────────
   const slug = slugify(name, { lower: true, strict: true });
   const s3Key = `assignments/${slug}-${Date.now()}.pdf`;
 
   const newAssignment = await assignmentModel.create({
-    name, slug, startDate: start, endDate: end, // Use the validated Date objects
-    gradeId,
+    name, slug, startDate: start, endDate: end, gradeId,
     groupIds: validGroupIds,
     bucketName: process.env.S3_BUCKET_NAME,
     key: s3Key,
@@ -88,44 +70,19 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
     createdBy: teacherId,
   });
 
-  if (!newAssignment) {
-    await fs.unlink(req.file.path);
-    return next(new Error("Error while creating the assignment record in DB.", { cause: 500 }));
-  }
-
-  // ── 6) Read file and upload to S3 AFTER DB record is secure ──────────────
-  let fileContent;
-  try {
-    fileContent = await fs.readFile(req.file.path);
-    if (fileContent.length === 0) {
-      throw new Error("Cannot upload an empty file.");
-    }
-  } catch (readError) {
-    await assignmentModel.findByIdAndDelete(newAssignment._id); // Rollback
-    return next(new Error("Server failed to read the uploaded file.", { cause: 500 }));
-  }
+  if (!newAssignment) { await fs.unlink(req.file.path); return next(new Error("Error while creating the assignment record in DB.", { cause: 500 })); }
 
   try {
-    await uploadFileToS3(
-      process.env.S3_BUCKET_NAME,
-      s3Key,
-      fileContent,
-      "application/pdf"
-    );
-
-    res.status(201).json({
-      message: "Assignment created successfully",
-      assignment: newAssignment,
-    });
+    await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
+    res.status(201).json({ message: "Assignment created successfully", assignment: newAssignment });
   } catch (s3Error) {
     console.error("S3 Upload Failed. Rolling back database entry.", s3Error);
     await assignmentModel.findByIdAndDelete(newAssignment._id); // Rollback
     return next(new Error("Failed to upload file. The operation has been rolled back.", { cause: 500 }));
   } finally {
-    await fs.unlink(req.file.path); // Always cleanup the local temporary file
+    await fs.unlink(req.file.path);
   }
 });
-
 export const submitAssignment = asyncHandler(async (req, res, next) => {
   const { assignmentId, notes } = req.body;
   const file = req.file;
