@@ -8,7 +8,9 @@ import { teacherModel } from "../../../DB/models/teacher.model.js";
 import { gradeModel } from "../../../DB/models/grades.model.js";
 import  studentModel  from "../../../DB/models/student.model.js";
 import { groupModel } from "../../../DB/models/groups.model.js"; 
+import { SubassignmentModel } from "../../../DB/models/submitted_assignment.model.js";
 
+import { SubexamModel } from "../../../DB/models/submitted_exams.model.js";
 
 export const Signup = asyncHandler(async(req,res,next)=>{
     const {email,parentemail,userName,firstName,lastName,password,grade ,  parentphone ,phone,cPassword}= req.body ;
@@ -142,34 +144,50 @@ export const Signup = asyncHandler(async(req,res,next)=>{
 
 
 export const getMyProfile = asyncHandler(async (req, res, next) => {
-  const userId = req.user._id;            
-  const isTeacher = req.isteacher?.teacher === true;
+    const userId = req.user._id;            
+    const isTeacher = req.isteacher?.teacher === true;
 
-  // choose model & hide sensitive props
-  const Model = isTeacher ? teacherModel : studentModel;
-  const projection = { password: 0, __v: 0 };
+    // --- Phase 1: Prepare Queries ---
+    // Select the correct model and projection based on the user's role.
+    const Model = isTeacher ? teacherModel : studentModel;
+    const projection = { password: 0, __v: 0, token: 0 }; // Also hide the token if it exists
 
-  // build the query
-  let query = Model.findById(userId).select(projection);
+    // Build the main profile query. We use .lean() for a significant performance boost.
+    let profileQuery = Model.findById(userId).select(projection).lean();
 
-  // only students have gradeId & groupId fields
-  if (!isTeacher) {
-    query = query
-      .populate({ path: "groupId", select: "groupname" })
-      .populate({ path: "gradeId", select: "grade" });
-  }
+    // Conditionally add population for students. This logic is preserved.
+    if (!isTeacher) {
+        profileQuery = profileQuery
+            .populate({ path: "groupId", select: "groupname", model: "group" }) // Explicitly specify model for clarity
+            .populate({ path: "gradeId", select: "grade", model: "grade" });
+    }
 
-  // execute
-  const account = await query;
-  if (!account) {
-    return next(new Error("Account not found", { cause: 404 }));
-  }
+    // --- Phase 2: Maximum Performance - Parallel Data Fetching ---
+    // Execute all independent database queries concurrently.
+    const [account, assignmentSubmissions, examSubmissions] = await Promise.all([
+        profileQuery,
+        SubassignmentModel.find({ studentId: userId }).lean(),
+        SubexamModel.find({ studentId: userId }).lean()
+    ]);
 
-  res.status(200).json({
-    message: "Account info fetched successfully",
-    data: account,
-  });
+    // --- Phase 3: Validate & Construct Final Response ---
+    if (!account) {
+        return next(new Error("Account not found. The user may have been deleted.", { cause: 404 }));
+    }
+
+    // Combine the results into a clean, final data object.
+    const responseData = {
+        ...account, // Spread the main account details
+        assignmentSubmissions, // Attach the array of assignment submissions
+        examSubmissions,       // Attach the array of exam submissions
+    };
+
+    res.status(200).json({
+        message: "Profile information fetched successfully.",
+        data: responseData,
+    });
 });
+
 export const Login = asyncHandler(async(req,res,next)=>{
     const {email , password}= req.body;
     const user = await UserModel.findOne({email});

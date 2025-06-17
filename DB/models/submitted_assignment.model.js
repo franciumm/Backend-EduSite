@@ -17,5 +17,6 @@ const submittedAssignmentSchema = new Schema(
   },
   { timestamps: true }
 );
+submittedAssignmentSchema.index({ studentId: 1, assignmentId: 1 }, { unique: true }); // A compound unique index is even better!
 
 export const SubassignmentModel = model("subassignment", submittedAssignmentSchema);

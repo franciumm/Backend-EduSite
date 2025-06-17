@@ -17,5 +17,6 @@ const submittedExamSchema = new Schema(
   },
   { timestamps: true }
 );
+submittedExamSchema.index({ studentId: 1, examId: 1 }, { unique: true }); // A compound unique index is even better!
 
 export const SubexamModel = model("subexam", submittedExamSchema);
