@@ -8,7 +8,7 @@ import { PDFDocument, rgb } from "pdf-lib";
 import fs from "fs";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
-
+import mongoose from "mongoose";
 
 // export const downloadAssignment = asyncHandler(async (req, res, next) => {
 //   const { assignmentId } = req.query;
