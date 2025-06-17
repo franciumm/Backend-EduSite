@@ -18,7 +18,7 @@ const studentSchema = new Schema(
     },
     groupId: {
       type: Schema.Types.ObjectId,
-      ref: "group",
+      ref: "group", index: true
     },
     phone: { type: String },
     parentPhone: { type: String },
