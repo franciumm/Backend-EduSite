@@ -1,7 +1,7 @@
 import { gradeModel } from '../../../../DB/models/grades.model.js';
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { SubassignmentModel } from '../../../../DB/models/submitted_assignment.model.js';
-import { SubexamModel } from '../../../../DB/models/submitted_exam.model.js';
+import { SubexamModel } from '../../../../DB/models/submitted_exams.model.js';
 import { asyncHandler } from "../../../utils/erroHandling.js";
 
 // --- Helper Function for the "Aggregate & Hydrate" Pattern ---
