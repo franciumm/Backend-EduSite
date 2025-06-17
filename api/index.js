@@ -6,8 +6,27 @@ import DBConnect from "../DB/DB.Connect.js";
 
 dotenv.config();
 
-const app = express();
+const app = express();console.log(`Is MONGOCONNECT variable present? ${!!process.env.MONGOCONNECT}`);
+
+// --- STEP 2: SET UP DETAILED CONNECTION LISTENERS ---
+// This will give us definitive proof of the connection's state.
+
+mongoose.connection.on('connected', () => {
+    console.log('[Mongoose Event] => connected');
+});
+
+mongoose.connection.on('error', err => {
+    // This will catch any errors that happen AFTER the initial connection
+    console.error('[Mongoose Event] => error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+    console.log('[Mongoose Event] => disconnected');
+});
+
+// Disable buffering globally as a best practice.
 mongoose.set('bufferCommands', false);
+
 
 const startServer = async () => {
   try {
