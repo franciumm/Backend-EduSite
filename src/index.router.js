@@ -9,11 +9,7 @@ import mater from "./Modules/Materials/Materials.router.js";
 import { requestTimeout } from './middelwares/requestTimeout.js'; 
 
 const bootstrape = async (app, express) => {
-    
-    // --- 1. Database Connection ---
-    // Initiate the connection when the application starts.
-    
-
+   
     // --- 2. Global Middlewares (apply to every request) ---
     // CORS Configuration: Use your whitelist properly.
     const whitelist = ["http://127.0.0.1:5500" , "http://localhost:3000"]; // Example: Add your frontend dev server

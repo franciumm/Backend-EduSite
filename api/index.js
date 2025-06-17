@@ -18,14 +18,14 @@ const app = express();
     // AWAITING HERE is the key. Nothing after this line will run
     // until the database is connected and all middlewares are set up.
     await DBConnect();
-    await bootstrape(app, express);
+    
     console.log("Bootstrap complete. Application is ready.");
   } catch (error) {
     console.error("Failed to bootstrap the application:", error);
   }
 })();
 
-
+await bootstrape(app, express);
 // When using @vercel/node and a file in the /api directory,
 // exporting the app instance directly allows Vercel to handle wrapping it.
 export default app;
