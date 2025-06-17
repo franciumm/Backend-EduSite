@@ -103,7 +103,7 @@ export const AdminAuth = asyncHandler(async (req, res, next) => {
     try {
         const { authorization } = req.headers;
 
-        if (!authorization || !authorization.startsWith(process.env.BEARER_TOKEN)) {
+        if (!authorization || !authorization.startsWith('MonaEdu')) {
             return next(new Error('Invalid authorization header.', { cause: 401 }));
         }
 
