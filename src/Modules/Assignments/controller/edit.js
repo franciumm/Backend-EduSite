@@ -215,63 +215,91 @@ export const markAssignment = asyncHandler(async (req, res, next) => {
 });
 
 export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, next) => {
+    // --- Phase 1: Fail Fast - Input Validation & Authorization ---
     const { assignmentId } = req.body;
-    if (!assignmentId) {
-        return next(new Error("Assignment ID is required", { cause: 400 }));
+    const teacherId = req.user._id;
+
+    if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
+        return next(new Error("A valid Assignment ID is required.", { cause: 400 }));
     }
 
-    const assignment = await assignmentModel.findById(assignmentId);
+    // --- Phase 2: Prepare - Parallel Data Fetching ---
+    // Fetch all necessary documents in parallel for maximum performance.
+    const [assignment, submissions] = await Promise.all([
+        assignmentModel.findById(assignmentId).select('key createdBy').lean(),
+        SubassignmentModel.find({ assignmentId }).select('key').lean()
+    ]);
+    
     if (!assignment) {
-        return next(new Error("Assignment not found", { cause: 404 }));
+        return next(new Error("Assignment not found.", { cause: 404 }));
     }
 
-    const submissions = await SubassignmentModel.find({ assignmentId }).select('key studentId');
+    // SECURITY UPGRADE: Ensure only the creator can delete the assignment.
+    // You could add a role check here for super-admins, e.g., `|| req.user.role === 'superadmin'`
+    if (!assignment.createdBy.equals(teacherId)) {
+        return next(new Error("You are not authorized to delete this assignment.", { cause: 403 }));
+    }
 
-    // --- S3 Cleanup ---
-    const objectsToDelete = [];
-    // Add the main assignment file to the list
+    // --- Phase 3: Execute - Atomic Database Transaction ---
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
+
+        const submissionIds = submissions.map(s => s._id);
+
+        // Delete all submission documents for this assignment
+        if (submissionIds.length > 0) {
+            await SubassignmentModel.deleteMany({ _id: { $in: submissionIds } }, { session });
+        }
+
+        // Remove dangling references from all affected students
+        if (submissionIds.length > 0) {
+            await studentModel.updateMany(
+                { submittedassignments: { $in: submissionIds } },
+                { $pull: { submittedassignments: { $in: submissionIds } } },
+                { session }
+            );
+        }
+        
+        // Finally, delete the assignment itself
+        await assignmentModel.findByIdAndDelete(assignmentId, { session });
+        
+        // If all database operations succeed, commit the transaction.
+        await session.commitTransaction();
+
+    } catch (error) {
+        // If any DB operation fails, abort the entire transaction.
+        await session.abortTransaction();
+        console.error("Database transaction failed during assignment deletion:", error);
+        return next(new Error("Failed to delete assignment due to a database error. Operation rolled back.", { cause: 500 }));
+    } finally {
+        await session.endSession();
+    }
+
+    // --- Phase 4: Post-Commit Cleanup - S3 Deletion ---
+    // This phase only runs if the database transaction was successful.
+    const objectsToDelete = submissions.map(sub => ({ Key: sub.key })).filter(item => item.Key);
     if (assignment.key) {
         objectsToDelete.push({ Key: assignment.key });
     }
-    // Add all submission files to the list
-    submissions.forEach(sub => {
-        if (sub.key) {
-            objectsToDelete.push({ Key: sub.key });
-        }
-    });
 
-    // FIX 1: Batch delete S3 objects for efficiency and atomicity.
     if (objectsToDelete.length > 0) {
-        await s3.send(new DeleteObjectsCommand({
-            Bucket: process.env.S3_BUCKET_NAME, // Assuming one bucket for all
-            Delete: { Objects: objectsToDelete },
-        }));
+        try {
+            await s3.send(new DeleteObjectsCommand({
+                Bucket: process.env.S3_BUCKET_NAME,
+                Delete: { Objects: objectsToDelete },
+            }));
+        } catch (s3Error) {
+            // Log the S3 error but don't fail the request, as the DB part is already done.
+            // This would be a good place to send an alert to an admin.
+            console.error("CRITICAL: Database records were deleted, but S3 cleanup failed.", s3Error);
+        }
     }
-
-    // --- Database Cleanup ---
-    // FIX 2: Use bulk operations for efficiency.
-    // Delete all submission documents for this assignment
-    await SubassignmentModel.deleteMany({ assignmentId });
-
-    // FIX 3 (CRITICAL): Remove dangling references from all affected students.
-    // This maintains data integrity.
-    const submissionIds = submissions.map(s => s._id);
-    if (submissionIds.length > 0) {
-        await studentModel.updateMany(
-            { submittedassignments: { $in: submissionIds } },
-            { $pull: { submittedassignments: { $in: submissionIds } } }
-        );
-    }
-    
-    // Finally, delete the assignment itself
-    await assignmentModel.findByIdAndDelete(assignmentId);
 
     res.status(200).json({
-        message: "Assignment and all related submissions deleted successfully.",
+        message: "Assignment and all related data deleted successfully.",
     });
 });
-
-
 // --- Fully Refactored User/Teacher Delete Function ---
 
 export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => {
