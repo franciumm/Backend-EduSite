@@ -25,7 +25,7 @@ router.post("/add-exception",  AdminAuth, Edit.addExceptionStudent);
 router.post("/add-rejected", AdminAuth , Edit.addRejectedStudent);
 router.delete("/delete", AdminAuth, Edit.deleteExam);
 
-router.delete("/deleteSub", AdminAuth, Edit.deleteSubmittedExam);
+router.delete("/deleteSub", isAuth, Edit.deleteSubmittedExam);
 
 
 
