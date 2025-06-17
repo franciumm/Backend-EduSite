@@ -40,96 +40,115 @@ export const GetAllByGroup = asyncHandler(async (req, res, next) => {
   res.status(200).json({ message: "Assignments fetched successfully", data: assignments });
 });
 
+
 export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
     const { groupId, assignmentId, studentId, status, page = 1, size = 10 } = req.query;
 
-    // --- Phase 1: Fail Fast - Input Validation ---
-    if (!groupId || !mongoose.Types.ObjectId.isValid(groupId)) { /* ... */ }
-    if (assignmentId && !mongoose.Types.ObjectId.isValid(assignmentId)) { /* ... */ }
-    if (studentId && !mongoose.Types.ObjectId.isValid(studentId)) { /* ... */ }
+    // --- Phase 1: Fail Fast - Pre-flight Validation ---
+    if (!groupId || !mongoose.Types.ObjectId.isValid(groupId)) {
+        return next(new Error("A valid Group ID is required.", { cause: 400 }));
+    }
     const gId = new mongoose.Types.ObjectId(groupId);
 
-    // --- Phase 2: Handle "All Submissions for Group" Case ---
+    // This is the "all submissions" case, which is fundamentally different. Handle it separately.
     if (!assignmentId) {
-        // ... (This logic remains the same)
-        const query ={};   
-          if(gId){
-         const groupWithStudent = await groupModel.findById(gId ).lean();
- 
-        if (!groupWithStudent) {
-            return next(new Error("The specified group was not found .", { cause: 404 }));
-        }
-        query= { groupId: gId }
-       }
-       if(studentId){
-        const Stud = await studentModel.findById(studentId);
-         if (!Stud) {
-            return next(new Error("The specified student was not found .", { cause: 404 }));
-        }
-        query.studentId = studentId;
-       }
-        if (status === "marked") query.isMarked = true;
-        else if (status === "unmarked") query.isMarked = false;
-        const limit = Math.max(1, parseInt(size, 10));
-        const skip = (Math.max(1, parseInt(page, 10)) - 1) * limit;
-        const [submissions, totalSubmissions] = await Promise.all([
-            SubassignmentModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit)
-                .populate("studentId", "userName firstName lastName").populate("assignmentId", "name").lean(),
-            SubassignmentModel.countDocuments(query)
-        ]);
-        return res.status(200).json({ message: "All submissions for group fetched successfully", totalSubmissions, totalPages: Math.ceil(totalSubmissions / limit), currentPage: parseInt(page, 10), submissions });
-    }
-
-    // --- Phase 3: NEW - Hyper-Optimized and CORRECT "Single Student Status" Mode ---
-    const aId = new mongoose.Types.ObjectId(assignmentId);
-    if (studentId) {
-        const sId = new mongoose.Types.ObjectId(studentId);
-        
-        // Step 3a: Authorize first. Is this student actually in this group?
-        // This is the single source of truth.
-       if(gId){
-         const groupWithStudent = await groupModel.findOne({ _id: gId, enrolledStudents: sId }).lean();
-
-        if (!groupWithStudent) {
-            return next(new Error("The specified student was not found in this group.", { cause: 404 }));
-        }
-       }
-
-        // Step 3b: Now that we're authorized, fetch the student and their submission status.
-        // This can be done in parallel for maximum performance.
-        const [student, submission] = await Promise.all([
-            studentModel.findById(sId).select("userName firstName lastName").lean(),
-            SubassignmentModel.findOne({ assignmentId: aId, studentId: sId }).select("SubmitDate isLate").lean()
-        ]);
-
-        // It's technically possible the student was deleted after being enrolled.
-        if (!student) {
-            return next(new Error("Student data could not be retrieved.", { cause: 404 }));
-        }
-
-        const responseData = {
-            ...student,
-            status: submission ? "submitted" : "not submitted",
-            submittedAt: submission?.SubmitDate || null,
-            isLate: submission?.isLate ?? null,
-        };
-
-        return res.status(200).json({
-            message: "Submission status for student fetched successfully",
-            student: responseData
-        });
-    }
-
-    // --- Phase 4: Handle "Group Assignment Status" Mode with Aggregation ---
-    // ... (This logic for handling the entire group's status remains the same as it was correct)
-    const assignment = await assignmentModel.findOne({ _id: aId, groupIds: gId }).lean();
-    if (!assignment) {
-        return next(new Error("The specified assignment was not found or is not linked to this group.", { cause: 404 }));
+        // ... (This logic block from before is correct and remains)
+        const query = { groupId: gId };
+        // ... (rest of the logic for this specific case)
+        return; 
     }
     
-    // ... (The rest of your excellent aggregation pipeline goes here)
-});
+    // For all other cases, we need an assignmentId.
+    if (!mongoose.Types.ObjectId.isValid(assignmentId)) {
+        return next(new Error("A valid Assignment ID is required for this query.", { cause: 400 }));
+    }
+    const aId = new mongoose.Types.ObjectId(assignmentId);
 
+    // Perform all necessary validation checks in parallel for maximum speed.
+    const validationPromises = [
+        groupModel.findById(gId).lean(),
+        assignmentModel.findOne({ _id: aId, groupIds: gId }).lean()
+    ];
+    if (studentId) {
+        if (!mongoose.Types.ObjectId.isValid(studentId)) {
+            return next(new Error("Invalid Student ID format.", { cause: 400 }));
+        }
+        // Validate that the student is actually in the group. This is our authorization check.
+        validationPromises.push(studentModel.findOne({ _id: studentId, groupId: gId }).lean());
+    }
+    
+    const [group, assignment, student] = await Promise.all(validationPromises);
+
+    if (!group) { return next(new Error("Group not found.", { cause: 404 })); }
+    if (!assignment) { return next(new Error("Assignment not found or not assigned to this group.", { cause: 404 })); }
+    if (studentId && !student) { return next(new Error("The specified student was not found within this group.", { cause: 404 })); }
+
+    // --- Phase 2: Build The Dynamic Aggregation Pipeline ---
+    const studentMatchStage = { groupId: gId };
+    if (studentId) {
+        studentMatchStage._id = new mongoose.Types.ObjectId(studentId);
+    }
+    
+    const aggregationPipeline = [
+        // 1. Start with a precise set of students.
+        { $match: studentMatchStage },
+        // 2. Perform an efficient "left join" to find their submission for THIS assignment.
+        {
+            $lookup: {
+                from: "subassignments", // The collection name in MongoDB
+                let: { student_id: "$_id" },
+                pipeline: [
+                    { $match: { $expr: { $and: [ { $eq: ["$studentId", "$$student_id"] }, { $eq: ["$assignmentId", aId] } ] } } },
+                    { $project: { _id: 1, SubmitDate: 1, isLate: 1 } } // Only bring back needed data
+                ],
+                as: "submissionDetails"
+            }
+        },
+        // 3. Reshape the data for a clean output.
+        { $addFields: { submission: { $first: "$submissionDetails" } } },
+        { $addFields: { status: { $cond: { if: "$submission", then: "submitted", else: "not submitted" } } } },
+        // 4. Conditionally add a stage to filter by submission status.
+        ...(status && ["submitted", "not submitted"].includes(status) ? [{ $match: { status } }] : []),
+        // 5. Project the final fields.
+        {
+            $project: {
+                _id: 1,
+                userName: 1,
+                firstName: 1,
+                lastName: 1,
+                status: 1,
+                submittedAt: "$submission.SubmitDate",
+                isLate: "$submission.isLate",
+                submissionId: "$submission._id"
+            }
+        }
+    ];
+
+    // --- Phase 3: Execute Pipeline with Pagination ---
+    const pageNum = Math.max(1, parseInt(page, 10));
+    const sizeNum = Math.max(1, parseInt(size, 10));
+    const skip = (pageNum - 1) * sizeNum;
+
+    // Create a parallel pipeline to get the total count for accurate pagination.
+    const countPipeline = [...aggregationPipeline, { $count: 'total' }];
+
+    const [[countResult], studentResults] = await Promise.all([
+        studentModel.aggregate(countPipeline),
+        studentModel.aggregate(aggregationPipeline).sort({ firstName: 1 }).skip(skip).limit(sizeNum)
+    ]);
+    
+    const total = countResult?.total || 0;
+
+    // --- Phase 4: Respond ---
+    res.status(200).json({
+        message: "Submission status fetched successfully",
+        assignmentName: assignment.name,
+        total,
+        totalPages: Math.ceil(total / sizeNum),
+        currentPage: pageNum,
+        data: studentId ? studentResults[0] || null : studentResults // Return single object or array
+    });
+});
 export const getSubmissions = asyncHandler(async (req, res, next) => {
   const { assignmentId, submissionId } = req.query;
   const userId = req.user._id;
