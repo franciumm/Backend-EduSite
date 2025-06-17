@@ -463,7 +463,7 @@ export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
     const { submissionId } = req.body;
     const { user, isteacher } = req;
 
-    if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
+    if (!submissionId || (!mongoose.Types.ObjectId.isValid(submissionId))) {
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
 
