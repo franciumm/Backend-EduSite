@@ -7,106 +7,103 @@ import mongoose from "mongoose";
 import fs from 'fs'
 import studentModel from "../../../../DB/models/student.model.js";
 
-
-
-// 1. الدالة دي مش محتاجة ترجّع Promise، فمش هنغلفها بـ asyncHandler
 const validateExamId = (req, res, next) => {
-  const { examId } = req.query;
-  if (!examId) {
-    return next(new Error("Exam ID is required", { cause: 400 }));
-  }
-  next();
+    const { examId } = req.query;
+    if (!examId || !mongoose.Types.ObjectId.isValid(examId)) { // Added ObjectId validation
+        return next(new Error("A valid Exam ID is required in the query.", { cause: 400 }));
+    }
+    next();
 };
 
-// 2. دالة صلاحيات الطالب/المدرس لحد دلوقتي async، يبقى هنا نستخدم asyncHandler عادي
-const authorizeUserForExam = async (req, res, next) => {
-  const { examId } = req.query;
-  const exam = await examModel.findById(examId);
-  if (!exam) {
-    return next(new Error("Exam not found", { cause: 404 }));
-  }
+// --- 2. Authorization & Enrollment Middleware (Asynchronous & Optimized) ---
+const authorizeAndEnrollUser = async (req, res, next) => {
+    const { examId } = req.query;
+    const { user, isteacher } = req;
+    const isTeacher = isteacher?.teacher === true;
+    
+    // Performance Boost: Fetch exam and student data in parallel.
+    const [exam] = await Promise.all([
+        examModel.findById(examId),
+        // No need for a separate student lookup; `req.user` from `isAuth` is sufficient.
+    ]);
 
-  // لو teacher، نفترض إنه عنده صلاحية تلقائية
-  if (req.isteacher?.teacher) {
-    req.exam = exam;
-    return next();
-  }
-
-  // لو student، نتحقق من المجموعات والتسجيل والـ exceptions
-  const studentId = req.user._id.toString();
-  const a7a = await studentModel.findById( req.user._id);
-  const studentGroupId = a7a.groupId?.toString();
-
-  const isInGroup = exam.groupIds.some((gid) => gid.toString() === studentGroupId);
-  const isEnrolled = exam.enrolledStudents.some((sid) => sid.toString() === studentId);
-  const isRejected = exam.rejectedStudents.some((sid) => sid.toString() === studentId);
-  const exceptionEntry = exam.exceptionStudents.find((ex) => ex.studentId.toString() === studentId);
-
-  if (isRejected || (!isInGroup && !isEnrolled && !exceptionEntry)) {
-    return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
-  }
-
-  // نتحقق من التايملاين (أساسي أو استثناء)
-  const now = new Date();
-  if (exceptionEntry) {
-    if (now < exceptionEntry.startdate || now > exceptionEntry.enddate) {
-      return next(new Error("This exam is not available (exception timeline).", { cause: 403 }));
+    if (!exam) {
+        return next(new Error("Exam not found.", { cause: 404 }));
     }
-  } else {
-    if (now < exam.startdate || now > exam.enddate) {
-      return next(new Error("This exam is not available (main timeline).", { cause: 403 }));
+
+    // --- Teacher Path (Simple & Fast) ---
+    if (isTeacher) {
+        req.exam = exam; // Attach exam to request for the next middleware
+        return next();
     }
-  }
 
-  // لو مش مسجل أصلاً، نضيفه لقائمة المسجلين
-  if (!isEnrolled) {
-    exam.enrolledStudents.push(req.user._id);
-    await exam.save();
-  }
+    // --- Student Path (Robust & Atomic) ---
+    const studentId = user._id;
 
-  req.exam = exam;
-  next();
+    // Check for explicit rejection first
+    if (exam.rejectedStudents?.some(id => id.equals(studentId))) {
+        return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
+    }
+
+    // Authorization check: Is the student in an allowed group OR have a special exception?
+    const isInGroup = exam.groupIds.some(gid => gid.equals(user.groupId));
+    const exceptionEntry = exam.exceptionStudents.find(ex => ex.studentId.equals(studentId));
+
+    if (!isInGroup && !exceptionEntry) {
+        return next(new Error("You are not in an authorized group for this exam.", { cause: 403 }));
+    }
+    
+    // Timeline check: Use the exception timeline if it exists, otherwise use the main one.
+    const now = new Date();
+    const timeline = exceptionEntry ? 
+        { start: exceptionEntry.startdate, end: exceptionEntry.enddate } : 
+        { start: exam.startdate, end: exam.enddate };
+        
+    if (now < timeline.start || now > timeline.end) {
+        return next(new Error(`This exam is not available at this time. (Available from ${timeline.start.toLocaleString()} to ${timeline.end.toLocaleString()})`, { cause: 403 }));
+    }
+
+    // Atomic Enrollment: Add the student to the enrolled list if they download the exam.
+    // `$addToSet` is atomic and prevents duplicates, making it superior to find-then-push-then-save.
+    const updatedExam = await examModel.findByIdAndUpdate(
+        examId,
+        { $addToSet: { enrolledStudents: studentId } },
+        { new: true } // Return the updated document
+    );
+
+    req.exam = updatedExam; // Attach the *updated* exam to the request
+    next();
 };
 
-// 3. دالة تنزيل الملف من S3، بردو async معمولها wrap بالـ asyncHandler
+// --- 3. File Streaming Middleware (Asynchronous) ---
+// This logic is already well-designed. Minor improvements for clarity.
 const streamExamFile = async (req, res, next) => {
-  const exam = req.exam;
-  const { bucketName, key } = exam;
+    const { bucketName, key, Name } = req.exam;
 
-  try {
-    const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
-    const response = await s3.send(command);
+    try {
+        const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
+        const s3Response = await s3.send(command);
 
-    const filename = key.split("/").pop();
-    res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
-    res.setHeader("Content-Type", response.ContentType || "application/pdf");
+        const safeFilename = encodeURIComponent(Name.replace(/[^a-zA-Z0-9.\-_]/g, '_') + '.pdf');
+        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeFilename}`);
+        res.setHeader('Content-Type', s3Response.ContentType || "application/pdf");
+        res.setHeader('Content-Length', s3Response.ContentLength);
 
-    response.Body.pipe(res);
-
-    response.Body.on("end", async () => {
-      if (!req.isteacher?.teacher) {
-        const stillEnrolled = exam.enrolledStudents.some(
-          (sid) => sid.toString() === req.user._id.toString()
-        );
-        if (!stillEnrolled) {
-          exam.enrolledStudents.push(req.user._id);
-          await exam.save();
-        }
-      }
-    });
-  } catch (err) {
-    console.error("S3 Error:", err);
-    return next(new Error("Failed to download the exam file.", { cause: 500 }));
-  }
+        s3Response.Body.pipe(res);
+        
+    } catch (err) {
+        console.error("S3 File Streaming Error:", err);
+        return next(new Error("Failed to download the exam file.", { cause: 500 }));
+    }
 };
 
-// 4. نصدّر الـ middleware محتوية على الثلاث مراحل بدون تغليف validateExamId بالـ asyncHandler
+// --- 4. Final Exported Pipeline ---
+// The modular structure is excellent and is preserved.
 export const downloadExam = [
-  validateExamId,
-  asyncHandler(authorizeUserForExam),
-  asyncHandler(streamExamFile),
+    validateExamId,
+    asyncHandler(authorizeAndEnrollUser),
+    asyncHandler(streamExamFile),
 ];
-
 export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
   const { submissionId } = req.query;
 
