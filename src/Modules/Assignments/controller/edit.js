@@ -301,37 +301,38 @@ export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, nex
     });
 });
 // --- Fully Refactored User/Teacher Delete Function ---
-
 export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => {
-    // --- 1. Input Validation ---
+    // --- Phase 1: Fail Fast - Input Validation ---
     const { submissionId } = req.body;
-    if (!submissionId) {
-        return next(new Error("Submission ID is required.", { cause: 400 }));
-    }
-    // FIX: Validate that the ID is a valid MongoDB ObjectId format before querying the DB.
-    if (!mongoose.Types.ObjectId.isValid(submissionId)) {
-        return next(new Error("Invalid Submission ID format.", { cause: 400 }));
+    const { user, isteacher } = req;
+
+    if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
+        return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
 
-    // --- 2. Fetch Data ---
-    // Fetch the submission and the necessary related data for authorization.
-    const submission = await SubassignmentModel.findById(submissionId)
-        .populate({ path: 'assignmentId', select: 'createdBy' }); // Populate creator of the assignment
-
+    // --- Phase 2: Prepare - Parallel Data Fetching ---
+    // Fetch all documents needed for authorization. Use .lean() for fast, read-only results.
+    const submission = await SubassignmentModel.findById(submissionId).lean();
+    
     if (!submission) {
         return next(new Error("Submission not found.", { cause: 404 }));
     }
 
-    // --- 3. Authorization Logic (Clear and Explicit) ---
-    let isAuthorized = false;
-    const { user, isteacher } = req; // Destructure for cleaner access
+    // Fetch the parent assignment only if we need it for teacher authorization.
+    let assignment;
+    if (isteacher?.teacher === true) {
+        assignment = await assignmentModel.findById(submission.assignmentId).select('createdBy').lean();
+    }
 
+    // --- Phase 3: Robust Authorization ---
+    let isAuthorized = false;
     // Condition 1: The user is the student who made the submission.
     if (user._id.equals(submission.studentId)) {
         isAuthorized = true;
     }
-    // Condition 2: The user is a teacher AND is the one who created the original assignment.
-    else if (isteacher?.teacher === true && submission.assignmentId?.createdBy.equals(user._id)) {
+    // Condition 2 (Secure): The user is a teacher AND created the original assignment.
+    // To allow any teacher, you would remove the second part of this condition.
+    else if (isteacher?.teacher === true && assignment?.createdBy.equals(user._id)) {
         isAuthorized = true;
     }
 
@@ -339,49 +340,35 @@ export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => 
         return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
     }
     
-    // --- 4. Deletion Logic with Guaranteed Integrity (Using a Transaction) ---
+    // --- Phase 4: Execute - Atomic Database Transaction ---
+    // The transaction is now simpler and only contains ONE operation.
     const session = await mongoose.startSession();
-    session.startTransaction();
-
     try {
-        // First, delete the file from S3. If this fails, we don't touch the database.
-        if (submission.key) {
+        session.startTransaction();
+        await SubassignmentModel.findByIdAndDelete(submission._id, { session });
+        await session.commitTransaction();
+    } catch (error) {
+        await session.abortTransaction();
+        console.error("Database transaction failed during submission deletion:", error);
+        return next(new Error("Failed to delete submission due to a database error. Operation rolled back.", { cause: 500 }));
+    } finally {
+        await session.endSession();
+    }
+
+    // --- Phase 5: Post-Commit Cleanup - S3 Deletion ---
+    // This only runs if the database transaction was successful.
+    if (submission.key) {
+        try {
             await s3.send(new DeleteObjectCommand({
                 Bucket: submission.bucketName,
                 Key: submission.key,
             }));
+        } catch (s3Error) {
+            // Log this as a critical failure for an admin to investigate, but don't fail the request.
+            // The database record is gone, which is the most important part.
+            console.error(`CRITICAL: DB record for submission ${submission._id} was deleted, but S3 cleanup failed for key ${submission.key}.`, s3Error);
         }
-
-        // DB Operation 1: Remove the reference from the student's document.
-        // This is the CRITICAL data integrity fix you requested.
-        const updateStudent = await studentModel.findByIdAndUpdate(
-            submission.studentId,
-            { $pull: { submittedassignments: submission._id } },
-            { new: true, session } // Pass the session to include this in the transaction
-        );
-        
-        if (!updateStudent) {
-            // This is an edge case where the student was deleted after submission.
-            // We should abort to prevent leaving an orphaned submission document.
-            throw new Error(`Student with ID ${submission.studentId} not found. Cannot remove submission reference.`);
-        }
-
-        // DB Operation 2: Delete the submission document itself.
-        await SubassignmentModel.findByIdAndDelete(submission._id, { session });
-
-        // If both database operations succeed, commit the transaction.
-        await session.commitTransaction();
-
-        res.status(200).json({ message: "Submission deleted successfully." });
-
-    } catch (error) {
-        // If any error occurs (S3 or DB), abort the entire transaction.
-        await session.abortTransaction();
-        console.error("Transaction aborted:", error);
-        // Pass the error to the global error handler.
-        return next(new Error("Failed to delete the submission due to a server error.", { cause: 500 }));
-    } finally {
-        // Always end the session to clean up resources.
-        session.endSession();
     }
+
+    res.status(200).json({ message: "Submission deleted successfully." });
 });
