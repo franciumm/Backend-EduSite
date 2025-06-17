@@ -13,140 +13,141 @@ import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
 import fs from "fs";
 import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
-
+import { promises as fs } from 'fs';
+import slugify from "slugify";
 
 export const createExam = asyncHandler(async (req, res, next) => {
-  const { Name, startdate, enddate, gradeId, exceptionStudents } = req.body;
-
-  const gradedoc= await gradeModel.findById(gradeId);
-  if(!gradedoc){
-      return next(new Error("wrong GradeId ", { cause: 400 }));
-  }
-    let raw = req.body.groupIds ?? req.body["groupIds[]"];
-  if (!raw) {
-    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
-  }
-
-  // ─── 2) If they sent JSON text, parse it  
-  if (typeof raw === "string" && raw.trim().startsWith("[")) {
-    try {
-      raw = JSON.parse(raw);
-    } catch {
-      // not valid JSON – fall back below
+    // --- Phase 1: Fail Fast - Synchronous Input Validation & Sanitization ---
+    if (!req.file) {
+        return next(new Error("The exam file must be uploaded.", { cause: 400 }));
     }
-  }
 
-  let groupIds = Array.isArray(raw) ? raw : [raw];
+    const { Name, startdate, enddate, gradeId } = req.body;
+    const name = Name?.trim(); // Sanitize name to prevent whitespace issues
+    const teacherId = req.user._id;
 
-  if ( groupIds.length === 0) {
-    return next(new Error('Group IDs are required and should be an array ', { cause: 400 }));
-  }
+    if (!name || !startdate || !enddate || !gradeId) {
+        await fs.unlink(req.file.path);
+        return next(new Error("Name, startdate, enddate, and gradeId are required.", { cause: 400 }));
+    }
 
-  const invalidGroupIds = groupIds.filter(
-    (groupId) => !mongoose.Types.ObjectId.isValid(groupId)
-  );
-  if (invalidGroupIds.length > 0) {
-    return next(
-      new Error(`Invalid Group ID(s): ${invalidGroupIds.join(", ")}`, { cause: 400 })
-    );
-  }
+    // Comprehensive Date Validation
+    const start = new Date(startdate);
+    const end = new Date(enddate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || new Date() > end || start >= end) {
+        await fs.unlink(req.file.path);
+        return next(new Error("Invalid exam timeline. Ensure dates are valid, end date is in the future, and start date is before end date.", { cause: 400 }));
+    }
 
-  const validGroupIds = groupIds.map((groupId) => new mongoose.Types.ObjectId(groupId));
+    // Robust parsing for groupIds and exceptionStudents from form-data
+    const parseJsonInput = (input) => {
+        if (!input) return [];
+        if (Array.isArray(input)) return input;
+        if (typeof input === "string") {
+            try { return JSON.parse(input); } catch { return [input]; }
+        }
+        return [input];
+    };
+    
+    const groupIds = parseJsonInput(req.body.groupIds ?? req.body["groupIds[]"]);
+    const exceptionStudentsInput = parseJsonInput(req.body.exceptionStudents);
 
-  // Validate the file
-  if (!req.file) {
-    return next(new Error("Please upload a PDF file for the exam", { cause: 400 }));
-  }
+    if (groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
+        await fs.unlink(req.file.path);
+        return next(new Error("One or more Group IDs are invalid.", { cause: 400 }));
+    }
+    const validGroupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
+    const exceptionStudentIds = exceptionStudentsInput.map(ex => ex?.studentId).filter(id => id && mongoose.Types.ObjectId.isValid(id));
 
-  // Validate start and end dates
-  const currentDate = new Date();
-  if (new Date(startdate) < currentDate) {
-    return next(new Error("Start date cannot be in the past", { cause: 400 }));
-  }
-  if (new Date(startdate) >= new Date(enddate)) {
-    return next(new Error("End date must be after the start date", { cause: 400 }));
-  }
+    // --- Phase 2: Maximum Performance - Parallel Asynchronous Validation ---
+    let results;
+    try {
+        // Run all independent read operations concurrently
+        const [grade, groups, duplicateExam, exceptionStudents, fileContent] = await Promise.all([
+            gradeModel.findById(gradeId).lean(),
+            groupModel.find({ _id: { $in: validGroupIds } }).lean(),
+            examModel.findOne({ Name: name, groupIds: { $in: validGroupIds } }).lean(),
+            studentModel.find({ _id: { $in: exceptionStudentIds } }).select('groupId').lean(),
+            fs.readFile(req.file.path) // Read file from disk while querying DB
+        ]);
+        results = { grade, groups, duplicateExam, exceptionStudents, fileContent };
+    } catch (parallelError) {
+        await fs.unlink(req.file.path); // Cleanup on failure
+        console.error("Error during parallel validation phase:", parallelError);
+        return next(new Error("A server error occurred during validation.", { cause: 500 }));
+    }
+    
+    // --- Phase 3: Process Parallel Results & Deep Coherency Validation ---
+    const { grade, groups, duplicateExam, exceptionStudents, fileContent } = results;
 
-  // Validate that all groups exist
-  const groups = await groupModel.find({ _id: { $in: validGroupIds } });
-  if (!groups || groups.length !== groupIds.length) {
-    return next(new Error("One or more Group IDs were not found", { cause: 404 }));
-  }
-
-  // Check for duplicate exam name in any of the provided groups
-  const duplicateExam = await examModel.findOne({
-    Name,
-    groupIds: { $in: validGroupIds },
-  });
-  if (duplicateExam) {
-    return next(
-      new Error(
-        "An exam with this name already exists for one of the selected groups",
-        { cause: 400 }
-      )
-    );
-  }
-
-  // Validate and format exceptionStudents if provided
-  let formattedExceptions = [];
-  if (exceptionStudents && Array.isArray(exceptionStudents)) {
-    formattedExceptions = exceptionStudents.map((ex) => {
-      if (!ex.studentId || !mongoose.Types.ObjectId.isValid(ex.studentId)) {
-        throw new Error(`Invalid studentId in exceptionStudents`);
-      }
-      if (!ex.startdate || !ex.enddate) {
-        throw new Error(`Missing start/end date for an exception student`);
-      }
-      if (new Date(ex.startdate) >= new Date(ex.enddate)) {
-        throw new Error(
-          `Exception student has end date before or equal to start date`
-        );
-      }
-      return {
+    if (!grade) { await fs.unlink(req.file.path); return next(new Error("The specified grade does not exist.", { cause: 404 })); }
+    if (duplicateExam) { await fs.unlink(req.file.path); return next(new Error("An exam with this name already exists for one of the selected groups.", { cause: 409 })); }
+    if (groups.length !== validGroupIds.length) { await fs.unlink(req.file.path); return next(new Error("One or more specified groups were not found.", { cause: 404 })); }
+    if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot create an exam with an empty file.", { cause: 400 })); }
+    
+    // Deeper Validation: Ensure relationships between data are logical
+    if (!groups.every(g => g.gradeid.equals(grade._id))) {
+        await fs.unlink(req.file.path);
+        return next(new Error("Data mismatch: One or more groups do not belong to the specified grade.", { cause: 400 }));
+    }
+    if (exceptionStudentIds.length !== exceptionStudents.length) {
+        await fs.unlink(req.file.path);
+        return next(new Error("Data mismatch: One or more student IDs in the exception list were not found.", { cause: 404 }));
+    }
+    const validGroupIdsStr = validGroupIds.map(id => id.toString());
+    if (!exceptionStudents.every(s => s.groupId && validGroupIdsStr.includes(s.groupId.toString()))) {
+        await fs.unlink(req.file.path);
+        return next(new Error("Data mismatch: An exception student does not belong to any of the target groups for this exam.", { cause: 400 }));
+    }
+    const formattedExceptions = exceptionStudentsInput.map(ex => ({ // Format after validation
         studentId: new mongoose.Types.ObjectId(ex.studentId),
         startdate: new Date(ex.startdate),
         enddate: new Date(ex.enddate),
-      };
-    });
-  }
+    }));
 
-  // Upload the exam PDF to S3
-  const fileName = `${Name.replace(/\s+/g, "_")}_${Date.now()}.pdf`; // Unique file name
-  const fileContent = fs.readFileSync(req.file.path);
-  const s3Key = `Exams/${fileName}`;
+    // --- Phase 4: Transactional Write Operation for Supreme Data Integrity ---
+    const slug = slugify(name, { lower: true, strict: true });
+    const s3Key = `exams/${slug}-${Date.now()}.pdf`;
+    const session = await mongoose.startSession();
 
-  try {
-    await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
-    fs.unlinkSync(req.file.path);
+    try {
+        session.startTransaction();
 
-    const exam = await examModel.create({
-      Name,
-      startdate,
-      enddate,
-      grade: gradeId,
-      groupIds: validGroupIds,
-      bucketName: process.env.S3_BUCKET_NAME,
-      key: s3Key,
-      path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-      createdBy: req.user._id,
-      exceptionStudents: formattedExceptions,
-    });
+        const [newExam] = await examModel.create([{
+            Name: name,
+            slug,
+            startdate: start,
+            enddate: end,
+            grade: gradeId,
+            groupIds: validGroupIds,
+            bucketName: process.env.S3_BUCKET_NAME,
+            key: s3Key,
+            path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
+            createdBy: teacherId,
+            exceptionStudents: formattedExceptions,
+        }], { session });
 
-    return res.status(201).json({
-      message: "Exam created successfully",
-      exam,
-    });
-  } catch (error) {
-    console.error("Error creating exam:", error);
+        // Only upload to S3 if DB create succeeds
+        await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
 
-    if (fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+        // If both succeed, commit the transaction
+        await session.commitTransaction();
+        res.status(201).json({ message: "Exam created successfully", exam: newExam });
+
+    } catch (error) {
+        // If any error occurs, abort the entire transaction
+        await session.abortTransaction();
+        // If the S3 upload failed, the DB record is gone. If the DB failed, S3 wasn't touched.
+        // But if DB succeeded and S3 failed, the file might exist in S3, so we try to clean it up.
+        await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key).catch(s3Err => console.error("Attempted to cleanup S3 file after transaction abort but failed:", s3Err));
+        console.error("Error creating exam, transaction aborted:", error);
+        return next(new Error("Failed to create exam due to a server error. The operation was rolled back.", { cause: 500 }));
+    } finally {
+        // ALWAYS end the session and cleanup the local file
+        await session.endSession();
+        await fs.unlink(req.file.path); 
     }
-    return next(new Error("Error creating exam", { cause: 500 }));
-  }
 });
-
-
 export const submitExam = asyncHandler(async (req, res, next) => {
   // --- 1. INITIAL SETUP & VALIDATION ---
   const { examId, notes = "" } = req.body;
