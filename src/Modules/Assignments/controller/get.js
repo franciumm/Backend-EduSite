@@ -72,11 +72,13 @@ export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
         
         // Step 3a: Authorize first. Is this student actually in this group?
         // This is the single source of truth.
-        const groupWithStudent = await groupModel.findOne({ _id: gId, enrolledStudents: sId }).lean();
+       if(gId){
+         const groupWithStudent = await groupModel.findOne({ _id: gId, enrolledStudents: sId }).lean();
 
         if (!groupWithStudent) {
             return next(new Error("The specified student was not found in this group.", { cause: 404 }));
         }
+       }
 
         // Step 3b: Now that we're authorized, fetch the student and their submission status.
         // This can be done in parallel for maximum performance.
