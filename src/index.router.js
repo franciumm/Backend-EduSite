@@ -14,16 +14,7 @@ const bootstrape = async (app, express) => {
     // --- 2. Global Middlewares (apply to every request) ---
     // CORS Configuration: Use your whitelist properly.
     const whitelist = ["http://127.0.0.1:5500" , "http://localhost:3000"]; // Example: Add your frontend dev server
-    app.use(cors({
-        origin: function (origin, callback) {
-            // Allow requests with no origin (like Postman or server-to-server)
-            if (!origin || whitelist.indexOf(origin) !== -1) {
-                callback(null, true);
-            } else {
-                callback(new Error("Not allowed by CORS"));
-            }
-        },
-    }));
+    app.use(cors());
     
     // Body Parsers
     app.use(express.json());
