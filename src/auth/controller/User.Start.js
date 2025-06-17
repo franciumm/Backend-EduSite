@@ -143,27 +143,25 @@ export const Signup = asyncHandler(async(req,res,next)=>{
 })
 
 
+
 export const getMyProfile = asyncHandler(async (req, res, next) => {
     const userId = req.user._id;            
     const isTeacher = req.isteacher?.teacher === true;
 
     // --- Phase 1: Prepare Queries ---
-    // Select the correct model and projection based on the user's role.
     const Model = isTeacher ? teacherModel : studentModel;
-    const projection = { password: 0, __v: 0, token: 0 }; // Also hide the token if it exists
+    const projection = { password: 0, __v: 0, token: 0 }; 
 
-    // Build the main profile query. We use .lean() for a significant performance boost.
     let profileQuery = Model.findById(userId).select(projection).lean();
 
-    // Conditionally add population for students. This logic is preserved.
     if (!isTeacher) {
         profileQuery = profileQuery
-            .populate({ path: "groupId", select: "groupname", model: "group" }) // Explicitly specify model for clarity
+            // THE FIX IS HERE: We now select both the _id and the groupname.
+            .populate({ path: "groupId", select: "_id groupname", model: "group" }) 
             .populate({ path: "gradeId", select: "grade", model: "grade" });
     }
 
     // --- Phase 2: Maximum Performance - Parallel Data Fetching ---
-    // Execute all independent database queries concurrently.
     const [account, assignmentSubmissions, examSubmissions] = await Promise.all([
         profileQuery,
         SubassignmentModel.find({ studentId: userId }).lean(),
@@ -175,11 +173,10 @@ export const getMyProfile = asyncHandler(async (req, res, next) => {
         return next(new Error("Account not found. The user may have been deleted.", { cause: 404 }));
     }
 
-    // Combine the results into a clean, final data object.
     const responseData = {
-        ...account, // Spread the main account details
-        assignmentSubmissions, // Attach the array of assignment submissions
-        examSubmissions,       // Attach the array of exam submissions
+        ...account,
+        assignmentSubmissions,
+        examSubmissions,
     };
 
     res.status(200).json({
@@ -187,7 +184,6 @@ export const getMyProfile = asyncHandler(async (req, res, next) => {
         data: responseData,
     });
 });
-
 export const Login = asyncHandler(async(req,res,next)=>{
     const {email , password}= req.body;
     const user = await UserModel.findOne({email});
