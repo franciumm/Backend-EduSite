@@ -78,6 +78,15 @@ const authorizeAndEnrollUser = async (req, res, next) => {
 // --- 3. File Streaming Middleware (Asynchronous) ---
 // This logic is already well-designed. Minor improvements for clarity.
 const streamExamFile = async (req, res, next) => {
+    const exam = req.exam;
+
+    // --- Data Integrity Check ---
+    // Before we even try to call S3, verify that the required data exists.
+    if (!exam || !exam.bucketName || !exam.key) {
+        console.error("Data Integrity Error: Exam document is missing S3 bucketName or key.", { examId: exam._id });
+        return next(new Error("Cannot download file: exam data is incomplete.", { cause: 500 }));
+    }
+
     const { bucketName, key, Name } = req.exam;
 
     try {
@@ -87,8 +96,9 @@ const streamExamFile = async (req, res, next) => {
         const safeFilename = encodeURIComponent(Name.replace(/[^a-zA-Z0-9.\-_]/g, '_') + '.pdf');
         res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeFilename}`);
         res.setHeader('Content-Type', s3Response.ContentType || "application/pdf");
-        res.setHeader('Content-Length', s3Response.ContentLength);
-
+ if(s3Response.ContentLength) {
+             res.setHeader('Content-Length', s3Response.ContentLength);
+        }
         s3Response.Body.pipe(res);
         
     } catch (err) {
