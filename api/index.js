@@ -7,6 +7,7 @@ import DBConnect from "../DB/DB.Connect.js";
 dotenv.config();
 
 const app = express();
+mongoose.set('bufferCommands', false);
 
 const startServer = async () => {
   try {
