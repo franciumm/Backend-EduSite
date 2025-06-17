@@ -1,4 +1,3 @@
-import DBConnect from '../DB/DB.Connect.js';
 import { globalerrorHandling } from './utils/erroHandling.js';
 import cors from 'cors';
 import auth from './auth/auth.router.js';
@@ -13,7 +12,7 @@ const bootstrape = async (app, express) => {
     
     // --- 1. Database Connection ---
     // Initiate the connection when the application starts.
-    await DBConnect();
+    
 
     // --- 2. Global Middlewares (apply to every request) ---
     // CORS Configuration: Use your whitelist properly.
