@@ -55,7 +55,6 @@ const studentSchema = new Schema(
   { timestamps: true }
 );
 
-studentSchema.index({ email: 1 });
 studentSchema.index({ phone: 1 });
 
 const studentModel = model("student", studentSchema);
