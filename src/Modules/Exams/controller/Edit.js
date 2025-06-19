@@ -7,7 +7,8 @@ import mongoose from "mongoose";
 import fs from 'fs'
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
-import { format, zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
+import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
+
 
 const validateExamId = (req, res, next) => {
     const { examId } = req.query;
@@ -58,8 +59,8 @@ const authorizeAndEnrollUser = async (req, res, next) => {
 
     if (now < timeline.start || now > timeline.end) {
         // ** THE FIX IS HERE: Format the error message for the user in their time zone **
-        const zonedStart = utcToZonedTime(timeline.start, uaeTimeZone);
-        const zonedEnd = utcToZonedTime(timeline.end, uaeTimeZone);
+        const zonedStart = toZonedTime(timeline.start, uaeTimeZone);
+        const zonedEnd = toZonedTime(timeline.end, uaeTimeZone);
 
         // Create a user-friendly format string
         const friendlyFormat = "eeee, MMMM d, yyyy 'at' h:mm a (z)"; // e.g., "Monday, October 28, 2024 at 10:00 AM (GST)"

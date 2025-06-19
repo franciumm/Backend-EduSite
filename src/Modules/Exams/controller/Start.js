@@ -8,7 +8,7 @@ import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
 import { promises as fs } from 'fs';
 import slugify from "slugify";
-import { zonedTimeToUtc } from 'date-fns-tz';
+import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 
 export const createExam = asyncHandler(async (req, res, next) => {
     // --- Phase 1: Fail Fast - Synchronous Input Validation & Sanitization ---
@@ -25,8 +25,8 @@ export const createExam = asyncHandler(async (req, res, next) => {
         await fs.unlink(req.file.path);
         return next(new Error("Name, startdate, enddate, and gradeId are required.", { cause: 400 }));
     }
-const utcStartDate = zonedTimeToUtc(startdate, uaeTimeZone);
-    const utcEndDate = zonedTimeToUtc(enddate, uaeTimeZone);
+const utcStartDate = fromZonedTime(startdate, uaeTimeZone);
+    const utcEndDate = fromZonedTime(enddate, uaeTimeZone);
     // Comprehensive Date Validation
     const start = new Date(utcStartDate);
     const end = new Date(utcEndDate);
