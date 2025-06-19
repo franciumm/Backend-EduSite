@@ -52,7 +52,7 @@ const uaeTimeZone = 'Asia/Dubai';
       .sort({ startdate: 1 }) // soonest exam first
       .skip(skip)
       .limit(limit)
-      .select("Name startdate enddate groupIds grade exceptionStudents");
+      .select("Name startdate enddate groupIds grade exceptionStudents path");
 
     totalExams = await examModel.countDocuments(query);
   } else {
