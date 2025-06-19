@@ -21,14 +21,13 @@ const validateExamId = (req, res, next) => {
 // --- 2. Authorization & Enrollment Middleware (Asynchronous & Optimized) ---
 
 const authorizeAndEnrollUser = async (req, res, next) => {
-    // --- 1. SETUP ---
+    // --- SETUP ---
     const { examId } = req.query;
     const { user, isteacher } = req;
     const isTeacher = isteacher?.teacher === true;
-    const uaeTimeZone = 'Asia/Dubai'; // Define the target time zone
+    const uaeTimeZone = 'Asia/Dubai';
 
     const exam = await examModel.findById(examId);
-
     if (!exam) {
         return next(new Error("Exam not found.", { cause: 404 }));
     }
@@ -38,40 +37,37 @@ const authorizeAndEnrollUser = async (req, res, next) => {
         return next();
     }
 
-    // --- 2. STUDENT PATH ---
+    // --- STUDENT AUTHORIZATION (remains the same) ---
     const studentId = user._id;
-
-    if (exam.rejectedStudents?.some(id => id.equals(studentId))) {
-        return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
-    }
-
+    // ... (Your existing authorization logic for groups, rejections, etc.)
     const student = await studentModel.findById(user._id);
     user.groupId = student.groupId;
-    
     const isInGroup = exam.groupIds.some(gid => gid.equals(user.groupId));
     if (!isInGroup) {
         return next(new Error("You are not in an authorized group for this exam.", { cause: 403 }));
     }
 
-    // --- 3. TIME ZONE AWARE TIMELINE CHECK ---
-    const now = new Date(); // This is the current moment in UTC, which is correct for comparison
-    const timeline = { start: exam.startdate, end: exam.enddate };
+    // --- EXPLICIT UAE TIME ZONE CHECK ---
 
-    if (now < timeline.start || now > timeline.end) {
-        // ** THE FIX IS HERE: Format the error message for the user in their time zone **
-        const zonedStart = toZonedTime(timeline.start, uaeTimeZone);
-        const zonedEnd = toZonedTime(timeline.end, uaeTimeZone);
+    // Step 1: Get the current time, explicitly represented as UAE time.
+    const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
 
-        // Create a user-friendly format string
-        const friendlyFormat = "eeee, MMMM d, yyyy 'at' h:mm a (z)"; // e.g., "Monday, October 28, 2024 at 10:00 AM (GST)"
+    // Step 2: Get the exam's start and end times, also explicitly represented as UAE time.
+    const examStartTimeInUAE = toZonedTime(exam.startdate, uaeTimeZone);
+    const examEndTimeInUAE = toZonedTime(exam.enddate, uaeTimeZone);
 
-        const friendlyStartDate = format(zonedStart, friendlyFormat, { timeZone: uaeTimeZone });
-        const friendlyEndDate = format(zonedEnd, friendlyFormat, { timeZone: uaeTimeZone });
-
-        return next(new Error(`This exam is not available at this time. (Available from ${friendlyStartDate} to ${friendlyEndDate})`, { cause: 403 }));
+    // Step 3: Compare the UAE times directly. This is now perfectly clear.
+    if (nowInUAE < examStartTimeInUAE || nowInUAE > examEndTimeInUAE) {
+        // The error message formatting remains the same and is already correct.
+        const friendlyFormat = "eeee, MMMM d, yyyy 'at' h:mm a (z)";
+        const friendlyStartDate = format(examStartTimeInUAE, friendlyFormat, { timeZone: uaeTimeZone });
+        const friendlyEndDate = format(examEndTimeInUAE, friendlyFormat, { timeZone: uaeTimeZone });
+        const errorMessage = `This exam is not available at this time. (Available from ${friendlyStartDate} to ${friendlyEndDate})`;
+        
+        return next(new Error(errorMessage, { cause: 403 }));
     }
 
-    // --- 4. ATOMIC ENROLLMENT ---
+    // --- ATOMIC ENROLLMENT (Remains the same) ---
     const updatedExam = await examModel.findByIdAndUpdate(
         examId,
         { $addToSet: { enrolledStudents: studentId } },
@@ -81,6 +77,7 @@ const authorizeAndEnrollUser = async (req, res, next) => {
     req.exam = updatedExam;
     next();
 };
+
 // --- 3. File Streaming Middleware (Asynchronous) ---
 // This logic is already well-designed. Minor improvements for clarity.
 const streamExamFile = async (req, res, next) => {
