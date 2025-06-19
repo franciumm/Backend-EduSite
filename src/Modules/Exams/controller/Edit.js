@@ -53,15 +53,15 @@ const authorizeAndEnrollUser = async (req, res, next) => {
     const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
 
     // Step 2: Get the exam's start and end times, also explicitly represented as UAE time.
-    const examStartTimeInUAE = toZonedTime(exam.startdate, uaeTimeZone);
-    const examEndTimeInUAE = toZonedTime(exam.enddate, uaeTimeZone);
+    const examStartTimeInUAE = exam.startdate;
+    const examEndTimeInUAE = exam.enddate;
 
     // Step 3: Compare the UAE times directly. This is now perfectly clear.
     if (nowInUAE < examStartTimeInUAE || nowInUAE > examEndTimeInUAE) {
         // The error message formatting remains the same and is already correct.
         const friendlyFormat = "eeee, MMMM d, yyyy 'at' h:mm a (z)";
-        const friendlyStartDate = format(examStartTimeInUAE, friendlyFormat, { timeZone: uaeTimeZone });
-        const friendlyEndDate = format(examEndTimeInUAE, friendlyFormat, { timeZone: uaeTimeZone });
+        const friendlyStartDate = examStartTimeInUAE;
+        const friendlyEndDate = examEndTimeInUAE;
         const errorMessage = `This exam is not available at this time. (Available from ${friendlyStartDate} to ${friendlyEndDate})`;
         
         return next(new Error(errorMessage, { cause: 403 }));
