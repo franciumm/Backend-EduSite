@@ -6,6 +6,7 @@ const submittedExamSchema = new Schema(
     studentId: { type: Schema.Types.ObjectId, ref: "student", required: true },
     score: { type: Number, default: null },  // teacher's mark
     notes: { type: String },                 // student's notes
+    examname :  { type: String, required: true },
 
     // PDF info for submission
     fileBucket: String,

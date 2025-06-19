@@ -157,7 +157,7 @@ export const getMyProfile = asyncHandler(async (req, res, next) => {
     const Model = isTeacher ? teacherModel : studentModel;
     const projection = { password: 0, __v: 0, token: 0 }; 
 
-    let profileQuery = Model.findById(userId).select(projection).lean();
+    let profileQuery = await Model.findById(userId).select(projection).lean();
 
     if (!isTeacher) {
         profileQuery = profileQuery

@@ -9,6 +9,7 @@ import {groupModel} from "../../../../DB/models/groups.model.js";
 import mongoose from "mongoose";
 import path from 'path'; // To handle file extensions
 import { promises as fs } from 'fs';
+import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
@@ -140,7 +141,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         }
 
         // Rule 4: If in a group, they must adhere to the main timeline.
-        const now = new Date();
+        const now =  toZonedTime(new Date(), uaeTimeZone);
         if (now < assignment.startDate || now > assignment.endDate) {
             await fs.unlink(req.file.path);
             return next(new Error("The submission window for your group is closed.", { cause: 403 }));
@@ -161,6 +162,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         newSubmission = await SubassignmentModel.findOneAndUpdate(
             { studentId, assignmentId },
             {
+                assignmentname : assignment.name,
                 groupId: student.groupId,
                 SubmitDate: submissionTime,
                 notes: notes?.trim() || (isLate ? "Late submission" : "Submitted on time"),

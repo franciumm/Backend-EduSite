@@ -218,6 +218,7 @@ export const submitExam = asyncHandler(async (req, res, next) => {
         newSubmission = await SubexamModel.findOneAndUpdate(
             { examId, studentId },
             {
+                examname :exam.Name,
                 SubmitDate: submissionTime,
                 notes: notes?.trim() || "",
                 fileBucket: process.env.S3_BUCKET_NAME,
