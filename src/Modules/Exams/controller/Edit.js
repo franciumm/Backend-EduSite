@@ -6,6 +6,7 @@ import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
 import mongoose from "mongoose";
 import fs from 'fs'
 import studentModel from "../../../../DB/models/student.model.js";
+import { groupModel } from "../../../../DB/models/groups.model.js";
 
 const validateExamId = (req, res, next) => {
     const { examId } = req.query;
@@ -46,6 +47,8 @@ const authorizeAndEnrollUser = async (req, res, next) => {
     }
 
     // Authorization check: Is the student in an allowed group OR have a special exception?
+    const Ga7a = await studentModel.findById(user._id);
+    user.groupId=Ga7a;
     const isInGroup = exam.groupIds.some(gid => gid.equals(user.groupId));
     const exceptionEntry = exam.exceptionStudents.find(ex => ex.studentId.equals(studentId));
 
