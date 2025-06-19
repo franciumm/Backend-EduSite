@@ -8,12 +8,14 @@ import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
 import { promises as fs } from 'fs';
 import slugify from "slugify";
+import { zonedTimeToUtc } from 'date-fns-tz';
 
 export const createExam = asyncHandler(async (req, res, next) => {
     // --- Phase 1: Fail Fast - Synchronous Input Validation & Sanitization ---
     if (!req.file) {
         return next(new Error("The exam file must be uploaded.", { cause: 400 }));
     }
+    const uaeTimeZone = 'Asia/Dubai';
 
     const { Name, startdate, enddate, gradeId } = req.body;
     const name = Name?.trim(); // Sanitize name to prevent whitespace issues
@@ -23,10 +25,11 @@ export const createExam = asyncHandler(async (req, res, next) => {
         await fs.unlink(req.file.path);
         return next(new Error("Name, startdate, enddate, and gradeId are required.", { cause: 400 }));
     }
-
+const utcStartDate = zonedTimeToUtc(startdate, uaeTimeZone);
+    const utcEndDate = zonedTimeToUtc(enddate, uaeTimeZone);
     // Comprehensive Date Validation
-    const start = new Date(startdate);
-    const end = new Date(enddate);
+    const start = new Date(utcStartDate);
+    const end = new Date(utcEndDate);
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || new Date() > end || start >= end) {
         await fs.unlink(req.file.path);
         return next(new Error("Invalid exam timeline. Ensure dates are valid, end date is in the future, and start date is before end date.", { cause: 400 }));
