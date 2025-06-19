@@ -44,7 +44,7 @@ const authorizeAndEnrollUser = async (req, res, next) => {
     user.groupId = student.groupId;
     const isInGroup = exam.groupIds.some(gid => gid.equals(user.groupId));
     if (!isInGroup) {
-        return next(new Error("You are not in an authorized group for this exam.", { cause: 403 }));
+        return next(new Error("You are not in an authorized group for this exam.", { cause: 200 }));
     }
 
     // --- EXPLICIT UAE TIME ZONE CHECK ---
@@ -64,7 +64,7 @@ const authorizeAndEnrollUser = async (req, res, next) => {
         const friendlyEndDate = examEndTimeInUAE;
         const errorMessage = `This exam is not available at this time. (Available from ${friendlyStartDate} to ${friendlyEndDate})`;
         
-        return next(new Error(errorMessage, { cause: 403 }));
+        return next(new Error(errorMessage, { cause: 200 }));
     }
 
     // --- ATOMIC ENROLLMENT (Remains the same) ---
