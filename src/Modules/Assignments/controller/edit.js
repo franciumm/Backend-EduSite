@@ -9,7 +9,7 @@ import fs from "fs";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import mongoose from "mongoose";
-import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
+import { toZonedTime } from 'date-fns-tz';
 
 // export const downloadAssignment = asyncHandler(async (req, res, next) => {
 //   const { assignmentId } = req.query;
@@ -53,6 +53,7 @@ import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 
     export const downloadAssignment = asyncHandler(async (req, res, next) => {
   const { assignmentId } = req.query;
+    const uaeTimeZone = 'Asia/Dubai';
 
   // 1. Fetch assignment
   const assignment = await assignmentModel.findById(assignmentId);
@@ -80,7 +81,8 @@ import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
     const studentGroupIdStr = student.groupId.toString();
 // Convert the array of ObjectId to an array of strings for comparison
 const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
-    const now = new Date();
+    const now =  toZonedTime(new Date(), uaeTimeZone);
+
     const timeline = { start: assignment.startDate, end: assignment.endDate };
         
     if (now < timeline.start || now > timeline.end) {
