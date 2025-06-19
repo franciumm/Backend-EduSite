@@ -153,7 +153,7 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     const submissionTime = toZonedTime(new Date(), uaeTimeZone);
    
     if (isteacher?.teacher === true) {
-        return next(new Error("Teachers are not permitted to submit exams.", { cause: 403 }));
+        return next(new Error("Teachers are not permitted to submit exams.", { cause: 200 }));
     }
     if (!req.file) {
         return next(new Error("A file must be attached for submission.", { cause: 400 }));
@@ -190,20 +190,20 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     if (exceptionEntry) {
         if (submissionTime < exceptionEntry.startdate || submissionTime > exceptionEntry.enddate) {
             await fs.unlink(req.file.path);
-            return next(new Error("Submission is outside your special allowed time frame.", { cause: 403 }));
+            return next(new Error("Submission is outside your special allowed time frame.", { cause: 200 }));
         }
     } else { // Standard validation for non-exception students
         if (exam.rejectedStudents?.some(id => id.equals(studentId))) {
              await fs.unlink(req.file.path);
-             return next(new Error("You are explicitly blocked from submitting for this exam.", { cause: 403 }));
+             return next(new Error("You are explicitly blocked from submitting for this exam.", { cause: 200 }));
         }
         if (!exam.groupIds.some(gid => gid.equals(user.groupId))) {
             await fs.unlink(req.file.path);
-            return next(new Error("You are not in an authorized group for this exam.", { cause: 403 }));
+            return next(new Error("You are not in an authorized group for this exam.", { cause: 200 }));
         }
         if (submissionTime < exam.startdate || submissionTime > exam.enddate) {
             await fs.unlink(req.file.path);
-            return next(new Error("Exam submission window is closed.", { cause: 403 }));
+            return next(new Error("Exam submission window is closed.", { cause: 200 }));
         }
     }
 
