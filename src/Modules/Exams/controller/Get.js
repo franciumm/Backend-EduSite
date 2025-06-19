@@ -7,6 +7,7 @@ import { pagination } from "../../../utils/pagination.js";
 import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
+import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 
 export const getExams = asyncHandler(async (req, res, next) => {
   const { page = 1, size = 10, groupId, gradeId, status } = req.query;
