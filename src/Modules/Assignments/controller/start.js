@@ -119,7 +119,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     // --- Phase 3: Process Results & Multi-Tiered Authorization Checks ---
     const { assignment, student, oldSubmission } = results;
 
-    if (!student) { await fs.unlink(req.file.path); return next(new Error("Authenticated user is not a valid student.", { cause: 403 })); }
+    if (!student) { await fs.unlink(req.file.path); return next(new Error("Authenticated user is not a valid student.", { cause: 200 })); }
     if (!assignment) { await fs.unlink(req.file.path); return next(new Error("Assignment not found.", { cause: 404 })); }
     if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot submit an empty file.", { cause: 400 })); }
 
@@ -131,7 +131,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     // Rule 1: Highest priority - check for rejection.
     if (isRejected) {
         await fs.unlink(req.file.path);
-        return next(new Error("You are explicitly blocked from submitting this assignment.", { cause: 403 }));
+        return next(new Error("You are explicitly blocked from submitting this assignment.", { cause: 200 }));
     }
 
     // Rule 2: If explicitly enrolled, they have permission. Bypass other checks.
@@ -139,14 +139,14 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         // Rule 3: If not enrolled, they must be in an authorized group.
         if (!isInGroup) {
             await fs.unlink(req.file.path);
-            return next(new Error("You are not in an authorized group for this assignment.", { cause: 403 }));
+            return next(new Error("You are not in an authorized group for this assignment.", { cause: 200 }));
         }
 
         // Rule 4: If in a group, they must adhere to the main timeline.
         const now =  toZonedTime(new Date(), uaeTimeZone);
         if (now < assignment.startDate || now > assignment.endDate) {
             await fs.unlink(req.file.path);
-            return next(new Error("The submission window for your group is closed.", { cause: 403 }));
+            return next(new Error("The submission window for your group is closed.", { cause: 200 }));
         }
     }
     // If we reach here, the student is either enrolled OR in a group within the timeline. Access is granted.
