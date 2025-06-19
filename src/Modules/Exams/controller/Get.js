@@ -10,11 +10,11 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 
 export const getExams = asyncHandler(async (req, res, next) => {
   const { page = 1, size = 10, groupId, gradeId, status } = req.query;
-
+const uaeTimeZone = 'Asia/Dubai';
   // Extract user details and role
   const user = req.user;
   const isTeacher = req.isteacher.teacher;
-  const currentDate = new Date();
+  const currentDate =  toZonedTime(new Date(), uaeTimeZone);
 
   // 1. Pagination helpers
   const { limit, skip } = pagination({ page, size });
@@ -222,8 +222,8 @@ export const getExams = asyncHandler(async (req, res, next) => {
 export const getSubmittedExams =  asyncHandler(async (req, res, next) => {
     const { groupId, examId, studentId, gradeId, status, page = 1, size = 10 } = req.query;
     const { user, isteacher } = req;
-    const isTeacher = isteacher?.teacher === true;
-    const currentDate = new Date();
+    const isTeacher = isteacher?.teacher === true;const uaeTimeZone = 'Asia/Dubai';
+    const currentDate =  toZonedTime(new Date(), uaeTimeZone);
 
     const pageNum = Math.max(1, parseInt(page, 10));
     const limit = Math.max(1, parseInt(size, 10));

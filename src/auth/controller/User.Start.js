@@ -157,10 +157,11 @@ export const getMyProfile = asyncHandler(async (req, res, next) => {
     const Model = isTeacher ? teacherModel : studentModel;
     const projection = { password: 0, __v: 0, token: 0 }; 
 
-    let profileQuery =  Model.findById(userId).select(projection).lean();
+    let profileQuery = Model.findById(userId).select(projection).lean();
 
     if (!isTeacher) {
         profileQuery = profileQuery
+            // THE FIX IS HERE: We now select both the _id and the groupname.
             .populate({ path: "groupId", select: "_id groupname", model: "group" }) 
             .populate({ path: "gradeId", select: "grade", model: "grade" });
     }

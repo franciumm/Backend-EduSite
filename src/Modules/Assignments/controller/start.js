@@ -13,6 +13,8 @@ import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
+
+  const uaeTimeZone = 'Asia/Dubai';
   // ── 1) Perform all initial SYNCHRONOUS validations first (Fail-Fast) ──────
   if (!req.file) {
     return next(new Error("Please upload the assignment file.", { cause: 400 }));
@@ -23,7 +25,7 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
 
   const start = new Date(startDate);
   const end = new Date(endDate);
-  if (isNaN(start.getTime()) || isNaN(end.getTime()) || new Date() > end || start >= end) {
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) ||toZonedTime(new Date(), uaeTimeZone) > end || start >= end) {
     await fs.unlink(req.file.path);
     return next(new Error("Invalid assignment timeline. Ensure dates are valid, the end date is in the future, and the start date is before the end date.", { cause: 400 }));
   }
@@ -89,7 +91,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     // --- Phase 1: Fail Fast - Synchronous Input Validation ---
     const { assignmentId, notes } = req.body;
     const { _id: studentId, userName } = req.user;
-
+    const uaeTimeZone = 'Asia/Dubai';
     if (!req.file) {
         return next(new Error("A file must be attached for submission.", { cause: 400 }));
     }
@@ -148,10 +150,10 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         }
     }
     // If we reach here, the student is either enrolled OR in a group within the timeline. Access is granted.
-    const isLate = new Date() > assignment.endDate;
+    const isLate = toZonedTime(new Date(), uaeTimeZone) > assignment.endDate;
     
     // --- Phase 4: Prepare & Commit - Staging S3 and Atomic DB Write ---
-    const submissionTime = new Date();
+    const submissionTime = toZonedTime(new Date(), uaeTimeZone);
     const fileExtension = path.extname(req.file.originalname);
     const s3Key = `AssignmentSubmissions/${assignmentId}/${studentId}_${submissionTime.getTime()}${fileExtension}`;
     let newSubmission;
