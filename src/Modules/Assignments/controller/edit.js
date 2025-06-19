@@ -80,9 +80,7 @@ import mongoose from "mongoose";
 // Convert the array of ObjectId to an array of strings for comparison
 const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
     const now = new Date();
-    const timeline = exceptionEntry ? 
-        { start: exceptionEntry.startDate, end: exceptionEntry.enddate } : 
-        { start: assignment.startDate, end: assignment.endDate };
+    const timeline = { start: assignment.startDate, end: assignment.endDate };
         
     if (now < timeline.start || now > timeline.end) {
         return next(new Error(`This Assignment is not available at this time. (Available from ${timeline.start.toLocaleString()} to ${timeline.end.toLocaleString()})`, { cause: 200 }));
