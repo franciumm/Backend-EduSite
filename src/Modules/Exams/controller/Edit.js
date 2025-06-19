@@ -7,6 +7,7 @@ import mongoose from "mongoose";
 import fs from 'fs'
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
+import { format, zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
 
 const validateExamId = (req, res, next) => {
     const { examId } = req.query;
@@ -17,65 +18,68 @@ const validateExamId = (req, res, next) => {
 };
 
 // --- 2. Authorization & Enrollment Middleware (Asynchronous & Optimized) ---
+
 const authorizeAndEnrollUser = async (req, res, next) => {
+    // --- 1. SETUP ---
     const { examId } = req.query;
     const { user, isteacher } = req;
     const isTeacher = isteacher?.teacher === true;
-    
-    // Performance Boost: Fetch exam and student data in parallel.
-    const [exam] = await Promise.all([
-        examModel.findById(examId),
-        // No need for a separate student lookup; `req.user` from `isAuth` is sufficient.
-    ]);
+    const uaeTimeZone = 'Asia/Dubai'; // Define the target time zone
+
+    const exam = await examModel.findById(examId);
 
     if (!exam) {
         return next(new Error("Exam not found.", { cause: 404 }));
     }
 
-    // --- Teacher Path (Simple & Fast) ---
     if (isTeacher) {
-        req.exam = exam; // Attach exam to request for the next middleware
+        req.exam = exam;
         return next();
     }
 
-    // --- Student Path (Robust & Atomic) ---
+    // --- 2. STUDENT PATH ---
     const studentId = user._id;
 
-    // Check for explicit rejection first
     if (exam.rejectedStudents?.some(id => id.equals(studentId))) {
-        return next(new Error("You are not authorized to access this exam.", { cause: 200 }));
+        return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
     }
 
-    // Authorization check: Is the student in an allowed group OR have a special exception?
-    const Ga7a = await studentModel.findById(user._id);
-    user.groupId=Ga7a.groupId;
-    const isInGroup = exam.groupIds.some(gid => gid.equals(user.groupId));
-    const exceptionEntry = exam.exceptionStudents.find(ex => ex.studentId.equals(studentId));
-
-    if (!isInGroup && !exceptionEntry) {
-        return next(new Error("You are not in an authorized group for this exam.", { cause: 200 }));
-    }
+    const student = await studentModel.findById(user._id);
+    user.groupId = student.groupId;
     
-    // Timeline check: Use the exception timeline if it exists, otherwise use the main one.
-    const now = new Date();
-    const timeline = { start: exam.startdate, end: exam.enddate };
-        
-    if (now < timeline.start || now > timeline.end) {
-        return next(new Error(`This exam is not available at this time. (Available from ${timeline.start.toLocaleString()} to ${timeline.end.toLocaleString()})`, { cause: 200 }));
+    const isInGroup = exam.groupIds.some(gid => gid.equals(user.groupId));
+    if (!isInGroup) {
+        return next(new Error("You are not in an authorized group for this exam.", { cause: 403 }));
     }
 
-    // Atomic Enrollment: Add the student to the enrolled list if they download the exam.
-    // `$addToSet` is atomic and prevents duplicates, making it superior to find-then-push-then-save.
+    // --- 3. TIME ZONE AWARE TIMELINE CHECK ---
+    const now = new Date(); // This is the current moment in UTC, which is correct for comparison
+    const timeline = { start: exam.startdate, end: exam.enddate };
+
+    if (now < timeline.start || now > timeline.end) {
+        // ** THE FIX IS HERE: Format the error message for the user in their time zone **
+        const zonedStart = utcToZonedTime(timeline.start, uaeTimeZone);
+        const zonedEnd = utcToZonedTime(timeline.end, uaeTimeZone);
+
+        // Create a user-friendly format string
+        const friendlyFormat = "eeee, MMMM d, yyyy 'at' h:mm a (z)"; // e.g., "Monday, October 28, 2024 at 10:00 AM (GST)"
+
+        const friendlyStartDate = format(zonedStart, friendlyFormat, { timeZone: uaeTimeZone });
+        const friendlyEndDate = format(zonedEnd, friendlyFormat, { timeZone: uaeTimeZone });
+
+        return next(new Error(`This exam is not available at this time. (Available from ${friendlyStartDate} to ${friendlyEndDate})`, { cause: 403 }));
+    }
+
+    // --- 4. ATOMIC ENROLLMENT ---
     const updatedExam = await examModel.findByIdAndUpdate(
         examId,
         { $addToSet: { enrolledStudents: studentId } },
-        { new: true } // Return the updated document
+        { new: true }
     );
 
-    req.exam = updatedExam; // Attach the *updated* exam to the request
+    req.exam = updatedExam;
     next();
 };
-
 // --- 3. File Streaming Middleware (Asynchronous) ---
 // This logic is already well-designed. Minor improvements for clarity.
 const streamExamFile = async (req, res, next) => {
