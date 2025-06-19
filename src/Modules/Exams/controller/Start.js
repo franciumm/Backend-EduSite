@@ -8,6 +8,7 @@ import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
 import { promises as fs } from 'fs';
 import slugify from "slugify";
+import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 
 export const createExam = asyncHandler(async (req, res, next) => {
     // --- Phase 1: Fail Fast - Synchronous Input Validation & Sanitization ---
@@ -145,9 +146,10 @@ export const createExam = asyncHandler(async (req, res, next) => {
 export const submitExam = asyncHandler(async (req, res, next) => {
     // --- Phase 1: Fail Fast - Synchronous Input Validation & Authorization ---
     const { examId, notes } = req.body;
-    const { user, isteacher } = req;
-    const submissionTime = new Date();
+    const { user, isteacher } = req; const uaeTimeZone = 'Asia/Dubai';
 
+    const submissionTime = toZonedTime(new Date(), uaeTimeZone);
+   
     if (isteacher?.teacher === true) {
         return next(new Error("Teachers are not permitted to submit exams.", { cause: 403 }));
     }
@@ -169,6 +171,8 @@ export const submitExam = asyncHandler(async (req, res, next) => {
         ]);
         fileContent = await fs.readFile(req.file.path);
         results = { exam, oldSubmission };
+
+
     } catch (parallelError) {
         await fs.unlink(req.file.path).catch(e => console.error("Temp file cleanup failed:", e));
         return next(new Error("A server error occurred during validation.", { cause: 500 }));
