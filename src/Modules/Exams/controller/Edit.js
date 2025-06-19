@@ -42,7 +42,7 @@ const authorizeAndEnrollUser = async (req, res, next) => {
 
     // Check for explicit rejection first
     if (exam.rejectedStudents?.some(id => id.equals(studentId))) {
-        return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
+        return next(new Error("You are not authorized to access this exam.", { cause: 200 }));
     }
 
     // Authorization check: Is the student in an allowed group OR have a special exception?
@@ -50,7 +50,7 @@ const authorizeAndEnrollUser = async (req, res, next) => {
     const exceptionEntry = exam.exceptionStudents.find(ex => ex.studentId.equals(studentId));
 
     if (!isInGroup && !exceptionEntry) {
-        return next(new Error("You are not in an authorized group for this exam.", { cause: 403 }));
+        return next(new Error("You are not in an authorized group for this exam.", { cause: 200 }));
     }
     
     // Timeline check: Use the exception timeline if it exists, otherwise use the main one.
@@ -60,7 +60,7 @@ const authorizeAndEnrollUser = async (req, res, next) => {
         { start: exam.startdate, end: exam.enddate };
         
     if (now < timeline.start || now > timeline.end) {
-        return next(new Error(`This exam is not available at this time. (Available from ${timeline.start.toLocaleString()} to ${timeline.end.toLocaleString()})`, { cause: 403 }));
+        return next(new Error(`This exam is not available at this time. (Available from ${timeline.start.toLocaleString()} to ${timeline.end.toLocaleString()})`, { cause: 200 }));
     }
 
     // Atomic Enrollment: Add the student to the enrolled list if they download the exam.
