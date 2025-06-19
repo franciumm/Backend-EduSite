@@ -24,5 +24,5 @@ export const globalerrorHandling = (err, req, res, next) => {
   console.error(err);
   res
     .status(err.cause || 500)
-    .json({ Message: err.message });
+    .json({ message: err.message });
 };
