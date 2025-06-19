@@ -48,7 +48,7 @@ const authorizeAndEnrollUser = async (req, res, next) => {
 
     // Authorization check: Is the student in an allowed group OR have a special exception?
     const Ga7a = await studentModel.findById(user._id);
-    user.groupId=Ga7a;
+    user.groupId=Ga7a.groupId;
     const isInGroup = exam.groupIds.some(gid => gid.equals(user.groupId));
     const exceptionEntry = exam.exceptionStudents.find(ex => ex.studentId.equals(studentId));
 
@@ -58,9 +58,7 @@ const authorizeAndEnrollUser = async (req, res, next) => {
     
     // Timeline check: Use the exception timeline if it exists, otherwise use the main one.
     const now = new Date();
-    const timeline = exceptionEntry ? 
-        { start: exceptionEntry.startdate, end: exceptionEntry.enddate } : 
-        { start: exam.startdate, end: exam.enddate };
+    const timeline = { start: exam.startdate, end: exam.enddate };
         
     if (now < timeline.start || now > timeline.end) {
         return next(new Error(`This exam is not available at this time. (Available from ${timeline.start.toLocaleString()} to ${timeline.end.toLocaleString()})`, { cause: 200 }));
