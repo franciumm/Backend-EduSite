@@ -28,8 +28,8 @@ export const createExam = asyncHandler(async (req, res, next) => {
     }
 
     // Comprehensive Date Validation
-    const start = startdate;
-    const end = enddate;
+    const start = new Date(startdate);
+    const end = new Date(enddate);
     if (isNaN(start.getTime()) || isNaN(end.getTime()) ||toZonedTime(new Date(), uaeTimeZone) > end || start >= end) {
         await fs.unlink(req.file.path);
         return next(new Error("Invalid exam timeline. Ensure dates are valid, end date is in the future, and start date is before end date.", { cause: 400 }));
