@@ -18,7 +18,7 @@ gradee.enrolledStudents.push(usercreated._id);
 await gradee.save();
 usercreated.save();
 
-return usercreated ? res.redirect(`${req.protocol}://${req.headers.host}/student/login`) : res.send(`<a href="${req.protocol}://${req.headers.host}/student/signup">Ops looks like u don't have account yet follow me to signup now. </a>`)
+return usercreated ? res.redirect(`https://adel225.github.io/EduSite/#/login`) : res.send(`<a href="https://adel225.github.io/EduSite/#/signup">Ops looks like u don't have account yet follow me to signup now. </a>`)
 })
 
 
