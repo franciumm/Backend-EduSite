@@ -9,7 +9,7 @@ import { gradeModel } from "../../../DB/models/grades.model.js";
 import  studentModel  from "../../../DB/models/student.model.js";
 import { groupModel } from "../../../DB/models/groups.model.js"; 
 import { SubassignmentModel } from "../../../DB/models/submitted_assignment.model.js";
-
+import { promises as fs } from 'fs';
 import { SubexamModel } from "../../../DB/models/submitted_exams.model.js";
 
 export const Signup = asyncHandler(async(req,res,next)=>{
@@ -18,12 +18,14 @@ export const Signup = asyncHandler(async(req,res,next)=>{
     if (password !== cPassword) {
         return next(new Error("Passwords do not match.", { cause: 400 }));
     }
-
-     const userExists = await studentModel.findOne({ $or: [{ email }, { userName }, { phone }] });
+    const [userExists,gradeOBJ]= await Promise.all([ 
+        studentModel.findOne({ $or: [{ email }, { userName }, { phone }] }),
+        gradeModel.findOne({ grade }).lean();]);
+     
     if (userExists) {
         return next(new Error('User with this email, username, or phone already exists.', { cause: 409 }));
     }
-    const  gradeOBJ =  await gradeModel.findOne({ grade }).lean();
+   
     if(!(gradeOBJ)){
         return next( Error('Invalid Grade Id ', {cause:409}));
     }
