@@ -29,9 +29,7 @@ export const Signup = asyncHandler(async(req,res,next)=>{
     if(!(gradeOBJ)){
         return next( Error('Invalid Grade Id ', {cause:409}));
     }
-    if(password != cPassword){
-        return next( Error('Password Doesn`t match'), {cause:403});
-    }
+    
     
     const newUser ={firstName,lastName,email,parentemail,gradeId: gradeOBJ._id, userName,password ,parentPhone: parentphone , phone ,confirmEmail:true };
     
