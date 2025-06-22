@@ -9,7 +9,7 @@ import { gradeModel } from "../../../DB/models/grades.model.js";
 export const confirmEmail = asyncHandler(async (req,res,next)=>{
 const tokenDec =  jwt.verify(req.params.email, process.env.EMAIL_SIG);
 const userif = await UserModel.findOne({$or :[{email:tokenDec.email},{userName :tokenDec.user.userName },{phone :tokenDec.user.phone }]});
-if(userif && userif.confirmEmail == true ){return res.redirect(`${req.protocol}://${req.headers.host}/student/login`)}
+if(userif && userif.confirmEmail == true ){return res.redirect(`${req.protocol}://${req.headers.host}/EduSite/#/login`)}
 tokenDec.user.password = bycrypt.hashSync(tokenDec.user.password, parseInt(process.env.HASH_ROUNDS));
 
 const usercreated =await  UserModel.create(tokenDec.user);
@@ -26,7 +26,7 @@ export const newConfirmEmail = asyncHandler(async (req,res,next)=>{
     
     const tokenDec = jwt.verify(req.params.email, process.env.EMAIL_SIG);
     const user = await UserModel.findOne({email : tokenDec.email.toLowerCase()});
-    if (!user) {return res.send(`<a href="${req.protocol}://${req.headers.host}/student/signup">Ops looks like u don't have account yet follow me to signup now. </a>`)}
+    if (!user) {return res.send(`<a href="${req.protocol}://${req.headers.host}/EduSite/#/signup">Ops looks like u don't have account yet follow me to signup now. </a>`)}
     if(user.isdeleted ){return next(new Error('This Email is deleted Please Login Again ', {cause : 400}))}
     const newToken = jwt.sign({email: user.email,user}, process.env.EMAIL_SIG, { expiresIn: 60 * 2 })
     const link = `${req.protocol}://${req.headers.host}/student/confirmEmail/${newToken}`

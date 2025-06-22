@@ -16,7 +16,7 @@ const teacherSchema = new Schema(
       password: {
         type: String,
         required: [true, 'Password must be typed'],
-      },
+      }
     },
     { timestamps: true }
   );
