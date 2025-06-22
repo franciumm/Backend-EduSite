@@ -20,7 +20,7 @@ export const Signup = asyncHandler(async(req,res,next)=>{
     }
     const [userExists,gradeOBJ]= await Promise.all([ 
         studentModel.findOne({ $or: [{ email }, { userName }, { phone }] }),
-        gradeModel.findOne({ grade }).lean();]);
+        gradeModel.findOne({ grade }).lean()]);
      
     if (userExists) {
         return next(new Error('User with this email, username, or phone already exists.', { cause: 409 }));
