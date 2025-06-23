@@ -8,7 +8,6 @@ import {SubassignmentModel}from "../../../../DB/models/submitted_assignment.mode
 import studentModel from "../../../../DB/models/student.model.js";
 import {groupModel} from "../../../../DB/models/groups.model.js";
 import mongoose from "mongoose";
-import path from 'path'; // To handle file extensions
 import { promises as fs } from 'fs';
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 
