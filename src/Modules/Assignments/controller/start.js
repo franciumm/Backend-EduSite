@@ -121,7 +121,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     // --- Phase 3: Process Results & Multi-Tiered Authorization Checks ---
     const { assignment, student, oldSubmission } = results;
       var now =  toZonedTime(new Date(), uaeTimeZone);
-        var isLate = now > assignment.endDate;
+        const isLate = now > assignment.endDate;
     if (!student) { await fs.unlink(req.file.path); return next(new Error("Authenticated user is not a valid student.", { cause: 200 })); }
     if (!assignment) { await fs.unlink(req.file.path); return next(new Error("Assignment not found.", { cause: 404 })); }
     if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot submit an empty file.", { cause: 400 })); }
