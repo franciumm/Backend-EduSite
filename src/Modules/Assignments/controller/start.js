@@ -92,8 +92,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     const { assignmentId, notes } = req.body;
     const { _id: studentId, userName } = req.user;
     const uaeTimeZone = 'Asia/Dubai';
-      const now =  toZonedTime(new Date(), uaeTimeZone);
-        const isLate = now > assignment.endDate;
+  
     if (!req.file) {
         return next(new Error("A file must be attached for submission.", { cause: 400 }));
     }
@@ -107,6 +106,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     try {
         const [assignment, student, oldSubmission] = await Promise.all([
             // Select all fields needed for the complex authorization logic
+                
             assignmentModel.findById(assignmentId).select('startDate endDate groupIds enrolledStudents rejectedStudents name').lean(),
             studentModel.findById(studentId).select('groupId').lean(),
             SubassignmentModel.findOne({ studentId, assignmentId }).lean(),
@@ -120,7 +120,8 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
 
     // --- Phase 3: Process Results & Multi-Tiered Authorization Checks ---
     const { assignment, student, oldSubmission } = results;
-
+      var now =  toZonedTime(new Date(), uaeTimeZone);
+        var isLate = now > assignment.endDate;
     if (!student) { await fs.unlink(req.file.path); return next(new Error("Authenticated user is not a valid student.", { cause: 200 })); }
     if (!assignment) { await fs.unlink(req.file.path); return next(new Error("Assignment not found.", { cause: 404 })); }
     if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot submit an empty file.", { cause: 400 })); }
