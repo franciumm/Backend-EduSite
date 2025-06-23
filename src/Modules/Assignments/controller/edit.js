@@ -49,11 +49,10 @@ export const downloadAssignment = asyncHandler(async (req, res, next) => {
 
         const now = toZonedTime(new Date(), uaeTimeZone);
         const timeline = { start: assignment.startDate, end: assignment.endDate };
-
-        if (now < timeline.start || now > timeline.end) {
+ if ((now < timeline.start || now > timeline.end)&& (assignment.allowSubmissionsAfterDueDate==false)) {
             return next(new Error(`This Assignment is not available at this time. (Available from ${timeline.start.toLocaleString()} to ${timeline.end.toLocaleString()})`, { cause: 200 }));
-        }
-    }
+        }}
+    
 
     // 3. Proceed with S3 download
     const { bucketName, key } = assignment;

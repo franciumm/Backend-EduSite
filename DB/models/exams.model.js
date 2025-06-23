@@ -11,10 +11,7 @@ const examSchema = new Schema(
     bucketName: String,
     key: String,
     path: String,  
-    isLate: {
-        type: Boolean,
-        default: false,
-    },
+   
     allowSubmissionsAfterDueDate: {
         type: Boolean,
         default: false, // By default, submissions are closed after the due date.

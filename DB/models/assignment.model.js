@@ -13,10 +13,7 @@ const assignmentSchema = new Schema({
     key: String,
     fileContent: String,
     path: String,
-    isLate: {
-        type: Boolean,
-        default: false,
-    },
+   
      allowSubmissionsAfterDueDate: {
         type: Boolean,
         default: false,

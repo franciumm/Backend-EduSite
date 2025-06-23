@@ -92,6 +92,8 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     const { assignmentId, notes } = req.body;
     const { _id: studentId, userName } = req.user;
     const uaeTimeZone = 'Asia/Dubai';
+      const now =  toZonedTime(new Date(), uaeTimeZone);
+        const isLate = now > assignment.endDate;
     if (!req.file) {
         return next(new Error("A file must be attached for submission.", { cause: 400 }));
     }
@@ -143,8 +145,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         }
 
         // Rule 4: If in a group, they must adhere to the main timeline.
-        const now =  toZonedTime(new Date(), uaeTimeZone);
-        const isLate = now > assignment.endDate;
+      
 
         if (now < assignment.startDate) {
             await fs.unlink(req.file.path);
