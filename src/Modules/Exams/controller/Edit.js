@@ -4,14 +4,16 @@ import { PutObjectCommand, GetObjectCommand,DeleteObjectCommand} from "@aws-sdk/
 import { s3 } from "../../../utils/S3Client.js";
 import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
 import mongoose from "mongoose";
-import fs from 'fs'
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 import { deleteFileFromS3, uploadFileToS3 } from "../../../utils/S3Client.js";
-import { promises as fs } from 'fs';
 
-
+// --- CORRECTED IMPORTS ---
+// Import the synchronous parts of 'fs' for functions like 'readFileSync'
+import fs from 'fs'; 
+// Import the promise-based parts of 'fs' under a new name 'fsPromises' for async/await
+import { promises as fsPromises } from 'fs';
 
 const validateExamId = (req, res, next) => {
     const { examId } = req.query;
@@ -44,7 +46,8 @@ export const editExam = asyncHandler(async (req, res, next) => {
                 .catch(err => console.error("Non-critical error: Failed to delete old S3 file during edit:", err));
         }
         
-        const fileContent = await fs.readFile(req.file.path);
+        // Use the aliased 'fsPromises' for async operations
+        const fileContent = await fsPromises.readFile(req.file.path);
         const newKey = `exams/${exam.Name.replace(/\s+/g, '_')}-${Date.now()}.pdf`;
         
         await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, "application/pdf");
@@ -53,7 +56,8 @@ export const editExam = asyncHandler(async (req, res, next) => {
         exam.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
         exam.bucketName = process.env.S3_BUCKET_NAME;
 
-        await fs.unlink(req.file.path);
+        // Use the aliased 'fsPromises' for async operations
+        await fsPromises.unlink(req.file.path);
     }
     
     // Sanitize and update name if provided
@@ -285,6 +289,7 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
   // 5. Upload new PDF (the "marked" version) to S3
   let newKey;
   try {
+    // The synchronous 'fs' is correctly used here, so no change is needed.
     const fileContent = fs.readFileSync(req.file.path);
     newKey = `MarkedSubmissions/${submissionId}_${Date.now()}.pdf`;
     await s3.send(
@@ -296,6 +301,7 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
         ACL: "private",
       })
     );
+    // The synchronous 'fs' is correctly used here, so no change is needed.
     fs.unlinkSync(req.file.path);
   } catch (err) {
     if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);

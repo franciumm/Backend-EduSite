@@ -5,115 +5,70 @@ import { GetObjectCommand ,PutObjectCommand,DeleteObjectCommand,DeleteObjectsCom
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
 import { PDFDocument, rgb } from "pdf-lib";
-import fs from "fs";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import mongoose from "mongoose";
 import { toZonedTime } from 'date-fns-tz';
 import { deleteFileFromS3, uploadFileToS3 } from '../../../utils/S3Client.js';
-import { promises as fs } from 'fs';
 
-// export const downloadAssignment = asyncHandler(async (req, res, next) => {
-//   const { assignmentId } = req.query;
-
-
-//   // Fetch assignment details from the database
-//   const assignment = await assignmentModel.findById(assignmentId);
-//   if (!assignment) {
-//     return next(new Error("Assignment not found", { cause: 404 }));
-//   }
-//   req.user.groupId =  await studentModel.findById(req.user._id).groupId;
-//  if(req.isteacher.teacher == false && req.user.groupId != assignment.groupId)
-//   {
-//     next(new Error("Student not In same Group", { cause: 404 })); 
-//   }
-// // Extract S3 bucket name and file key
-//   const { bucketName, key } = assignment;
-
-//   try {
-//     // Get the object from S3
-//     const command = new GetObjectCommand({
-//       Bucket: bucketName,
-//       Key: key,
-//     });
-
-//     const response = await s3.send(command);
-
-//     // Set headers for file download
-//     res.setHeader("Content-Disposition", `attachment; filename="${key.split("/").pop()}"`);
-//     res.setHeader("Content-Type", response.ContentType);
-
-//     // Pipe the file stream to the response
-//     response.Body.pipe(res);
-//   } catch (error) {
-//     console.error("Error downloading file from S3:", error);
-//     return next(new Error("Error downloading file from S3", { cause: 500 }));
-//   }
-// });
+// --- CORRECTED IMPORTS ---
+// Import the standard 'fs' for synchronous operations
+import fs from "fs";
+// Import the promise-based 'fs' API with a unique alias 'fsPromises' for async/await
+import { promises as fsPromises } from 'fs';
 
 
-
-    export const downloadAssignment = asyncHandler(async (req, res, next) => {
-  const { assignmentId } = req.query;
+export const downloadAssignment = asyncHandler(async (req, res, next) => {
+    const { assignmentId } = req.query;
     const uaeTimeZone = 'Asia/Dubai';
 
-  // 1. Fetch assignment
-  const assignment = await assignmentModel.findById(assignmentId);
-  if (!assignment) {
-    return next(new Error("Assignment not found", { cause: 404 }));
-  }
-
-  // 2. Fetch student and get their group
-  
-  // 3. Check authorization
-  const isTeacher = req.isteacher.teacher === true;
-  if (!isTeacher) {
-    var student = await studentModel.findById(req.user._id);
-  
-  if (!student) {
-    return next(new Error("Student record not found", { cause: 404 }));
-  }
-
-    // FIX: Check if the student is assigned to a group BEFORE comparing IDs
-    if (!student.groupId) {
-      return next(new Error("You are not assigned to any group.", { cause: 403 }));
+    // 1. Fetch assignment
+    const assignment = await assignmentModel.findById(assignmentId);
+    if (!assignment) {
+        return next(new Error("Assignment not found", { cause: 404 }));
     }
 
-    // Now it's safe to compare
-    const studentGroupIdStr = student.groupId.toString();
-// Convert the array of ObjectId to an array of strings for comparison
-const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
-    const now =  toZonedTime(new Date(), uaeTimeZone);
+    // 2. Authorize student or teacher
+    const isTeacher = req.isteacher.teacher === true;
+    if (!isTeacher) {
+        const student = await studentModel.findById(req.user._id);
+        if (!student) {
+            return next(new Error("Student record not found", { cause: 404 }));
+        }
 
-    const timeline = { start: assignment.startDate, end: assignment.endDate };
-        
-    if (now < timeline.start || now > timeline.end) {
-        return next(new Error(`This Assignment is not available at this time. (Available from ${timeline.start.toLocaleString()} to ${timeline.end.toLocaleString()})`, { cause: 200 }));
+        if (!student.groupId) {
+            return next(new Error("You are not assigned to any group.", { cause: 403 }));
+        }
+
+        const studentGroupIdStr = student.groupId.toString();
+        const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
+
+        if (!assignmentGroupIdsStr.includes(studentGroupIdStr)) {
+            return next(new Error("You’re not in the right group for this assignment", { cause: 403 }));
+        }
+
+        const now = toZonedTime(new Date(), uaeTimeZone);
+        const timeline = { start: assignment.startDate, end: assignment.endDate };
+
+        if (now < timeline.start || now > timeline.end) {
+            return next(new Error(`This Assignment is not available at this time. (Available from ${timeline.start.toLocaleString()} to ${timeline.end.toLocaleString()})`, { cause: 200 }));
+        }
     }
 
-// FIX: Check if the student's group is in the assignment's list of allowed groups
-if (!isTeacher && !assignmentGroupIdsStr.includes(studentGroupIdStr)) {
-    return next(new Error("You’re not in the right group for this assignment", { cause: 403 }));
-}
-  }
+    // 3. Proceed with S3 download
+    const { bucketName, key } = assignment;
+    try {
+        const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
+        const response = await s3.send(command);
 
-  // 4. Proceed with S3 download
-  const { bucketName, key } = assignment;
-  try {
-    const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
-    const response = await s3.send(command);
-
-    res.setHeader("Content-Disposition", `attachment; filename="${key.split("/").pop()}"`);
-    res.setHeader("Content-Type", response.ContentType);
-    response.Body.pipe(res);
-  } catch (error) {
-    console.error("Error downloading file from S3:", error);
-    next(new Error("Error downloading file from S3", { cause: 500 }));
-  }
-}
-
-
-);
+        res.setHeader("Content-Disposition", `attachment; filename="${key.split("/").pop()}"`);
+        res.setHeader("Content-Type", response.ContentType);
+        response.Body.pipe(res);
+    } catch (error) {
+        console.error("Error downloading file from S3:", error);
+        next(new Error("Error downloading file from S3", { cause: 500 }));
+    }
+});
 
 export const editAssignment = asyncHandler(async (req, res, next) => {
     const { assignmentId, ...updateData } = req.body;
@@ -123,49 +78,41 @@ export const editAssignment = asyncHandler(async (req, res, next) => {
         return next(new Error("A valid Assignment ID is required.", { cause: 400 }));
     }
 
-    // Find the original assignment
     const assignment = await assignmentModel.findById(assignmentId);
     if (!assignment) {
         return next(new Error("Assignment not found.", { cause: 404 }));
     }
 
-    // Authorize: ensure the user editing is the one who created it
     if (!assignment.createdBy.equals(teacherId)) {
         return next(new Error("You are not authorized to edit this assignment.", { cause: 403 }));
     }
 
-    // If a new file is uploaded, handle the replacement
     if (req.file) {
-        // 1. Delete the old file from S3, if it exists
         if (assignment.key) {
             await deleteFileFromS3(assignment.bucketName, assignment.key)
                 .catch(err => console.error("Non-critical error: Failed to delete old S3 file during edit:", err));
         }
 
-        // 2. Upload the new file to S3
-        const fileContent = await fs.readFile(req.file.path);
+        // Use the aliased 'fsPromises' for async file reading
+        const fileContent = await fsPromises.readFile(req.file.path);
         const newKey = `assignments/${assignment.slug}-${Date.now()}.pdf`;
         
         await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, "application/pdf");
         
-        // 3. Update assignment document with new file details
         assignment.key = newKey;
         assignment.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
         assignment.bucketName = process.env.S3_BUCKET_NAME;
 
-        // 4. Clean up the temporary local file
-        await fs.unlink(req.file.path);
+        // Use the aliased 'fsPromises' for async file deletion
+        await fsPromises.unlink(req.file.path);
     }
 
-    // Update other fields from req.body (name, dates, etc.)
-    // This dynamically updates only the fields provided in the request
     Object.keys(updateData).forEach(key => {
         if (updateData[key] !== undefined && updateData[key] !== null) {
             assignment[key] = updateData[key];
         }
     });
     
-    // Save the updated assignment
     const updatedAssignment = await assignment.save();
 
     res.status(200).json({
@@ -177,35 +124,30 @@ export const editAssignment = asyncHandler(async (req, res, next) => {
 export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) => {
   const { submissionId } = req.query;
 
-  // Validate submissionId
   if (!submissionId) {
     return next(new Error("Submission ID is required", { cause: 400 }));
   }
 
-  // Fetch the submission details
   const submission = await SubassignmentModel.findById(submissionId)
-    .populate("assignmentId", "name") // Populate assignment name
-    .populate("studentId", "userName firstName lastName"); // Populate student details
+    .populate("assignmentId", "name") 
+    .populate("studentId", "userName firstName lastName"); 
 
   if (!submission) {
     return next(new Error("Submission not found", { cause: 404 }));
   }
 
-  // Validate access: Only the submitting student or the teacher can download
   if (
-    req.isteacher.teacher === false && // If the user is a student
-    submission.studentId._id.toString() !== req.user._id.toString() // Not the submitting student
+    req.isteacher.teacher === false && 
+    submission.studentId._id.toString() !== req.user._id.toString()
   ) {
     return next(
       new Error("You are not allowed to download this submission", { cause: 403 })
     );
   }
 
-  // Extract S3 bucket and file key
   const { bucketName, key } = submission;
 
   try {
-    // Fetch the file from S3
     const command = new GetObjectCommand({
       Bucket: bucketName,
       Key: key,
@@ -213,12 +155,10 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
 
     const response = await s3.send(command);
 
-    // Set headers for the file download
     const fileName = `${submission.assignmentId.name}_${submission.studentId.userName}.pdf`;
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     res.setHeader("Content-Type", response.ContentType);
 
-    // Stream the file to the response
     response.Body.pipe(res);
   } catch (error) {
     console.error("Error downloading the submission from S3:", error);
@@ -230,7 +170,6 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
 export const markAssignment = asyncHandler(async (req, res, next) => {
   const { submissionId, score, notes } = req.body;
 
-  // Validate submission existence
   const submission = await SubassignmentModel.findById(submissionId).populate("assignmentId studentId");
   if (!submission) {
     return next(new Error("Submission not found", { cause: 404 }));
@@ -238,36 +177,31 @@ export const markAssignment = asyncHandler(async (req, res, next) => {
 
   const { bucketName, key } = submission;
 
-  // Ensure a marked file is uploaded
   if (!req.file) {
     return next(new Error("Please upload the marked PDF file", { cause: 400 }));
   }
 
   try {
-    // Read the uploaded marked file
+    // The synchronous 'fs' is correctly used here, no change needed
     const fileContent = fs.readFileSync(req.file.path);
 
-    // Generate S3 parameters for replacing the original file
     const s3Params = {
       Bucket: bucketName,
-      Key: key, // Keep the same key to overwrite the original submission
+      Key: key, 
       Body: fileContent,
       ContentType: "application/pdf",
     };
 
-    // Upload the updated PDF back to S3 (overwriting the original file)
     await s3.send(new PutObjectCommand(s3Params));
 
-    // Update submission metadata
-    submission.score = score || submission.score; // Update the score if provided
-    submission.notes = notes || submission.notes; // Update notes if provided
-    submission.isMarked = true; // Mark the submission as marked
+    submission.score = score || submission.score; 
+    submission.notes = notes || submission.notes;
+    submission.isMarked = true; 
     await submission.save();
 
-    // Cleanup: Remove the uploaded file from local storage
+    // The synchronous 'fs' is correctly used here, no change needed
     fs.unlinkSync(req.file.path);
 
-    // Respond with success
     res.status(200).json({
       message: "Submission marked and replaced successfully",
       updatedSubmission: submission,
@@ -275,8 +209,8 @@ export const markAssignment = asyncHandler(async (req, res, next) => {
   } catch (error) {
     console.error("Error marking and replacing the submission:", error);
 
-    // Cleanup: Remove the uploaded file from local storage in case of error
     if (req.file && fs.existsSync(req.file.path)) {
+      // The synchronous 'fs' is correctly used here, no change needed
       fs.unlinkSync(req.file.path);
     }
 
@@ -285,7 +219,6 @@ export const markAssignment = asyncHandler(async (req, res, next) => {
 });
 
 export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, next) => {
-    // --- Phase 1: Fail Fast - Input Validation & Authorization ---
     const { assignmentId } = req.body;
     const teacherId = req.user._id;
 
@@ -293,8 +226,6 @@ export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, nex
         return next(new Error("A valid Assignment ID is required.", { cause: 400 }));
     }
 
-    // --- Phase 2: Prepare - Parallel Data Fetching ---
-    // Fetch all necessary documents in parallel for maximum performance.
     const [assignment, submissions] = await Promise.all([
         assignmentModel.findById(assignmentId).select('key createdBy').lean(),
         SubassignmentModel.find({ assignmentId }).select('key').lean()
@@ -304,26 +235,18 @@ export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, nex
         return next(new Error("Assignment not found.", { cause: 404 }));
     }
 
-    // SECURITY UPGRADE: Ensure only the creator can delete the assignment.
-    // You could add a role check here for super-admins, e.g., `|| req.user.role === 'superadmin'`
     if (!assignment.createdBy.equals(teacherId)) {
         return next(new Error("You are not authorized to delete this assignment.", { cause: 403 }));
     }
 
-    // --- Phase 3: Execute - Atomic Database Transaction ---
     const session = await mongoose.startSession();
     try {
         session.startTransaction();
 
         const submissionIds = submissions.map(s => s._id);
 
-        // Delete all submission documents for this assignment
         if (submissionIds.length > 0) {
             await SubassignmentModel.deleteMany({ _id: { $in: submissionIds } }, { session });
-        }
-
-        // Remove dangling references from all affected students
-        if (submissionIds.length > 0) {
             await studentModel.updateMany(
                 { submittedassignments: { $in: submissionIds } },
                 { $pull: { submittedassignments: { $in: submissionIds } } },
@@ -331,14 +254,11 @@ export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, nex
             );
         }
         
-        // Finally, delete the assignment itself
         await assignmentModel.findByIdAndDelete(assignmentId, { session });
         
-        // If all database operations succeed, commit the transaction.
         await session.commitTransaction();
 
     } catch (error) {
-        // If any DB operation fails, abort the entire transaction.
         await session.abortTransaction();
         console.error("Database transaction failed during assignment deletion:", error);
         return next(new Error("Failed to delete assignment due to a database error. Operation rolled back.", { cause: 500 }));
@@ -346,8 +266,6 @@ export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, nex
         await session.endSession();
     }
 
-    // --- Phase 4: Post-Commit Cleanup - S3 Deletion ---
-    // This phase only runs if the database transaction was successful.
     const objectsToDelete = submissions.map(sub => ({ Key: sub.key })).filter(item => item.Key);
     if (assignment.key) {
         objectsToDelete.push({ Key: assignment.key });
@@ -360,8 +278,6 @@ export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, nex
                 Delete: { Objects: objectsToDelete },
             }));
         } catch (s3Error) {
-            // Log the S3 error but don't fail the request, as the DB part is already done.
-            // This would be a good place to send an alert to an admin.
             console.error("CRITICAL: Database records were deleted, but S3 cleanup failed.", s3Error);
         }
     }
@@ -370,9 +286,8 @@ export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, nex
         message: "Assignment and all related data deleted successfully.",
     });
 });
-// --- Fully Refactored User/Teacher Delete Function ---
+
 export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => {
-    // --- Phase 1: Fail Fast - Input Validation ---
     const { submissionId } = req.body;
     const { user, isteacher } = req;
 
@@ -380,28 +295,21 @@ export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => 
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
 
-    // --- Phase 2: Prepare - Parallel Data Fetching ---
-    // Fetch all documents needed for authorization. Use .lean() for fast, read-only results.
     const submission = await SubassignmentModel.findById(submissionId).lean();
     
     if (!submission) {
         return next(new Error("Submission not found.", { cause: 404 }));
     }
 
-    // Fetch the parent assignment only if we need it for teacher authorization.
     let assignment;
     if (isteacher?.teacher === true) {
         assignment = await assignmentModel.findById(submission.assignmentId).select('createdBy').lean();
     }
 
-    // --- Phase 3: Robust Authorization ---
     let isAuthorized = false;
-    // Condition 1: The user is the student who made the submission.
     if (user._id.equals(submission.studentId)) {
         isAuthorized = true;
     }
-    // Condition 2 (Secure): The user is a teacher AND created the original assignment.
-    // To allow any teacher, you would remove the second part of this condition.
     else if (isteacher?.teacher === true && assignment?.createdBy.equals(user._id)) {
         isAuthorized = true;
     }
@@ -410,8 +318,6 @@ export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => 
         return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
     }
     
-    // --- Phase 4: Execute - Atomic Database Transaction ---
-    // The transaction is now simpler and only contains ONE operation.
     const session = await mongoose.startSession();
     try {
         session.startTransaction();
@@ -425,8 +331,6 @@ export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => 
         await session.endSession();
     }
 
-    // --- Phase 5: Post-Commit Cleanup - S3 Deletion ---
-    // This only runs if the database transaction was successful.
     if (submission.key) {
         try {
             await s3.send(new DeleteObjectCommand({
@@ -434,8 +338,6 @@ export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => 
                 Key: submission.key,
             }));
         } catch (s3Error) {
-            // Log this as a critical failure for an admin to investigate, but don't fail the request.
-            // The database record is gone, which is the most important part.
             console.error(`CRITICAL: DB record for submission ${submission._id} was deleted, but S3 cleanup failed for key ${submission.key}.`, s3Error);
         }
     }
