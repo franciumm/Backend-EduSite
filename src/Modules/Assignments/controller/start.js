@@ -156,9 +156,9 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     // If we reach here, the student is either enrolled OR in a group within the timeline. Access is granted.
     if (isLate) {
     // If it's late, check if late submissions are disallowed.
-    if (!assignment.allowSubmissionsAfterDueDate) {
+    if (assignment.allowSubmissionsAfterDueDate==false) {
         await fs.unlink(req.file.path);
-        return next(new Error("The submission window for this assignment is closed.", { cause: 200 }));
+        return next(new Error("The submission window for your group is closed.", { cause: 200 }));
     }
 }
     // --- Phase 4: Prepare & Commit - Staging S3 and Atomic DB Write ---
