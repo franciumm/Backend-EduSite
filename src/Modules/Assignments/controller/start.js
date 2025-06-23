@@ -1,4 +1,5 @@
-import slugify from "slugify";
+
+import path from 'path'; // Make sure this import is at the topimport slugify from "slugify";
 import { asyncHandler } from "../../../utils/erroHandling.js";
 import { assignmentModel } from "../../../../DB/models/assignment.model.js";
 import { s3, uploadFileToS3, deleteFileFromS3 } from "../../../utils/S3Client.js";
@@ -87,10 +88,11 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
   }
 });
 
+
 export const submitAssignment = asyncHandler(async (req, res, next) => {
     // --- Phase 1: Fail Fast - Synchronous Input Validation ---
     const { assignmentId, notes } = req.body;
-    const { _id: studentId, userName } = req.user;
+    const { _id: studentId } = req.user;
     const uaeTimeZone = 'Asia/Dubai';
   
     if (!req.file) {
@@ -105,9 +107,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     let results, fileContent;
     try {
         const [assignment, student, oldSubmission] = await Promise.all([
-            // Select all fields needed for the complex authorization logic
-                
-            assignmentModel.findById(assignmentId).select('startDate endDate groupIds enrolledStudents rejectedStudents name').lean(),
+            assignmentModel.findById(assignmentId).lean(),
             studentModel.findById(studentId).select('groupId').lean(),
             SubassignmentModel.findOne({ studentId, assignmentId }).lean(),
         ]);
@@ -118,53 +118,52 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         return next(new Error("A server error occurred during validation.", { cause: 500 }));
     }
 
-    // --- Phase 3: Process Results & Multi-Tiered Authorization Checks ---
+    // --- Phase 3: Process Results & Unified Authorization Checks ---
     const { assignment, student, oldSubmission } = results;
-      var now =  toZonedTime(new Date(), uaeTimeZone);
-        const isLate = now > assignment.endDate;
+    
+    // Basic data validation
     if (!student) { await fs.unlink(req.file.path); return next(new Error("Authenticated user is not a valid student.", { cause: 200 })); }
     if (!assignment) { await fs.unlink(req.file.path); return next(new Error("Assignment not found.", { cause: 404 })); }
     if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot submit an empty file.", { cause: 400 })); }
-
-    // Authorization Logic with "Enrolled" Override
+    
+    // --- Step 3.1: Unified Permission Check ---
     const isRejected = assignment.rejectedStudents?.some(id => id.equals(studentId));
     const isEnrolled = assignment.enrolledStudents?.some(id => id.equals(studentId));
-    const isInGroup = assignment.groupIds.some(gid => gid.equals(student.groupId));
-    
-    // Rule 1: Highest priority - check for rejection.
+    const isInGroup = student.groupId && assignment.groupIds.some(gid => gid.equals(student.groupId));
+
+    // Rule 1: Highest priority - block rejected students.
     if (isRejected) {
         await fs.unlink(req.file.path);
         return next(new Error("You are explicitly blocked from submitting this assignment.", { cause: 200 }));
     }
 
-    // Rule 2: If explicitly enrolled, they have permission. Bypass other checks.
-    if (!isEnrolled) {
-        // Rule 3: If not enrolled, they must be in an authorized group.
-        if (!isInGroup) {
-            await fs.unlink(req.file.path);
-            return next(new Error("You are not in an authorized group for this assignment.", { cause: 200 }));
-        }
-
-        // Rule 4: If in a group, they must adhere to the main timeline.
-      
-
-        if (now < assignment.startDate) {
-            await fs.unlink(req.file.path);
-            return next(new Error("The submission window for your group is closed.", { cause: 200 }));
-        }
-    }
-    // If we reach here, the student is either enrolled OR in a group within the timeline. Access is granted.
-    if (isLate) {
-    // If it's late, check if late submissions are disallowed.
-    if (assignment.allowSubmissionsAfterDueDate==false) {
+    // Rule 2: The student must be either enrolled or in an authorized group.
+    if (!isEnrolled && !isInGroup) {
         await fs.unlink(req.file.path);
-        return next(new Error("The submission window for your group is closed.", { cause: 200 }));
+        return next(new Error("You are not authorized for this assignment.", { cause: 200 }));
     }
-}
+
+    // --- Step 3.2: Unified Timeline Check ---
+    const now = toZonedTime(new Date(), uaeTimeZone);
+    const isOnTime = now >= new Date(assignment.startDate) && now <= new Date(assignment.endDate);
+    const isLate = now > new Date(assignment.endDate);
+
+    // Rule 3: The submission window must be open.
+    // The window is open if it's on time, OR if it's late AND late submissions are allowed.
+    const isSubmissionWindowOpen = isOnTime || (isLate && assignment.allowSubmissionsAfterDueDate === true);
+
+    if (!isSubmissionWindowOpen) {
+        await fs.unlink(req.file.path);
+        // Provide a clear reason for the closure.
+        const reason = isLate ? "The deadline has passed." : "The submission window has not opened yet.";
+        return next(new Error(`Cannot submit. ${reason}`, { cause: 200 }));
+    }
+    // --- End of Authorization ---
+
     // --- Phase 4: Prepare & Commit - Staging S3 and Atomic DB Write ---
     const submissionTime = toZonedTime(new Date(), uaeTimeZone);
     const fileExtension = path.extname(req.file.originalname);
-    const s3Key = `AssignmentSubmissions/${assignmentId}/${studentId}_${submissionTime.getTime()}${fileExtension}`;
+    const s3Key = `AssignmentSubmissions/${assignmentId}/${studentId}_${Date.now()}${fileExtension}`;
     let newSubmission;
 
     try {
@@ -173,11 +172,10 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         newSubmission = await SubassignmentModel.findOneAndUpdate(
             { studentId, assignmentId },
             {
-              
-                assignmentname : assignment.name,
+                assignmentname: assignment.name,
                 groupId: student.groupId,
                 SubmitDate: submissionTime,
-                notes: notes?.trim() || (isLate ? "Late submission" : "Submitted on time"),
+                notes: notes?.trim() || (isLate ? "Submitted late" : "Submitted on time"),
                 isLate,
                 bucketName: process.env.S3_BUCKET_NAME,
                 key: s3Key,
