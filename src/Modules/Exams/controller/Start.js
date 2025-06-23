@@ -151,7 +151,7 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     const { user, isteacher } = req; const uaeTimeZone = 'Asia/Dubai';
 
     const submissionTime = toZonedTime(new Date(), uaeTimeZone);
-   
+
     if (isteacher?.teacher === true) {
         return next(new Error("Teachers are not permitted to submit exams.", { cause: 200 }));
     }
@@ -185,26 +185,32 @@ export const submitExam = asyncHandler(async (req, res, next) => {
 
     if (!exam) { await fs.unlink(req.file.path); return next(new Error("Exam not found.", { cause: 404 })); }
     if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot submit an empty file.", { cause: 400 })); }
-
+    let effectiveStartDate, effectiveEndDate;
     const exceptionEntry = exam.exceptionStudents.find(ex => ex.studentId.equals(studentId));
     if (exceptionEntry) {
-        if (submissionTime < exceptionEntry.startdate || submissionTime > exceptionEntry.enddate) {
-            await fs.unlink(req.file.path);
-            return next(new Error("Submission is outside your special allowed time frame.", { cause: 200 }));
-        }
+         effectiveStartDate = exceptionEntry.startdate;
+        effectiveEndDate = exceptionEntry.enddate;
+        
     } else { // Standard validation for non-exception students
         if (exam.rejectedStudents?.some(id => id.equals(studentId))) {
-             await fs.unlink(req.file.path);
-             return next(new Error("You are explicitly blocked from submitting for this exam.", { cause: 200 }));
+            await fs.unlink(req.file.path);
+            return next(new Error("You are explicitly blocked from submitting for this exam.", { cause: 200 }));
         }
         if (!exam.groupIds.some(gid => gid.equals(user.groupId))) {
             await fs.unlink(req.file.path);
             return next(new Error("You are not in an authorized group for this exam.", { cause: 200 }));
         }
-        if (submissionTime < exam.startdate || submissionTime > exam.enddate) {
-            await fs.unlink(req.file.path);
-            return next(new Error("Exam submission window is closed.", { cause: 200 }));
-        }
+        // Use the exam's main timeline for this student.
+        effectiveStartDate = exam.startdate;
+        effectiveEndDate = exam.enddate;
+    }
+
+    const isLate = submissionTime > effectiveEndDate;
+
+  if (isLate && !exam.allowSubmissionsAfterDueDate) {
+        await fs.unlink(req.file.path);
+        const errorMessage = exceptionEntry ? "Submission is outside your special allowed time frame." : "Exam submission window is closed.";
+        return next(new Error(errorMessage, { cause: 200 }));
     }
 
     // --- Phase 4: Transactional Write Operation for Supreme Data Integrity ---

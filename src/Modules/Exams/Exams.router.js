@@ -24,7 +24,7 @@ router.put("/mark", AdminAuth, multerCloudFunction(allowedExtensions.Files).sing
 router.post("/add-exception",  AdminAuth, Edit.addExceptionStudent);
 router.post("/add-rejected", AdminAuth , Edit.addRejectedStudent);
 router.delete("/delete", AdminAuth, Edit.deleteExam);
-
+router.put("/edit", AdminAuth, multerCloudFunction(allowedExtensions.Files).single('file'), Edit.editExam);
 router.delete("/deleteSub", isAuth, Edit.deleteSubmittedExam);
 
 

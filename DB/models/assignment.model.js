@@ -13,6 +13,14 @@ const assignmentSchema = new Schema({
     key: String,
     fileContent: String,
     path: String,
+    isLate: {
+        type: Boolean,
+        default: false,
+    },
+     allowSubmissionsAfterDueDate: {
+        type: Boolean,
+        default: false,
+    },
     enrolledStudents: [{ type: Schema.Types.ObjectId, ref: 'student' }],
     rejectedStudents: [{ type: Schema.Types.ObjectId, ref: "student" }], 
     createdBy: {

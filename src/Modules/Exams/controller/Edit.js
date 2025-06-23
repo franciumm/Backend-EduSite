@@ -8,6 +8,9 @@ import fs from 'fs'
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
+import { deleteFileFromS3, uploadFileToS3 } from "../../../utils/S3Client.js";
+import { promises as fs } from 'fs';
+
 
 
 const validateExamId = (req, res, next) => {
@@ -18,6 +21,59 @@ const validateExamId = (req, res, next) => {
     next();
 };
 
+export const editExam = asyncHandler(async (req, res, next) => {
+    const { examId, ...updateData } = req.body;
+    const teacherId = req.user._id;
+
+    if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
+        return next(new Error("A valid Exam ID is required.", { cause: 400 }));
+    }
+
+    const exam = await examModel.findById(examId);
+    if (!exam) {
+        return next(new Error("Exam not found.", { cause: 404 }));
+    }
+
+    if (!exam.createdBy.equals(teacherId)) {
+        return next(new Error("You are not authorized to edit this exam.", { cause: 403 }));
+    }
+
+    if (req.file) {
+        if (exam.key) {
+            await deleteFileFromS3(exam.bucketName, exam.key)
+                .catch(err => console.error("Non-critical error: Failed to delete old S3 file during edit:", err));
+        }
+        
+        const fileContent = await fs.readFile(req.file.path);
+        const newKey = `exams/${exam.Name.replace(/\s+/g, '_')}-${Date.now()}.pdf`;
+        
+        await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, "application/pdf");
+        
+        exam.key = newKey;
+        exam.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
+        exam.bucketName = process.env.S3_BUCKET_NAME;
+
+        await fs.unlink(req.file.path);
+    }
+    
+    // Sanitize and update name if provided
+    if (updateData.Name) {
+        updateData.Name = updateData.Name.trim();
+    }
+    
+    Object.keys(updateData).forEach(key => {
+        if (updateData[key] !== undefined && updateData[key] !== null) {
+            exam[key] = updateData[key];
+        }
+    });
+
+    const updatedExam = await exam.save();
+
+    res.status(200).json({
+        message: "Exam updated successfully.",
+        exam: updatedExam,
+    });
+});
 // --- 2. Authorization & Enrollment Middleware (Asynchronous & Optimized) ---
 
 const authorizeAndEnrollUser = async (req, res, next) => {

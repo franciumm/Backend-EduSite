@@ -144,14 +144,21 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
 
         // Rule 4: If in a group, they must adhere to the main timeline.
         const now =  toZonedTime(new Date(), uaeTimeZone);
-        if (now < assignment.startDate || now > assignment.endDate) {
+        const isLate = now > assignment.endDate;
+
+        if (now < assignment.startDate) {
             await fs.unlink(req.file.path);
             return next(new Error("The submission window for your group is closed.", { cause: 200 }));
         }
     }
     // If we reach here, the student is either enrolled OR in a group within the timeline. Access is granted.
-    const isLate = toZonedTime(new Date(), uaeTimeZone) > assignment.endDate;
-    
+    if (isLate) {
+    // If it's late, check if late submissions are disallowed.
+    if (!assignment.allowSubmissionsAfterDueDate) {
+        await fs.unlink(req.file.path);
+        return next(new Error("The submission window for this assignment is closed.", { cause: 200 }));
+    }
+}
     // --- Phase 4: Prepare & Commit - Staging S3 and Atomic DB Write ---
     const submissionTime = toZonedTime(new Date(), uaeTimeZone);
     const fileExtension = path.extname(req.file.originalname);
@@ -164,6 +171,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         newSubmission = await SubassignmentModel.findOneAndUpdate(
             { studentId, assignmentId },
             {
+              
                 assignmentname : assignment.name,
                 groupId: student.groupId,
                 SubmitDate: submissionTime,

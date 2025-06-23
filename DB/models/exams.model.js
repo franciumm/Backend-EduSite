@@ -10,7 +10,15 @@ const examSchema = new Schema(
     grade: { type: Schema.Types.ObjectId, ref: "grade" },
     bucketName: String,
     key: String,
-    path: String,
+    path: String,  
+    isLate: {
+        type: Boolean,
+        default: false,
+    },
+    allowSubmissionsAfterDueDate: {
+        type: Boolean,
+        default: false, // By default, submissions are closed after the due date.
+    },
     startdate: { type: Date, required: true },
     enddate: { type: Date, required: true },
     enrolledStudents: [{ type: Schema.Types.ObjectId, ref: "student" }],

@@ -13,6 +13,10 @@ const submittedExamSchema = new Schema(
     fileKey: String,
     filePath: String,
  SubmitDate: Date,
+   isLate: {
+      type: Boolean,
+      default: false,
+    },
     // teacher’s optional feedback text
     teacherFeedback: { type: String, default: "" },
   },

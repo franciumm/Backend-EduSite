@@ -12,6 +12,10 @@ const submittedAssignmentSchema = new Schema(
     notes: String, // Notes about submission (e.g., "Late submission")
     isLate: Boolean, // Indicates if the submission was late
     isMarked :{type:Boolean,  default: false},
+      isLate: {
+      type: Boolean,
+      default: false,
+    },
     SubmitDate: Date,
 assignmentname:  { type: String, required: true },
   },

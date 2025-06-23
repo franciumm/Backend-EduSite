@@ -10,6 +10,8 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import mongoose from "mongoose";
 import { toZonedTime } from 'date-fns-tz';
+import { deleteFileFromS3, uploadFileToS3 } from '../../../utils/S3Client.js';
+import { promises as fs } from 'fs';
 
 // export const downloadAssignment = asyncHandler(async (req, res, next) => {
 //   const { assignmentId } = req.query;
@@ -112,6 +114,65 @@ if (!isTeacher && !assignmentGroupIdsStr.includes(studentGroupIdStr)) {
 
 
 );
+
+export const editAssignment = asyncHandler(async (req, res, next) => {
+    const { assignmentId, ...updateData } = req.body;
+    const teacherId = req.user._id;
+
+    if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
+        return next(new Error("A valid Assignment ID is required.", { cause: 400 }));
+    }
+
+    // Find the original assignment
+    const assignment = await assignmentModel.findById(assignmentId);
+    if (!assignment) {
+        return next(new Error("Assignment not found.", { cause: 404 }));
+    }
+
+    // Authorize: ensure the user editing is the one who created it
+    if (!assignment.createdBy.equals(teacherId)) {
+        return next(new Error("You are not authorized to edit this assignment.", { cause: 403 }));
+    }
+
+    // If a new file is uploaded, handle the replacement
+    if (req.file) {
+        // 1. Delete the old file from S3, if it exists
+        if (assignment.key) {
+            await deleteFileFromS3(assignment.bucketName, assignment.key)
+                .catch(err => console.error("Non-critical error: Failed to delete old S3 file during edit:", err));
+        }
+
+        // 2. Upload the new file to S3
+        const fileContent = await fs.readFile(req.file.path);
+        const newKey = `assignments/${assignment.slug}-${Date.now()}.pdf`;
+        
+        await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, "application/pdf");
+        
+        // 3. Update assignment document with new file details
+        assignment.key = newKey;
+        assignment.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
+        assignment.bucketName = process.env.S3_BUCKET_NAME;
+
+        // 4. Clean up the temporary local file
+        await fs.unlink(req.file.path);
+    }
+
+    // Update other fields from req.body (name, dates, etc.)
+    // This dynamically updates only the fields provided in the request
+    Object.keys(updateData).forEach(key => {
+        if (updateData[key] !== undefined && updateData[key] !== null) {
+            assignment[key] = updateData[key];
+        }
+    });
+    
+    // Save the updated assignment
+    const updatedAssignment = await assignment.save();
+
+    res.status(200).json({
+        message: "Assignment updated successfully.",
+        assignment: updatedAssignment,
+    });
+});
 
 export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) => {
   const { submissionId } = req.query;
