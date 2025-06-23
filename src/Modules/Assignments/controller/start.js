@@ -198,7 +198,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     }
 
     res.status(200).json({
-        message: oldSubmission ? "Assignment re-submitted successfully." : "Assignment submitted successfully.",
+        message: "Assignment submitted successfully.",
         submission: newSubmission,
     });
 });
