@@ -203,7 +203,7 @@ export const viewMaterial = asyncHandler(async (req, res, next) => {
 
     // Generate a presigned URL for each file in the material
     const urlGenerationPromises = material.files.map(file =>
-        getPresignedUrlForS3(material.bucketName, file.key, 60 * 30) // 30-minute expiry
+        getPresignedUrlForS3(material.bucketName, file.key) // 90-minute expiry
     );
     const presignedUrls = await Promise.all(urlGenerationPromises);
 
@@ -215,6 +215,7 @@ export const viewMaterial = asyncHandler(async (req, res, next) => {
     res.status(200).json({
         message: "Material is ready for viewing",
         name: material.name,
+        Links : material.linksArray,
         description: material.description,
         files: filesWithUrls,
     });
