@@ -52,36 +52,42 @@ function generateSlug(text) {
 }
 
 export const createMaterial = asyncHandler(async (req, res, next) => {
+    // Breadcrumb 1: Log entry and basic info
+    console.log("--- createMaterial controller initiated ---");
+    console.log("User ID:", req.user._id);
+    console.log("Files received by controller:", req.files.length);
+
     const userId = req.user._id;
     const { name, description, gradeId } = req.body;
-
-    // 1) Validate inputs and files
-    const gradeDoc = await gradeModel.findById(gradeId);
-    if (!gradeDoc) return next(new Error("Wrong GradeId", { cause: 400 }));
-
-    let raw = req.body.groupIds ?? req.body["groupIds[]"];
-    if (!raw) return next(new Error("Group IDs are required", { cause: 400 }));
-    if (typeof raw === "string" && raw.trim().startsWith("[")) {
-        try { raw = JSON.parse(raw); } catch {}
-    }
-    const groupIdsArray = Array.isArray(raw) ? raw : [raw];
-    if (groupIdsArray.length === 0) return next(new Error("At least one Group ID is required", { cause: 400 }));
-
-    if (!req.files || req.files.length === 0) {
-        return next(new Error("Please upload at least one file.", { cause: 400 }));
-    }
-
     const uploadedFilesData = [];
     const successfulS3Keys = [];
 
     try {
-        // 2) Upload all files to S3 in parallel for efficiency
+        // Breadcrumb 2: Log before the main logic starts
+        console.log("Validating inputs...");
+        const gradeDoc = await gradeModel.findById(gradeId);
+        if (!gradeDoc) return next(new Error("Wrong GradeId", { cause: 400 }));
+
+        let raw = req.body.groupIds ?? req.body["groupIds[]"];
+        if (!raw) return next(new Error("Group IDs are required", { cause: 400 }));
+        if (typeof raw === "string" && raw.trim().startsWith("[")) {
+            try { raw = JSON.parse(raw); } catch {}
+        }
+        const groupIdsArray = Array.isArray(raw) ? raw : [raw];
+        if (groupIdsArray.length === 0) return next(new Error("At least one Group ID is required", { cause: 400 }));
+
+        if (!req.files || req.files.length === 0) {
+            return next(new Error("Please upload at least one file.", { cause: 400 }));
+        }
+
+        // Breadcrumb 3: Log before starting S3 uploads
+        console.log(`Attempting to upload ${req.files.length} files to S3...`);
         const uploadPromises = req.files.map(async (file) => {
             const fileContent = fs.readFileSync(file.path);
             const s3Key = `materials/${name.replace(/\s+/g, '_')}/${Date.now()}-${file.originalname}`;
             
             await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, file.mimetype);
-            successfulS3Keys.push(s3Key); // Track for potential rollback
+            successfulS3Keys.push(s3Key);
 
             return {
                 key: s3Key,
@@ -94,7 +100,8 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
         const resolvedFiles = await Promise.all(uploadPromises);
         uploadedFilesData.push(...resolvedFiles);
 
-        // 3) Create the database record with all file data
+        // Breadcrumb 4: Log after S3 uploads, before DB write
+        console.log("S3 uploads successful. Attempting to create database record...");
         const newMaterial = await MaterialModel.create({
             name,
             description,
@@ -105,21 +112,29 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
             files: uploadedFilesData,
         });
 
+        // Breadcrumb 5: Log on final success
+        console.log("Database record created successfully.");
         res.status(201).json({
             message: "Material created and files uploaded successfully",
             material: newMaterial
         });
+
     } catch (err) {
-        console.error("Error creating material. Initiating rollback...", err);
-        // If any error occurs, delete all files that were successfully uploaded to S3
+        // THIS IS THE MOST IMPORTANT PART!
+        // We log the *actual* error object to the console.
+        console.error("!!! --- ERROR CAUGHT IN createMaterial --- !!!");
+        console.error("DETAILED ERROR OBJECT:", err); // This will show the full error
+        console.error("!!! ------------------------------------ !!!");
+
         if (successfulS3Keys.length > 0) {
+            console.log("Initiating S3 rollback for successful uploads...");
             await Promise.all(
                 successfulS3Keys.map(key => deleteFileFromS3(process.env.S3_BUCKET_NAME, key).catch(e => console.error(`S3 rollback failed for key: ${key}`, e)))
             );
         }
         return next(new Error("Failed to create material due to an upload or database error.", { cause: 500 }));
     } finally {
-        // 4) Clean up all temporary local files
+        console.log("--- createMaterial finally block reached. Cleaning up temp files... ---");
         if (req.files) {
             req.files.forEach(file => fs.unlink(file.path, (err) => {
                 if (err) console.error(`Failed to delete temp file: ${file.path}`, err);
@@ -127,8 +142,6 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
         }
     }
 });
-
-
 // ── 2) List materials (students & teachers) ────────────────────────────────────
 export const getMaterials = asyncHandler(async (req, res, next) => {
   const { page = 1, size = 4 } = req.query;
