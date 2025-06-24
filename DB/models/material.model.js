@@ -7,9 +7,7 @@ const materialSchema = new Schema(
     groupIds: [{ type: Schema.Types.ObjectId, ref: "group", required: true }],
     gradeId: { type: Schema.Types.ObjectId, ref: "grade" },
     bucketName: { type: String, required: true },
-    
-    // This 'files' array is what the new controller sends.
-    // The old 'slug', 'key', and 'path' fields must be removed.
+    linksArray :  [{ type: String} ],
     files: [
       {
         key: { type: String, required: true },

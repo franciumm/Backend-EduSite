@@ -53,17 +53,21 @@ function generateSlug(text) {
 
 export const createMaterial = asyncHandler(async (req, res, next) => {
     const userId = req.user._id;
-    const { name, description, gradeId } = req.body;
+    const { name, description, gradeId, } = req.body;
 
     // 1) Validate inputs and files
     const gradeDoc = await gradeModel.findById(gradeId);
     if (!gradeDoc) return next(new Error("Wrong GradeId", { cause: 400 }));
-
+    let rawlinks =req.body.links ?? req.body["links[]"];
     let raw = req.body.groupIds ?? req.body["groupIds[]"];
     if (!raw) return next(new Error("Group IDs are required", { cause: 400 }));
     if (typeof raw === "string" && raw.trim().startsWith("[")) {
         try { raw = JSON.parse(raw); } catch {}
     }
+    if (typeof rawlinks === "string" && rawlinks.trim().startsWith("[")) {
+        try { rawlinks = JSON.parse(rawlinks); } catch {}
+    }
+    const linksArray = Array.isArray(rawlinks) ? rawlinks : [rawlinks];
     const groupIdsArray = Array.isArray(raw) ? raw : [raw];
     if (groupIdsArray.length === 0) return next(new Error("At least one Group ID is required", { cause: 400 }));
 
@@ -98,6 +102,7 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
         const newMaterial = await MaterialModel.create({
             name,
             description,
+            linksArray,
             groupIds: groupIdsArray,
             gradeId,
             createdBy: userId,
@@ -131,7 +136,7 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
 
 // ── 2) List materials (students & teachers) ────────────────────────────────────
 export const getMaterials = asyncHandler(async (req, res, next) => {
-  const { page = 1, size = 4 } = req.query;
+  const { page = 1, size = 20 } = req.query;
   const userId     = req.user._id;
   const isTeacher  = req.isteacher.teacher;
 
