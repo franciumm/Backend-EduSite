@@ -15,7 +15,15 @@ const materialSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "teacher",
       required: true,
-    },   
+    },    
+    files: [
+      {
+        key: { type: String, required: true }, // S3 Key
+        path: { type: String, required: true }, // Full S3 URL
+        originalName: { type: String, required: true }, // The original filename from upload
+        fileType: { type: String }, // e.g., 'application/pdf'
+      },
+    ],
      status: {
       type: String,
       enum: ["Pending Upload", "Uploaded", "Failed"],

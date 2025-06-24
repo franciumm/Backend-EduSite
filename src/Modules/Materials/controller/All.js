@@ -45,89 +45,87 @@ export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
   // Use 200 OK for a successful GET request.
   res.status(200).json({ message: "Materials fetched successfully for the group", data: materials });
 });
+
+
 function generateSlug(text) {
   return slugify(text, { lower: true, strict: true });
 }
 
 export const createMaterial = asyncHandler(async (req, res, next) => {
-  const userId = req.user._id;
-  const { name, description, gradeId } = req.body;
+    const userId = req.user._id;
+    const { name, description, gradeId } = req.body;
 
-  // 1) Validate grade
-  const gradeDoc = await gradeModel.findById(gradeId);
-  if (!gradeDoc) {
-    return next(new Error("wrong GradeId", { cause: 400 }));
-  }
+    // 1) Validate inputs and files
+    const gradeDoc = await gradeModel.findById(gradeId);
+    if (!gradeDoc) return next(new Error("Wrong GradeId", { cause: 400 }));
 
-  // 2) Normalize & validate groupIds
-  let raw = req.body.groupIds ?? req.body["groupIds[]"];
-  if (!raw) {
-    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
-  }
-  if (typeof raw === "string" && raw.trim().startsWith("[")) {
+    let raw = req.body.groupIds ?? req.body["groupIds[]"];
+    if (!raw) return next(new Error("Group IDs are required", { cause: 400 }));
+    if (typeof raw === "string" && raw.trim().startsWith("[")) {
+        try { raw = JSON.parse(raw); } catch {}
+    }
+    const groupIdsArray = Array.isArray(raw) ? raw : [raw];
+    if (groupIdsArray.length === 0) return next(new Error("At least one Group ID is required", { cause: 400 }));
+
+    if (!req.files || req.files.length === 0) {
+        return next(new Error("Please upload at least one file.", { cause: 400 }));
+    }
+
+    const uploadedFilesData = [];
+    const successfulS3Keys = [];
+
     try {
-      raw = JSON.parse(raw);
-    } catch {}
-  }
-  const groupIdsArray = Array.isArray(raw) ? raw : [raw];
-  if (groupIdsArray.length === 0) {
-    return next(new Error("Group IDs are required and should be an array", { cause: 400 }));
-  }
-  const invalid = groupIdsArray.filter(id => !mongoose.Types.ObjectId.isValid(id));
-  if (invalid.length) {
-    return next(new Error(`Invalid Group ID(s): ${invalid.join(", ")}`, { cause: 400 }));
-  }
-  const validGroupIds = groupIdsArray.map(id => new mongoose.Types.ObjectId(id));
-  const existCount = await groupModel.countDocuments({ _id: { $in: validGroupIds } });
-  if (existCount !== validGroupIds.length) {
-    return next(new Error("One or more Group IDs do not exist", { cause: 404 }));
-  }
+        // 2) Upload all files to S3 in parallel for efficiency
+        const uploadPromises = req.files.map(async (file) => {
+            const fileContent = fs.readFileSync(file.path);
+            const s3Key = `materials/${name.replace(/\s+/g, '_')}/${Date.now()}-${file.originalname}`;
+            
+            await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, file.mimetype);
+            successfulS3Keys.push(s3Key); // Track for potential rollback
 
-  // 3) Ensure file
-  if (!req.file) {
-    return next(new Error("Please upload a PDF file", { cause: 400 }));
-  }
-  const fileContent = fs.readFileSync(req.file.path);
+            return {
+                key: s3Key,
+                path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
+                originalName: file.originalname,
+                fileType: file.mimetype,
+            };
+        });
 
-  // 4) Generate slug and S3 key
-  const slug = generateSlug(`${name}-${Date.now()}`);
-  const fileName = `${slug}-${Date.now()}.pdf`;
-  const s3Key = `materials/${fileName}`;
+        const resolvedFiles = await Promise.all(uploadPromises);
+        uploadedFilesData.push(...resolvedFiles);
 
-  try {
-    // 5) Upload to S3
-    await uploadFileToS3(
-      process.env.S3_BUCKET_NAME,
-      s3Key,
-      fileContent,
-      "application/pdf"
-    );
+        // 3) Create the database record with all file data
+        const newMaterial = await MaterialModel.create({
+            name,
+            description,
+            groupIds: groupIdsArray,
+            gradeId,
+            createdBy: userId,
+            bucketName: process.env.S3_BUCKET_NAME,
+            files: uploadedFilesData,
+        });
 
-    // 6) Create DB record
-    const newMaterial = await MaterialModel.create({
-      name,
-      slug,
-      description,
-      groupIds: validGroupIds,
-      gradeId,
-      createdBy: userId,
-      bucketName: process.env.S3_BUCKET_NAME,
-      key: s3Key,
-      path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-      status: "Uploaded"
-    });
-
-    res.status(201).json({
-      message: "Material uploaded successfully",
-      material: newMaterial
-    });
-  } catch (err) {
-    console.error("createMaterial error:", err);
-    await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key);
-    return next(new Error("Failed to upload material", { cause: 500 }));
-  } finally {
-    fs.unlinkSync(req.file.path);
-  }
+        res.status(201).json({
+            message: "Material created and files uploaded successfully",
+            material: newMaterial
+        });
+    } catch (err) {
+        console.error("Error creating material. Initiating rollback...", err);
+        // If any error occurs, delete all files that were successfully uploaded to S3
+        if (successfulS3Keys.length > 0) {
+            await Promise.all(
+                successfulS3Keys.map(key => deleteFileFromS3(process.env.S3_BUCKET_NAME, key).catch(e => console.error(`S3 rollback failed for key: ${key}`, e)))
+            );
+        }
+        return next(new Error("Failed to create material due to an upload or database error.", { cause: 500 }));
+    } finally {
+        // 4) Clean up all temporary local files
+        if (req.files) {
+            req.files.forEach(file => fs.unlink(file.path, (err) => {
+                if (err) console.error(`Failed to delete temp file: ${file.path}`, err);
+            }));
+        }
+    }
 });
 
 
@@ -184,36 +182,37 @@ export const getMaterials = asyncHandler(async (req, res, next) => {
 
 
 
-// ── 3) View one material (URL) ─────────────────────────────────────────────────
 export const viewMaterial = asyncHandler(async (req, res, next) => {
-  const userId    = req.user._id;
-  const isTeacher = req.isteacher.teacher;
-  const { materialId } = req.params;
-
-  // fetch it
-  const material = await MaterialModel.findById(materialId);
-  if (!material) {
-    return next(new Error("Material not found", { cause: 404 }));
-  }
-
-  if (!isTeacher) {
-    // student flow: ensure their group is in material.groupIds
-    const student = await studentModel.findById(userId).select('groupId');
-    if (!student?.groupId || !material.groupIds.includes(student.groupId)) {
-      return next(new Error("You are not enrolled in this group", { cause: 403 }));
+    const { materialId } = req.params;
+    const material = await MaterialModel.findById(materialId);
+    if (!material) {
+        return next(new Error("Material not found", { cause: 404 }));
     }
-  }
 
-  // anyone authorized gets a presigned GET URL
-  const presignedUrl = await getPresignedUrlForS3(
-    material.bucketName,
-    material.key,
-    60 * 30
-  );
-  res.status(200).json({
-    message:     "Material is ready for viewing",
-    presignedUrl,
-  });
+    if (!req.isteacher.teacher) {
+        const student = await studentModel.findById(req.user._id).select('groupId').lean();
+        if (!student?.groupId || !material.groupIds.includes(student.groupId)) {
+            return next(new Error("You are not authorized to view this material", { cause: 403 }));
+        }
+    }
+
+    // Generate a presigned URL for each file in the material
+    const urlGenerationPromises = material.files.map(file =>
+        getPresignedUrlForS3(material.bucketName, file.key, 60 * 30) // 30-minute expiry
+    );
+    const presignedUrls = await Promise.all(urlGenerationPromises);
+
+    const filesWithUrls = material.files.map((file, index) => ({
+        originalName: file.originalName,
+        url: presignedUrls[index]
+    }));
+
+    res.status(200).json({
+        message: "Material is ready for viewing",
+        name: material.name,
+        description: material.description,
+        files: filesWithUrls,
+    });
 });
 
   
@@ -267,26 +266,25 @@ export const viewMaterial = asyncHandler(async (req, res, next) => {
 
 
 export const deleteMaterial = asyncHandler(async (req, res, next) => {
-  const { materialId } = req.params;
- 
-  
-  try {
+    const { materialId } = req.params;
     const material = await MaterialModel.findById(materialId);
+
     if (!material) {
-      return next(new Error("Material not found", { cause: 404 }));
+        return next(new Error("Material not found", { cause: 404 }));
     }
 
-    // Delete from S3
-    await deleteFileFromS3(material.bucketName, material.key);
+    // Delete all associated files from S3 in parallel
+    if (material.files && material.files.length > 0) {
+        const deletePromises = material.files.map(file =>
+            deleteFileFromS3(material.bucketName, file.key)
+        );
+        await Promise.all(deletePromises).catch(err => {
+            console.error("Error during S3 multi-file delete, but proceeding with DB deletion:", err);
+        });
+    }
 
-    // Delete from database
+    // Delete the material record from the database
     await MaterialModel.findByIdAndDelete(materialId);
 
-    res.status(200).json({ message: "Material deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting material:", error);
-    next(new Error("Error deleting material", { cause: 500 }));
-  }
+    res.status(200).json({ message: "Material and all associated files deleted successfully" });
 });
-
-

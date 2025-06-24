@@ -9,7 +9,8 @@ const router = Router();
  // Create materials for a group (teachers)
 router.post(
     "/create",
-    AdminAuth,multerCloudFunction(allowedExtensions.Files).single("file"), // Ensure user is authenticated
+    AdminAuth, 
+     multerCloudFunction(allowedExtensions.Files).array("files", 10), 
     materialsController.createMaterial
   );
   
@@ -22,7 +23,7 @@ router.post(
     isAuth, // Ensure user is authenticated
     materialsController.getMaterials
   );
-  
+  // router.get("details/:materialId",isAuth,materialsController.MaterialDetails)
 
 // Route to view material (students can view if enrolled, teachers can view any)
 router.get('/:materialId', isAuth, materialsController.viewMaterial);
