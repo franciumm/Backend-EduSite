@@ -26,7 +26,6 @@ assignmentname:  { type: String, required: true },
 
 
 
-db.subassignments.createIndex({ studentId: 1, assignmentId: 1, version: -1 });
 
 submittedAssignmentSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
     if (this.key && this.bucketName) {
