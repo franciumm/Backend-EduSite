@@ -152,6 +152,7 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     const uaeTimeZone = 'Asia/Dubai';
     const submissionTime = toZonedTime(new Date(), uaeTimeZone);
     const studentId = user._id;
+
     if (isteacher?.teacher === true) {
         return next(new Error("Teachers are not permitted to submit exams.", { cause: 200 }));
     }
@@ -163,33 +164,35 @@ export const submitExam = asyncHandler(async (req, res, next) => {
         return next(new Error("A valid Exam ID is required.", { cause: 400 }));
     }
    
-
-    // --- Phase 2: Maximum Performance - Parallel Asynchronous Validation ---
-    let results, fileContent;
+    // --- Phase 2: Maximum Performance - Asynchronous Validation ---
+    let exam, fileContent;
     try {
-        const exam = await examModel.findById(examId).lean();
-           
-        
-        fileContent = await fs.readFile(req.file.path);
-        results = { exam };
-
-
+        // Fetch both exam details and file content from disk concurrently
+        [exam, fileContent] = await Promise.all([
+            examModel.findById(examId).lean(),
+            fs.readFile(req.file.path)
+        ]);
     } catch (parallelError) {
         await fs.unlink(req.file.path).catch(e => console.error("Temp file cleanup failed:", e));
         return next(new Error("A server error occurred during validation.", { cause: 500 }));
     }
 
     // --- Phase 3: Process Results & Deep Authorization Checks ---
-    const { exam } = results;
+    if (!exam) { 
+        await fs.unlink(req.file.path); 
+        return next(new Error("Exam not found.", { cause: 404 })); 
+    }
+    if (fileContent.length === 0) { 
+        await fs.unlink(req.file.path); 
+        return next(new Error("Cannot submit an empty file.", { cause: 400 })); 
+    }
 
-    if (!exam) { await fs.unlink(req.file.path); return next(new Error("Exam not found.", { cause: 404 })); }
-    if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot submit an empty file.", { cause: 400 })); }
     let effectiveStartDate, effectiveEndDate;
     const exceptionEntry = exam.exceptionStudents.find(ex => ex.studentId.equals(studentId));
+    
     if (exceptionEntry) {
-         effectiveStartDate = exceptionEntry.startdate;
+        effectiveStartDate = exceptionEntry.startdate;
         effectiveEndDate = exceptionEntry.enddate;
-        
     } else { // Standard validation for non-exception students
         if (exam.rejectedStudents?.some(id => id.equals(studentId))) {
             await fs.unlink(req.file.path);
@@ -199,14 +202,13 @@ export const submitExam = asyncHandler(async (req, res, next) => {
             await fs.unlink(req.file.path);
             return next(new Error("You are not in an authorized group for this exam.", { cause: 200 }));
         }
-        // Use the exam's main timeline for this student.
         effectiveStartDate = exam.startdate;
         effectiveEndDate = exam.enddate;
     }
 
     const isLate = submissionTime > effectiveEndDate;
 
-  if (isLate && !exam.allowSubmissionsAfterDueDate) {
+    if (isLate && !exam.allowSubmissionsAfterDueDate) {
         await fs.unlink(req.file.path);
         const errorMessage = exceptionEntry ? "Submission is outside your special allowed time frame." : "Exam submission window is closed.";
         return next(new Error(errorMessage, { cause: 200 }));
@@ -220,37 +222,51 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     try {
         session.startTransaction();
         
+        // **FIX 1: Atomically calculate the new version number within the transaction.**
+        const currentVersionCount = await SubexamModel.countDocuments({ examId, studentId }).session(session);
+        const newVersion = currentVersionCount + 1;
+
+        // Upload to S3 first. If it fails, we haven't touched the DB yet.
         await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
 
-        newSubmission = await SubexamModel.create(
-           
-            {
-                examname :exam.Name,
+        // **FIX 2: Use the correct syntax for .create() and include all required fields.**
+        const submissionDocs = await SubexamModel.create(
+           [{
+                examId, // Added
+                studentId, // Added
+                version: newVersion, // Added
+                examname: exam.Name,
                 SubmitDate: submissionTime,
                 notes: notes?.trim() || "",
                 fileBucket: process.env.S3_BUCKET_NAME,
                 fileKey: s3Key,
                 filePath: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-            },
-            { upsert: true, new: true, session, lean: true }
+                isLate: isLate
+           }],
+           // **FIX 3: Provide only the session option to .create().**
+           { session } 
         );
+
+        newSubmission = submissionDocs[0]; // .create returns an array
 
         await session.commitTransaction();
 
     } catch (error) {
         await session.abortTransaction();
         console.error("Error submitting exam, transaction aborted. Rolling back S3 upload.", error);
+        // Attempt to clean up the S3 file if the DB operation failed after upload
         await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key).catch(e => console.error("S3 rollback failed:", e));
         return next(new Error("Failed to save submission. The operation was rolled back.", { cause: 500 }));
     } finally {
         await session.endSession();
+        // Always clean up the local temp file
         await fs.unlink(req.file.path).catch(e => console.error("Final temp file cleanup failed:", e));
     }
 
-    // --- Phase 5: Post-Commit Cleanup of Old S3 File --
+    // **FIX 4: Remove the logic for cleaning up old S3 files. We want to keep all versions.**
 
     res.status(200).json({
-        message: "Exam submitted successfully.",
+        message: `Exam submitted successfully (Version ${newSubmission.version}).`,
         submission: newSubmission,
     });
 });
