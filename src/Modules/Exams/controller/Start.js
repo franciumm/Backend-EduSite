@@ -222,8 +222,8 @@ export const submitExam = asyncHandler(async (req, res, next) => {
         
         await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
 
-        newSubmission = await SubexamModel.findOneAndUpdate(
-            { examId, studentId },
+        newSubmission = await SubexamModel.create(
+           
             {
                 examname :exam.Name,
                 SubmitDate: submissionTime,
