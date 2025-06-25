@@ -266,7 +266,7 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     // **FIX 4: Remove the logic for cleaning up old S3 files. We want to keep all versions.**
 
     res.status(200).json({
-        message: `Exam submitted successfully (Version ${newSubmission.version}).`,
+        message: "Exam submitted successfully.",
         submission: newSubmission,
     });
 });
