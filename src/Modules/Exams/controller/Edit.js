@@ -457,98 +457,62 @@ export const addRejectedStudent = asyncHandler(async (req, res, next) => {
 });
 
 export const deleteExam = asyncHandler(async (req, res, next) => {
-  const { examId } = req.body; // or req.query, as you prefer
+  const { examId } = req.body;
 
-  // 1. Validate examId
+  // 1. Validate input - This remains the same.
   if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
     return next(new Error("A valid examId is required", { cause: 400 }));
   }
 
-  // 2. Find the exam
+  // 2. Find the specific exam document.
+  // We need the document itself so we can call .deleteOne() on it, which
+  // is what triggers your 'pre("deleteOne")' DOCUMENT middleware.
   const exam = await examModel.findById(examId);
+
+  // 3. Handle case where exam doesn't exist.
   if (!exam) {
     return next(new Error("Exam not found", { cause: 404 }));
   }
 
-  try {
-    // 3. Delete the exam's main file from S3
-    if (exam.bucketName && exam.key) {
-      await s3.send(
-        new DeleteObjectCommand({
-          Bucket: exam.bucketName,
-          Key: exam.key,
-        })
-      );
-    }
+  // 4. Trigger the deletion. The middleware you wrote does ALL the heavy lifting.
+  // This single line will automatically:
+  // - Find all related submissions
+  // - Delete all their associated files from S3
+  // - Delete the submission records from the database
+  // - Delete the main exam file from S3
+  // - Finally, delete the exam record itself
+  await exam.deleteOne();
 
-    // 4. Find all submissions for this exam
-    const submissions = await SubexamModel.find({ examId });
-
-    // 5. Delete each submission file from S3
-    for (const submission of submissions) {
-      if (submission.fileBucket && submission.fileKey) {
-        try {
-          await s3.send(
-            new DeleteObjectCommand({
-              Bucket: submission.fileBucket,
-              Key: submission.fileKey,
-            })
-          );
-        } catch (error) {
-          console.error(`Error deleting submission file ${submission.fileKey}:`, error);
-          // Not critical enough to stop the entire process
-        }
-      }
-    }
-
-    // 6. Delete all submission records for this exam
-    await SubexamModel.deleteMany({ examId });
-
-    // 7. Delete the exam record from the database
-    await examModel.deleteOne({ _id: examId });
-
-    // 8. Return success response
-    res.status(200).json({
-      message: "Exam and its submissions deleted successfully",
-    });
-  } catch (error) {
-    console.error("Error deleting exam or submissions:", error);
-    return next(new Error("Failed to delete exam and its submissions", { cause: 500 }));
-  }
+  // 5. Send the success response.
+  res.status(200).json({ message: "Exam and its submissions deleted successfully" });
 });
 
 
 
 
-
-
-
 export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
-    // --- Phase 1: Fail Fast - Input Validation ---
+    // --- Phase 1: Input Validation (Correct and unchanged) ---
     const { submissionId } = req.body;
     const { user, isteacher } = req;
 
-    if (!submissionId || (!mongoose.Types.ObjectId.isValid(submissionId))) {
+    if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
 
-    // --- Phase 2: Prepare - Data Fetching ---
-    // Fetch the full submission document. We need its details for authorization and cleanup.
-    // Use .lean() for a fast, read-only query.
-    const submission = await SubexamModel.findById(submissionId).lean();
+    // --- Phase 2: Fetch the Full Mongoose Document ---
+    // We REMOVE .lean() because we need the document instance with its methods (like .deleteOne()).
+    const submission = await SubexamModel.findById(submissionId);
     
     if (!submission) {
         return next(new Error("Submission not found.", { cause: 404 }));
     }
 
-    // --- Phase 3: Robust Authorization (Implementing Your Business Rules) ---
+    // --- Phase 3: Authorization (Correct and unchanged) ---
+    // This logic works perfectly on the full document.
     let isAuthorized = false;
-    // Condition 1: The user is a teacher. (Your rule: "any teacher can delete")
     if (isteacher?.teacher === true) {
         isAuthorized = true;
-    }
-    // Condition 2: The user is the student who made the submission.
-    else if (user._id.equals(submission.studentId)) {
+    } else if (user._id.equals(submission.studentId)) {
         isAuthorized = true;
     }
 
@@ -556,36 +520,12 @@ export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
         return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
     }
     
-    // --- Phase 4: Execute - Atomic Database Transaction ---
-    // The transaction is now extremely simple and fast, containing only one essential operation.
-    const session = await mongoose.startSession();
-    try {
-        session.startTransaction();
-        await SubexamModel.findByIdAndDelete(submission._id, { session });
-        await session.commitTransaction();
-    } catch (error) {
-        await session.abortTransaction();
-        console.error("Database transaction failed during submission deletion:", error);
-        return next(new Error("Failed to delete submission due to a database error. Operation rolled back.", { cause: 500 }));
-    } finally {
-        await session.endSession();
-    }
+    // --- Phase 4: Trigger Middleware and Delete ---
+    // This single line replaces the entire transaction and manual S3 cleanup block.
+    // It will trigger your pre('deleteOne') hook, which handles the S3 file deletion
+    // before the document is removed from the database.
+    await submission.deleteOne();
 
-    // --- Phase 5: Post-Commit Cleanup - S3 Deletion ---
-    // This runs only after the database transaction was successful, ensuring data integrity.
-    if (submission.fileKey) {
-        try {
-            await s3.send(new DeleteObjectCommand({
-                Bucket: submission.fileBucket,
-                Key: submission.fileKey,
-            }));
-        } catch (s3Error) {
-            // If the file is already gone, that's okay. Log other S3 errors as critical.
-            if (s3Error.name !== 'NoSuchKey') {
-                console.error(`CRITICAL: DB record for submission ${submission._id} was deleted, but S3 cleanup failed for key ${submission.fileKey}.`, s3Error);
-            }
-        }
-    }
-
+    // --- Phase 5: Send Success Response ---
     res.status(200).json({ message: "Submission deleted successfully." });
 });

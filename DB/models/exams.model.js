@@ -1,7 +1,8 @@
 // /DB/models/exams.model.js
 
 import { Schema, model } from "mongoose";
-
+import { SubexamModel } from "./submitted_exams.model.js";
+import { deleteFileFromS3 } from "../../src/utils/S3Client.js"; // Verify this path is correct
 const examSchema = new Schema(
   {
     Name: { type: String, required: true },
@@ -34,5 +35,30 @@ const examSchema = new Schema(
   },
   { timestamps: true }
 );
+
+examSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
+    // 'this' refers to the exam document being deleted
+    const submissions = await SubexamModel.find({ examId: this._id });
+
+    if (submissions.length > 0) {
+        // FIX 3: Make the S3 deletion more robust by using each submission's specific bucket.
+        const s3FilesToDelete = submissions
+            .filter(sub => sub.fileKey && sub.fileBucket) // Ensure both key and bucket exist
+            .map(sub => deleteFileFromS3(sub.fileBucket, sub.fileKey));
+
+        // Delete all submission files from S3 in parallel.
+        await Promise.all(s3FilesToDelete);
+        
+        // Now that S3 files are gone, delete all the database records.
+        await SubexamModel.deleteMany({ examId: this._id });
+    }
+    
+    // Also delete the main exam PDF file itself from S3
+    if (this.key && this.bucketName) {
+        await deleteFileFromS3(this.bucketName, this.key);
+    }
+    
+    next();
+});
 
 export const examModel = model("exam", examSchema);

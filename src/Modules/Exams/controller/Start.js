@@ -152,7 +152,6 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     const uaeTimeZone = 'Asia/Dubai';
     const submissionTime = toZonedTime(new Date(), uaeTimeZone);
     const studentId = user._id;
-
     if (isteacher?.teacher === true) {
         return next(new Error("Teachers are not permitted to submit exams.", { cause: 200 }));
     }
@@ -214,7 +213,7 @@ export const submitExam = asyncHandler(async (req, res, next) => {
         return next(new Error(errorMessage, { cause: 200 }));
     }
 
-    // --- Phase 4: Transactional Write Operation for Supreme Data Integrity ---
+
     const s3Key = `ExamSubmissions/${examId}/${studentId}_${submissionTime.getTime()}.pdf`;
     const session = await mongoose.startSession();
     let newSubmission;
@@ -222,14 +221,12 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     try {
         session.startTransaction();
         
-        // **FIX 1: Atomically calculate the new version number within the transaction.**
         const currentVersionCount = await SubexamModel.countDocuments({ examId, studentId }).session(session);
         const newVersion = currentVersionCount + 1;
 
         // Upload to S3 first. If it fails, we haven't touched the DB yet.
         await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
 
-        // **FIX 2: Use the correct syntax for .create() and include all required fields.**
         const submissionDocs = await SubexamModel.create(
            [{
                 examId, // Added
@@ -243,7 +240,6 @@ export const submitExam = asyncHandler(async (req, res, next) => {
                 filePath: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
                 isLate: isLate
            }],
-           // **FIX 3: Provide only the session option to .create().**
            { session } 
         );
 
@@ -263,7 +259,6 @@ export const submitExam = asyncHandler(async (req, res, next) => {
         await fs.unlink(req.file.path).catch(e => console.error("Final temp file cleanup failed:", e));
     }
 
-    // **FIX 4: Remove the logic for cleaning up old S3 files. We want to keep all versions.**
 
     res.status(200).json({
         message: "Exam submitted successfully.",

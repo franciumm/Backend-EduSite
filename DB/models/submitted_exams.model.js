@@ -1,5 +1,5 @@
 import { Schema, model } from "mongoose";
-
+import { deleteFileFromS3 } from "../../src/utils/S3Client.js";
 const submittedExamSchema = new Schema(
   {
     examId: { type: Schema.Types.ObjectId, ref: "exam", required: true },
@@ -25,7 +25,18 @@ const submittedExamSchema = new Schema(
   { timestamps: true }
 );
 
-// We remove the unique index and add a new one for performance
+
+
+submittedExamSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
+    if (this.fileKey) {
+        // This will now automatically clean up the S3 file when a submission is deleted.
+        await deleteFileFromS3(this.fileBucket, this.fileKey);
+    }
+    next();
+});
+
+
+
 submittedExamSchema.index({ studentId: 1, examId: 1, version: -1 });
 
 export const SubexamModel = model("subexam", submittedExamSchema);
