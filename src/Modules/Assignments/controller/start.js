@@ -87,9 +87,8 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
   }
 });
 
-
 export const submitAssignment = asyncHandler(async (req, res, next) => {
-    // --- Phase 1: Fail Fast - Synchronous Input Validation ---
+    // --- Phases 1, 2, and 3 are correct and unchanged ---
     const { assignmentId, notes } = req.body;
     const { _id: studentId } = req.user;
     const uaeTimeZone = 'Asia/Dubai';
@@ -102,75 +101,73 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
         return next(new Error("A valid assignmentId is required.", { cause: 400 }));
     }
 
-    // --- Phase 2: Maximum Performance - Parallel Asynchronous Validation ---
     let results, fileContent;
     try {
-        const [assignment, student, oldSubmission] = await Promise.all([
+        const [assignment, student] = await Promise.all([
             assignmentModel.findById(assignmentId).lean(),
             studentModel.findById(studentId).select('groupId').lean(),
-            SubassignmentModel.findOne({ studentId, assignmentId }).lean(),
         ]);
         fileContent = await fs.readFile(req.file.path);
-        results = { assignment, student, oldSubmission };
+        results = { assignment, student };
     } catch (parallelError) {
         await fs.unlink(req.file.path).catch(e => console.error("Temp file cleanup failed:", e));
         return next(new Error("A server error occurred during validation.", { cause: 500 }));
     }
 
-    // --- Phase 3: Process Results & Unified Authorization Checks ---
-    const { assignment, student, oldSubmission } = results;
+    const { assignment, student } = results;
     
-    // Basic data validation
     if (!student) { await fs.unlink(req.file.path); return next(new Error("Authenticated user is not a valid student.", { cause: 200 })); }
     if (!assignment) { await fs.unlink(req.file.path); return next(new Error("Assignment not found.", { cause: 404 })); }
     if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot submit an empty file.", { cause: 400 })); }
     
-    // --- Step 3.1: Unified Permission Check ---
     const isRejected = assignment.rejectedStudents?.some(id => id.equals(studentId));
-    const isEnrolled = assignment.enrolledStudents?.some(id => id.equals(studentId));
-    const isInGroup = student.groupId && assignment.groupIds.some(gid => gid.equals(student.groupId));
-
-    // Rule 1: Highest priority - block rejected students.
     if (isRejected) {
         await fs.unlink(req.file.path);
         return next(new Error("You are explicitly blocked from submitting this assignment.", { cause: 200 }));
     }
-
-    // Rule 2: The student must be either enrolled or in an authorized group.
+    const isEnrolled = assignment.enrolledStudents?.some(id => id.equals(studentId));
+    const isInGroup = student.groupId && assignment.groupIds.some(gid => gid.equals(student.groupId));
     if (!isEnrolled && !isInGroup) {
         await fs.unlink(req.file.path);
         return next(new Error("You are not authorized for this assignment.", { cause: 200 }));
     }
 
-    // --- Step 3.2: Unified Timeline Check ---
     const now = toZonedTime(new Date(), uaeTimeZone);
     const isOnTime = now >= new Date(assignment.startDate) && now <= new Date(assignment.endDate);
     const isLate = now > new Date(assignment.endDate);
-
-    // Rule 3: The submission window must be open.
-    // The window is open if it's on time, OR if it's late AND late submissions are allowed.
     const isSubmissionWindowOpen = isOnTime || (isLate && assignment.allowSubmissionsAfterDueDate === true);
-
     if (!isSubmissionWindowOpen) {
         await fs.unlink(req.file.path);
-        // Provide a clear reason for the closure.
         const reason = isLate ? "The deadline has passed." : "The submission window has not opened yet.";
         return next(new Error(`Cannot submit. ${reason}`, { cause: 200 }));
     }
-    // --- End of Authorization ---
 
     // --- Phase 4: Prepare & Commit - Staging S3 and Atomic DB Write ---
     const submissionTime = toZonedTime(new Date(), uaeTimeZone);
     const fileExtension = path.extname(req.file.originalname);
     const s3Key = `AssignmentSubmissions/${assignmentId}/${studentId}_${Date.now()}${fileExtension}`;
+    
+    // **FIX 1: Initialize the session object BEFORE the try block.**
+    const session = await mongoose.startSession();
     let newSubmission;
 
+    // **FIX 2: Wrap the entire transaction logic in a single, complete try...catch...finally block.**
     try {
-        await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
+        // Start the transaction
+        session.startTransaction();
+        
+        // Pipelined operations
+        const countPromise = SubassignmentModel.countDocuments({ studentId, assignmentId }).session(session);
+        const uploadPromise = uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
+        const [currentVersionCount] = await Promise.all([countPromise, uploadPromise]);
+        const newVersion = currentVersionCount + 1;
 
-        newSubmission = await SubassignmentModel.findOneAndUpdate(
-            { studentId, assignmentId },
-            {
+        // Create the DB record as part of the transaction
+        const createdDocs = await SubassignmentModel.create(
+           [{
+                studentId,
+                assignmentId,
+                version: newVersion,
                 assignmentname: assignment.name,
                 groupId: student.groupId,
                 SubmitDate: submissionTime,
@@ -179,26 +176,28 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
                 bucketName: process.env.S3_BUCKET_NAME,
                 key: s3Key,
                 path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-            },
-            { new: true, upsert: true, lean: true }
+           }],
+           { session } // Pass the session to the create operation
         );
+        newSubmission = createdDocs[0];
+
+        // If everything above succeeded, commit the transaction.
+        await session.commitTransaction();
 
     } catch (error) {
-        console.error("Database error during submission. Rolling back S3 upload.", error);
+        // **FIX 3: Abort the transaction on ANY error.**
+        await session.abortTransaction();
+        console.error("Database error or S3 upload failure during submission. Rolling back.", error);
         await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key).catch(e => console.error("S3 rollback failed:", e));
         return next(new Error("Failed to save submission. The operation was rolled back.", { cause: 500 }));
     } finally {
+        // **FIX 4: ALWAYS end the session and clean up the local file.**
+        await session.endSession();
         await fs.unlink(req.file.path).catch(e => console.error("Final temp file cleanup failed:", e));
     }
-
-    // --- Phase 5: Post-Commit Cleanup of Old S3 File ---
-    if (oldSubmission?.key && oldSubmission.key !== s3Key) {
-        deleteFileFromS3(process.env.S3_BUCKET_NAME, oldSubmission.key)
-            .catch(err => console.error("Non-critical error: Failed to delete old S3 file on resubmission:", err));
-    }
-
+  
     res.status(200).json({
-        message: "Assignment submitted successfully.",
+        message: `Assignment submitted successfully (Version ${newSubmission.version}).`,
         submission: newSubmission,
     });
 });

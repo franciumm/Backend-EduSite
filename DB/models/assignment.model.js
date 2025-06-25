@@ -1,4 +1,5 @@
 import {Schema, model} from "mongoose";
+import { deleteFileFromS3 } from "../../src/utils/S3Client";
 
 const assignmentSchema = new Schema({
     name: { type: String, required: true },
@@ -26,5 +27,28 @@ const assignmentSchema = new Schema({
         required: true,
       }
   }, { timestamps: true });
-  
+
+
+  assignmentSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
+    // Delete the main assignment file
+    if (this.key && this.bucketName) {
+        await deleteFileFromS3(this.bucketName, this.key);
+    }
+
+    // Find all child submissions
+    const submissions = await SubassignmentModel.find({ assignmentId: this._id });
+    if (submissions.length > 0) {
+        // Delete all their S3 files in parallel
+        const s3Deletions = submissions
+            .filter(sub => sub.key && sub.bucketName)
+            .map(sub => deleteFileFromS3(sub.bucketName, sub.key));
+        await Promise.all(s3Deletions);
+
+        // Delete all the submission database records
+        await SubassignmentModel.deleteMany({ assignmentId: this._id });
+    }
+    next();
+});
+
+
 export const assignmentModel = model('assignment', assignmentSchema);

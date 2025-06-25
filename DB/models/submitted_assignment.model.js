@@ -1,4 +1,5 @@
 import { Schema, model } from "mongoose";
+import { deleteFileFromS3 } from "../../src/utils/S3Client.js";
 
 const submittedAssignmentSchema = new Schema(
   {
@@ -10,9 +11,10 @@ const submittedAssignmentSchema = new Schema(
     key: String, // New Field for S3 file key
     path: String, // New Field for S3 file path (public or signed URL)
     notes: String, // Notes about submission (e.g., "Late submission")
-    isLate: Boolean, // Indicates if the submission was late
     isMarked :{type:Boolean,  default: false},
-      isLate: {
+       
+    version: { type: Number, required: true },
+  isLate: {
       type: Boolean,
       default: false,
     },
@@ -21,6 +23,15 @@ assignmentname:  { type: String, required: true },
   },
   { timestamps: true }
 );
-submittedAssignmentSchema.index({ studentId: 1, assignmentId: 1 }, { unique: true }); // A compound unique index is even better!
 
+
+
+submittedAssignmentSchema.index({ studentId: 1, assignmentId: 1, version: -1 });
+
+submittedAssignmentSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
+    if (this.key && this.bucketName) {
+        await deleteFileFromS3(this.bucketName, this.key);
+    }
+    next();
+});
 export const SubassignmentModel = model("subassignment", submittedAssignmentSchema);

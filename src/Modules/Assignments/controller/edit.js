@@ -225,61 +225,19 @@ export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, nex
         return next(new Error("A valid Assignment ID is required.", { cause: 400 }));
     }
 
-    const [assignment, submissions] = await Promise.all([
-        assignmentModel.findById(assignmentId).select('key createdBy').lean(),
-        SubassignmentModel.find({ assignmentId }).select('key').lean()
-    ]);
-    
+    // FIX: Fetch the full document
+    const assignment = await assignmentModel.findById(assignmentId);
     if (!assignment) {
         return next(new Error("Assignment not found.", { cause: 404 }));
     }
 
+    // Authorization
     if (!assignment.createdBy.equals(teacherId)) {
         return next(new Error("You are not authorized to delete this assignment.", { cause: 403 }));
     }
 
-    const session = await mongoose.startSession();
-    try {
-        session.startTransaction();
-
-        const submissionIds = submissions.map(s => s._id);
-
-        if (submissionIds.length > 0) {
-            await SubassignmentModel.deleteMany({ _id: { $in: submissionIds } }, { session });
-            await studentModel.updateMany(
-                { submittedassignments: { $in: submissionIds } },
-                { $pull: { submittedassignments: { $in: submissionIds } } },
-                { session }
-            );
-        }
-        
-        await assignmentModel.findByIdAndDelete(assignmentId, { session });
-        
-        await session.commitTransaction();
-
-    } catch (error) {
-        await session.abortTransaction();
-        console.error("Database transaction failed during assignment deletion:", error);
-        return next(new Error("Failed to delete assignment due to a database error. Operation rolled back.", { cause: 500 }));
-    } finally {
-        await session.endSession();
-    }
-
-    const objectsToDelete = submissions.map(sub => ({ Key: sub.key })).filter(item => item.Key);
-    if (assignment.key) {
-        objectsToDelete.push({ Key: assignment.key });
-    }
-
-    if (objectsToDelete.length > 0) {
-        try {
-            await s3.send(new DeleteObjectsCommand({
-                Bucket: process.env.S3_BUCKET_NAME,
-                Delete: { Objects: objectsToDelete },
-            }));
-        } catch (s3Error) {
-            console.error("CRITICAL: Database records were deleted, but S3 cleanup failed.", s3Error);
-        }
-    }
+    // FIX: This single line triggers the powerful cascading delete middleware you wrote.
+    await assignment.deleteOne();
 
     res.status(200).json({
         message: "Assignment and all related data deleted successfully.",
@@ -294,52 +252,23 @@ export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => 
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
 
-    const submission = await SubassignmentModel.findById(submissionId).lean();
-    
+    // FIX: Fetch the full document, not a .lean() object
+    const submission = await SubassignmentModel.findById(submissionId);
     if (!submission) {
         return next(new Error("Submission not found.", { cause: 404 }));
     }
 
-    let assignment;
-    if (isteacher?.teacher === true) {
-        assignment = await assignmentModel.findById(submission.assignmentId).select('createdBy').lean();
-    }
-
-    let isAuthorized = false;
-    if (user._id.equals(submission.studentId)) {
-        isAuthorized = true;
-    }
-    else if (isteacher?.teacher === true && assignment?.createdBy.equals(user._id)) {
-        isAuthorized = true;
-    }
-
+    // Authorization logic is fine, but we need the full document for it
+    const assignment = await assignmentModel.findById(submission.assignmentId).select('createdBy').lean();
+    let isAuthorized = user._id.equals(submission.studentId) || (isteacher?.teacher === true && assignment?.createdBy.equals(user._id));
+    
     if (!isAuthorized) {
         return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
     }
     
-    const session = await mongoose.startSession();
-    try {
-        session.startTransaction();
-        await SubassignmentModel.findByIdAndDelete(submission._id, { session });
-        await session.commitTransaction();
-    } catch (error) {
-        await session.abortTransaction();
-        console.error("Database transaction failed during submission deletion:", error);
-        return next(new Error("Failed to delete submission due to a database error. Operation rolled back.", { cause: 500 }));
-    } finally {
-        await session.endSession();
-    }
-
-    if (submission.key) {
-        try {
-            await s3.send(new DeleteObjectCommand({
-                Bucket: submission.bucketName,
-                Key: submission.key,
-            }));
-        } catch (s3Error) {
-            console.error(`CRITICAL: DB record for submission ${submission._id} was deleted, but S3 cleanup failed for key ${submission.key}.`, s3Error);
-        }
-    }
+    // FIX: This single line replaces all manual S3 and DB cleanup.
+    // It triggers the pre('deleteOne') hook in the submittedAssignmentSchema.
+    await submission.deleteOne();
 
     res.status(200).json({ message: "Submission deleted successfully." });
 });
