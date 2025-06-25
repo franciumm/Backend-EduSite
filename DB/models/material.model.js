@@ -7,7 +7,9 @@ const materialSchema = new Schema(
     groupIds: [{ type: Schema.Types.ObjectId, ref: "group", required: true }],
     gradeId: { type: Schema.Types.ObjectId, ref: "grade" },
     bucketName: { type: String, required: true },
-    linksArray :  [{ type: String} ],
+    linksArray :  [{ 
+      type: String
+    } ],
     files: [
       {
         key: { type: String, required: true },
@@ -17,7 +19,6 @@ const materialSchema = new Schema(
         _id: false // It's good practice to disable subdocument IDs if not needed
       },
     ],
-    
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "teacher",
