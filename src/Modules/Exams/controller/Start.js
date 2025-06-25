@@ -148,10 +148,10 @@ export const createExam = asyncHandler(async (req, res, next) => {
 export const submitExam = asyncHandler(async (req, res, next) => {
     // --- Phase 1: Fail Fast - Synchronous Input Validation & Authorization ---
     const { examId, notes } = req.body;
-    const { user, isteacher } = req; const uaeTimeZone = 'Asia/Dubai';
-
+    const { user, isteacher } = req; 
+    const uaeTimeZone = 'Asia/Dubai';
     const submissionTime = toZonedTime(new Date(), uaeTimeZone);
-
+    const studentId = user._id;
     if (isteacher?.teacher === true) {
         return next(new Error("Teachers are not permitted to submit exams.", { cause: 200 }));
     }
@@ -162,17 +162,16 @@ export const submitExam = asyncHandler(async (req, res, next) => {
         await fs.unlink(req.file.path).catch(e => console.error("Temp file cleanup failed on invalid input:", e));
         return next(new Error("A valid Exam ID is required.", { cause: 400 }));
     }
-    const studentId = user._id;
+   
 
     // --- Phase 2: Maximum Performance - Parallel Asynchronous Validation ---
     let results, fileContent;
     try {
-        const [exam, oldSubmission] = await Promise.all([
-            examModel.findById(examId).lean(),
-            SubexamModel.findOne({ examId, studentId }).lean(), // Check for re-submission early
-        ]);
+        const exam = await examModel.findById(examId).lean();
+           
+        
         fileContent = await fs.readFile(req.file.path);
-        results = { exam, oldSubmission };
+        results = { exam };
 
 
     } catch (parallelError) {
@@ -181,7 +180,7 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     }
 
     // --- Phase 3: Process Results & Deep Authorization Checks ---
-    const { exam, oldSubmission } = results;
+    const { exam } = results;
 
     if (!exam) { await fs.unlink(req.file.path); return next(new Error("Exam not found.", { cause: 404 })); }
     if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot submit an empty file.", { cause: 400 })); }
@@ -248,11 +247,7 @@ export const submitExam = asyncHandler(async (req, res, next) => {
         await fs.unlink(req.file.path).catch(e => console.error("Final temp file cleanup failed:", e));
     }
 
-    // --- Phase 5: Post-Commit Cleanup of Old S3 File ---
-    if (oldSubmission?.fileKey) {
-        deleteFileFromS3(process.env.S3_BUCKET_NAME, oldSubmission.fileKey)
-            .catch(err => console.error("Non-critical error: Failed to delete old S3 file on resubmission:", err));
-    }
+    // --- Phase 5: Post-Commit Cleanup of Old S3 File --
 
     res.status(200).json({
         message: "Exam submitted successfully.",
