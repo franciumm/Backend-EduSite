@@ -1,5 +1,6 @@
 import {Schema, model} from "mongoose";
 import { deleteFileFromS3 } from "../../src/utils/S3Client.js";
+import { SubassignmentModel } from "./submitted_assignment.model.js";
 
 const assignmentSchema = new Schema({
     name: { type: String, required: true },
