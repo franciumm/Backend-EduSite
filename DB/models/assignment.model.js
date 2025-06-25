@@ -1,5 +1,5 @@
 import {Schema, model} from "mongoose";
-import { deleteFileFromS3 } from "../../src/utils/S3Client";
+import { deleteFileFromS3 } from "../../src/utils/S3Client.js";
 
 const assignmentSchema = new Schema({
     name: { type: String, required: true },
