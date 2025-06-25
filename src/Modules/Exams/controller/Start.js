@@ -146,22 +146,74 @@ export const createExam = asyncHandler(async (req, res, next) => {
 });
 
 export const submitExam = asyncHandler(async (req, res, next) => {
-    // ... (All initial validation remains the same) ...
+    // --- Phase 1: Fail Fast - Synchronous Input Validation & Authorization ---
     const { examId, notes } = req.body;
-    const { user, isteacher } = req;
-    const uaeTimeZone = 'Asia/Dubai';
+    const { user, isteacher } = req; const uaeTimeZone = 'Asia/Dubai';
+
     const submissionTime = toZonedTime(new Date(), uaeTimeZone);
-    
-    // ... (Teacher check, file check, examId check remains the same) ...
+
+    if (isteacher?.teacher === true) {
+        return next(new Error("Teachers are not permitted to submit exams.", { cause: 200 }));
+    }
+    if (!req.file) {
+        return next(new Error("A file must be attached for submission.", { cause: 400 }));
+    }
+    if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
+        await fs.unlink(req.file.path).catch(e => console.error("Temp file cleanup failed on invalid input:", e));
+        return next(new Error("A valid Exam ID is required.", { cause: 400 }));
+    }
     const studentId = user._id;
 
-    // --- We no longer need to check for old submissions here ---
-    const exam = await examModel.findById(examId).lean();
-    if (!exam) { /* handle error */ }
+    // --- Phase 2: Maximum Performance - Parallel Asynchronous Validation ---
+    let results, fileContent;
+    try {
+        const [exam, oldSubmission] = await Promise.all([
+            examModel.findById(examId).lean(),
+            SubexamModel.findOne({ examId, studentId }).lean(), // Check for re-submission early
+        ]);
+        fileContent = await fs.readFile(req.file.path);
+        results = { exam, oldSubmission };
 
-    // ... (All authorization logic for deadlines, groups, rejections remains the same) ...
 
-    // --- NEW LOGIC: Transactional Write Operation for Supreme Data Integrity ---
+    } catch (parallelError) {
+        await fs.unlink(req.file.path).catch(e => console.error("Temp file cleanup failed:", e));
+        return next(new Error("A server error occurred during validation.", { cause: 500 }));
+    }
+
+    // --- Phase 3: Process Results & Deep Authorization Checks ---
+    const { exam, oldSubmission } = results;
+
+    if (!exam) { await fs.unlink(req.file.path); return next(new Error("Exam not found.", { cause: 404 })); }
+    if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot submit an empty file.", { cause: 400 })); }
+    let effectiveStartDate, effectiveEndDate;
+    const exceptionEntry = exam.exceptionStudents.find(ex => ex.studentId.equals(studentId));
+    if (exceptionEntry) {
+         effectiveStartDate = exceptionEntry.startdate;
+        effectiveEndDate = exceptionEntry.enddate;
+        
+    } else { // Standard validation for non-exception students
+        if (exam.rejectedStudents?.some(id => id.equals(studentId))) {
+            await fs.unlink(req.file.path);
+            return next(new Error("You are explicitly blocked from submitting for this exam.", { cause: 200 }));
+        }
+        if (!exam.groupIds.some(gid => gid.equals(user.groupId))) {
+            await fs.unlink(req.file.path);
+            return next(new Error("You are not in an authorized group for this exam.", { cause: 200 }));
+        }
+        // Use the exam's main timeline for this student.
+        effectiveStartDate = exam.startdate;
+        effectiveEndDate = exam.enddate;
+    }
+
+    const isLate = submissionTime > effectiveEndDate;
+
+  if (isLate && !exam.allowSubmissionsAfterDueDate) {
+        await fs.unlink(req.file.path);
+        const errorMessage = exceptionEntry ? "Submission is outside your special allowed time frame." : "Exam submission window is closed.";
+        return next(new Error(errorMessage, { cause: 200 }));
+    }
+
+    // --- Phase 4: Transactional Write Operation for Supreme Data Integrity ---
     const s3Key = `ExamSubmissions/${examId}/${studentId}_${submissionTime.getTime()}.pdf`;
     const session = await mongoose.startSession();
     let newSubmission;
@@ -169,45 +221,41 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     try {
         session.startTransaction();
         
-        // Atomically get the new version number
-        const currentVersionCount = await SubexamModel.countDocuments({ examId, studentId }).session(session);
-        const newVersion = currentVersionCount + 1;
-
-        const fileContent = await fs.readFile(req.file.path);
         await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
 
-        // Use .create() instead of .findOneAndUpdate()
-        const createdDocs = await SubexamModel.create(
-            [{
-                examId,
-                studentId,
-                version: newVersion, // Set the new version
-                examname: exam.Name,
+        newSubmission = await SubexamModel.findOneAndUpdate(
+            { examId, studentId },
+            {
+                examname :exam.Name,
                 SubmitDate: submissionTime,
                 notes: notes?.trim() || "",
                 fileBucket: process.env.S3_BUCKET_NAME,
                 fileKey: s3Key,
                 filePath: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-            }],
-            { session }
+            },
+            { upsert: true, new: true, session, lean: true }
         );
-        newSubmission = createdDocs[0];
 
         await session.commitTransaction();
 
     } catch (error) {
         await session.abortTransaction();
+        console.error("Error submitting exam, transaction aborted. Rolling back S3 upload.", error);
         await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key).catch(e => console.error("S3 rollback failed:", e));
         return next(new Error("Failed to save submission. The operation was rolled back.", { cause: 500 }));
     } finally {
         await session.endSession();
         await fs.unlink(req.file.path).catch(e => console.error("Final temp file cleanup failed:", e));
     }
-    
-    // --- We no longer need to clean up old S3 files ---
+
+    // --- Phase 5: Post-Commit Cleanup of Old S3 File ---
+    if (oldSubmission?.fileKey) {
+        deleteFileFromS3(process.env.S3_BUCKET_NAME, oldSubmission.fileKey)
+            .catch(err => console.error("Non-critical error: Failed to delete old S3 file on resubmission:", err));
+    }
 
     res.status(200).json({
-        message: `Exam submitted successfully (Version ${newSubmission.version}).`,
+        message: "Exam submitted successfully.",
         submission: newSubmission,
     });
 });
