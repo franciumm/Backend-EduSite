@@ -61,7 +61,7 @@ export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, g
         throw error;
     } finally {
         await session.endSession();
-        if (file && file.path && fs.existsSync(file.path)) {
+        if (file && file.path ) {
             await fs.unlink(file.path);
         }
     }
