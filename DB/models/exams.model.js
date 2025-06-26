@@ -3,6 +3,7 @@
 import { Schema, model } from "mongoose";
 import { SubexamModel } from "./submitted_exams.model.js";
 import { deleteFileFromS3 } from "../../src/utils/S3Client.js"; // Verify this path is correct
+import { sectionModel } from "./section.model.js";
 const examSchema = new Schema(
   {
     Name: { type: String, required: true },

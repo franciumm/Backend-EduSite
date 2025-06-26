@@ -1,5 +1,6 @@
 import { Schema, model } from "mongoose";
 import { deleteFileFromS3 } from "../../src/utils/S3Client.js";
+import { sectionModel } from "./section.model.js";
 const submittedExamSchema = new Schema(
   {
     examId: { type: Schema.Types.ObjectId, ref: "exam", required: true },
@@ -34,7 +35,6 @@ submittedExamSchema.pre('deleteOne', { document: true, query: false }, async fun
     }
     next();
 });
-
 
 
 submittedExamSchema.index({ studentId: 1, examId: 1, version: -1 });
