@@ -1,6 +1,4 @@
 import { asyncHandler } from "../../../utils/erroHandling.js";
-import { assignmentModel } from "../../../../DB/models/assignment.model.js";
-
 import {  PutObjectCommand,DeleteObjectCommand,DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
