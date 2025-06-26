@@ -1,5 +1,5 @@
 import { asyncHandler } from "../../../utils/erroHandling.js";
-import {  PutObjectCommand,DeleteObjectCommand,DeleteObjectsCommand, GetObjectAclCommand } from "@aws-sdk/client-s3";
+import {  PutObjectCommand ,GetObjectCommand} from "@aws-sdk/client-s3";
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
 import { PDFDocument, rgb } from "pdf-lib";
