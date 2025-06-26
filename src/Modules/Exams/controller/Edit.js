@@ -13,7 +13,61 @@ import fs from 'fs';
 import { promises as fsPromises } from 'fs';
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
 
+export const editExam = asyncHandler(async (req, res, next) => {
+    const { examId, ...updateData } = req.body;
+    const teacherId = req.user._id;
 
+    if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
+        return next(new Error("A valid Exam ID is required.", { cause: 400 }));
+    }
+
+    const exam = await examModel.findById(examId);
+    if (!exam) {
+        return next(new Error("Exam not found.", { cause: 404 }));
+    }
+
+    if (!exam.createdBy.equals(teacherId)) {
+        return next(new Error("You are not authorized to edit this exam.", { cause: 403 }));
+    }
+
+    if (req.file) {
+        if (exam.key) {
+            await deleteFileFromS3(exam.bucketName, exam.key)
+                .catch(err => console.error("Non-critical error: Failed to delete old S3 file during edit:", err));
+        }
+        
+        // Use the aliased 'fsPromises' for async operations
+        const fileContent = await fsPromises.readFile(req.file.path);
+        const newKey = `exams/${exam.Name.replace(/\s+/g, '_')}-${Date.now()}.pdf`;
+        
+        await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, "application/pdf");
+        
+        exam.key = newKey;
+        exam.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
+        exam.bucketName = process.env.S3_BUCKET_NAME;
+
+        // Use the aliased 'fsPromises' for async operations
+        await fsPromises.unlink(req.file.path);
+    }
+    
+    // Sanitize and update name if provided
+    if (updateData.Name) {
+        updateData.Name = updateData.Name.trim();
+    }
+    
+    Object.keys(updateData).forEach(key => {
+        if (updateData[key] !== undefined && updateData[key] !== null) {
+            exam[key] = updateData[key];
+        }
+    });
+
+    const updatedExam = await exam.save();
+
+    res.status(200).json({
+        message: "Exam updated successfully.",
+        exam: updatedExam,
+    });
+});
 const authorizeExamDownload = asyncHandler(async (req, res, next) => {
     const { examId } = req.query;
 

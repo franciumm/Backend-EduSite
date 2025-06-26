@@ -3,6 +3,8 @@
 import { Router } from "express";
 import { AdminAuth, isAuth } from "../../middelwares/auth.js";
 import * as sectionController from "./controller/section.controller.js";
+import { multerCloudFunction } from "../../utils/MulterCloud.js";
+import { allowedExtensions } from "../../utils/allowedExtensions.js";
 
 const router = Router();
 
@@ -21,6 +23,7 @@ router.put(
     AdminAuth,
     sectionController.updateSectionLinks
 );
+
 router.post(
     "/:sectionId/create-and-link",
     AdminAuth,
