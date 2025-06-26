@@ -83,7 +83,7 @@ const authorizeExamDownload = asyncHandler(async (req, res, next) => {
     }
 
     // If access is granted, attach the exam to the request for the next middleware.
-    req.exam = await examModel.findById(examId).select('bucketName key Name startdate enddate').lean();
+    req.exam = await examModel.findById(examId).lean();
     if (!req.exam) {
         return next(new Error("Exam not found.", { cause: 404 }));
     }
@@ -98,7 +98,7 @@ const streamExamFile = asyncHandler(async (req, res, next) => {
     const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
     const s3Response = await s3.send(command);
 
-    const safeFilename = encodeURIComponent(Name.replace(/[^a-zA-Z0-9.\-_]/g, '_') + '.pdf');
+    const safeFilename =  `${Name}_${req.exam.createdBy}.pdf`;
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeFilename}`);
     res.setHeader('Content-Type', s3Response.ContentType || "application/pdf");
     if(s3Response.ContentLength) {

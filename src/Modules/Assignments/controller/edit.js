@@ -126,13 +126,7 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
     if (req.user._id.equals(submission.studentId._id)) {
         isAuthorized = true;
     } else if (req.isteacher.teacher) {
-        const hasAccess = await canViewSubmissionsFor({
-            user: req.user,
-            isTeacher: true,
-            contentId: submission.assignmentId._id,
-            contentType: 'assignment'
-        });
-        if (hasAccess) isAuthorized = true;
+        ) isAuthorized = true;
     }
 
     if (!isAuthorized) {
