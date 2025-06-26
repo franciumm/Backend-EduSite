@@ -11,6 +11,7 @@ import { deleteFileFromS3, uploadFileToS3 } from "../../../utils/S3Client.js";
 import fs from 'fs'; 
 import { promises as fsPromises } from 'fs';
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
+import { sectionModel } from "../../../../DB/models/section.model.js";
 
 const validateExamId = (req, res, next) => {
     const { examId } = req.query;

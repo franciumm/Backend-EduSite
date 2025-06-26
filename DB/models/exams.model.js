@@ -37,30 +37,21 @@ const examSchema = new Schema(
 );
 
 examSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
-    // 'this' refers to the exam document being deleted
     const submissions = await SubexamModel.find({ examId: this._id });
 
     if (submissions.length > 0) {
-        // FIX 3: Make the S3 deletion more robust by using each submission's specific bucket.
+        // This part deletes submission files. It looks correct.
         const s3FilesToDelete = submissions
-            .filter(sub => sub.fileKey && sub.fileBucket) // Ensure both key and bucket exist
+            .filter(sub => sub.fileKey && sub.fileBucket)
             .map(sub => deleteFileFromS3(sub.fileBucket, sub.fileKey));
-
-        // Delete all submission files from S3 in parallel.
         await Promise.all(s3FilesToDelete);
-        
-        // Now that S3 files are gone, delete all the database records.
         await SubexamModel.deleteMany({ examId: this._id });
     }
     
-    // Also delete the main exam PDF file itself from S3
+    // This part deletes the main exam file.
     if (this.key && this.bucketName) {
         await deleteFileFromS3(this.bucketName, this.key);
     }
-     await sectionModel.updateMany(
-        { linkedExams: this._id },
-        { $pull: { linkedExams: this._id } }
-    );
     
     next();
 });
