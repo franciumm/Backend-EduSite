@@ -1,5 +1,5 @@
 import { asyncHandler } from "../../../utils/erroHandling.js";
-import {  PutObjectCommand,DeleteObjectCommand,DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import {  PutObjectCommand,DeleteObjectCommand,DeleteObjectsCommand, GetObjectAclCommand } from "@aws-sdk/client-s3";
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
 import { PDFDocument, rgb } from "pdf-lib";
@@ -10,10 +10,9 @@ import { toZonedTime } from 'date-fns-tz';
 import { deleteFileFromS3, uploadFileToS3 } from '../../../utils/S3Client.js';
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
 import { assignmentModel } from '../../../../DB/models/assignment.model.js';
-import { s3, GetObjectCommand } from '../../../utils/S3Client.js';
+import { s3 } from '../../../utils/S3Client.js';
 import fs from "fs";
 import { promises as fsPromises } from 'fs';
-
 
 
 
