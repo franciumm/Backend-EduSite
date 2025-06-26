@@ -25,20 +25,7 @@ export const findContent = asyncHandler(async (req, res, next) => {
     if (!gradeId || !mongoose.Types.ObjectId.isValid(gradeId)) {
         return next(new Error("A valid 'gradeId' is required to scope the search.", { cause: 400 }));
     }
-     const teacherId = req.user._id;
-
-    // Find all distinct grade IDs associated with groups created by this teacher.
-    // This gives us a definitive list of grades the teacher is allowed to see.
-    const authorizedGradeIds = await groupModel.distinct('gradeid', { createdBy: teacherId });
-
-    // Check if the requested gradeId is in the teacher's list of authorized grades.
-    // We convert the authorized IDs to strings for a safe comparison.
-    const isAuthorized = authorizedGradeIds.some(id => id.toString() === gradeId);
-
-    if (!isAuthorized) {
-        // If not authorized, deny the request with a 403 Forbidden error.
-        return next(new Error("You are not authorized to search for content in this grade.", { cause: 403 }));
-    }
+   
 
       const Model = modelMap[type];
     if (!Model) {
