@@ -9,7 +9,7 @@ import mongoose from "mongoose";
 import { promises as fs } from 'fs';
 import { toZonedTime } from 'date-fns-tz';
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
-
+const uaeTimeZone = 'Asia/Dubai';
 
 
 export const _internalCreateAssignment = async ({ name, startDate, endDate, gradeId, groupIds, file, teacherId, allowSubmissionsAfterDueDate }) => {
@@ -57,7 +57,21 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
         return next(new Error("Please upload the assignment file.", { cause: 400 }));
     }
 
-    const { name, startDate, endDate, gradeId, groupIds, allowSubmissionsAfterDueDate } = req.body;
+    const { name, startDate, endDate, gradeId } = req.body;
+    
+      req.body.startDate = new Date(startDate);
+      req.body.endDate = new Date(endDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime()) ||toZonedTime(new Date(), uaeTimeZone) > end || start >= end) {
+        await fs.unlink(req.file.path);
+        return next(new Error("Invalid assignment timeline. Ensure dates are valid, the end date is in the future, and the start date is before the end date.", { cause: 400 }));
+      }
+    
+      let raw = req.body.groupIds ?? req.body["groupIds[]"];
+      if (!raw) { await fs.unlink(req.file.path); return next(new Error("Group IDs are required.", { cause: 400 })); }
+      if (typeof raw === "string" && raw.trim().startsWith("[")) { try { raw = JSON.parse(raw); } catch {} }
+      const groupIds = Array.isArray(raw) ? raw : [raw];
+      if (groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) { await fs.unlink(req.file.path); return next(new Error("One or more Group IDs are invalid.", { cause: 400 })); }
+      req.body.groupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
     
     // Perform necessary validation before calling the internal function
     if (!name || !startDate || !endDate || !gradeId || !groupIds) {
