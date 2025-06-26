@@ -156,17 +156,17 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
     // or the student who owns the submission. Access is granted.
 
     // --- Phase 4: S3 File Streaming ---
-    const { fileBucket, fileKey } = submission;
+    const { bucketName, key } = submission;
 
     // Pre-flight check: Ensure there is actually a file to download.
-    if (!fileBucket || !fileKey) {
+    if (!fileBucket || !key) {
         return next(new Error("This submission record has no associated file, it may have been corrupted or uploaded incorrectly.", { cause: 404 }));
     }
 
     try {
         const command = new GetObjectCommand({
-            Bucket: fileBucket,
-            Key: fileKey,
+            Bucket: bucketName,
+            Key: key,
         });
 
         const s3Response = await s3.send(command);
@@ -221,12 +221,12 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
 
   // 4. Delete old PDF from S3 (optional but likely desired)
   //    so we don't keep the student's original or cause confusion.
-  if (subExam.fileBucket && subExam.fileKey) {
+  if (subExam.bucketName && subExam.key) {
     try {
       await s3.send(
         new DeleteObjectCommand({
-          Bucket: subExam.fileBucket,
-          Key: subExam.fileKey,
+          Bucket: subExam.bucketName,
+          Key: subExam.key,
         })
       );
     } catch (delErr) {
@@ -258,9 +258,9 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
   }
 
   // 6. Overwrite the subexam doc with new PDF fields + new score/feedback
-  subExam.fileBucket = process.env.S3_BUCKET_NAME;
-  subExam.fileKey = newKey;
-  subExam.filePath = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
+  subExam.bucketName = process.env.S3_BUCKET_NAME;
+  subExam.key = newKey;
+  subExam.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
 
   // score and feedback
   if (typeof score !== "undefined") {
