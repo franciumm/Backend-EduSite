@@ -61,7 +61,7 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
     
       req.body.startDate = new Date(startDate);
       req.body.endDate = new Date(endDate);
-      if (isNaN(start.getTime()) || isNaN(end.getTime()) ||toZonedTime(new Date(), uaeTimeZone) > req.body.endDate || req.body.startDate >= req.body.endDate) {
+      if (isNaN(req.body.startDate.getTime()) || isNaN(req.body.endDate.getTime()) ||toZonedTime(new Date(), uaeTimeZone) > req.body.endDate || req.body.startDate >= req.body.endDate) {
         await fs.unlink(req.file.path);
         return next(new Error("Invalid assignment timeline. Ensure dates are valid, the end date is in the future, and the start date is before the end date.", { cause: 400 }));
       }
