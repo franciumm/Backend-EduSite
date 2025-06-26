@@ -1,5 +1,3 @@
-// src/Modules/Assignments/controller/Start.js
-
 import path from 'path';
 import slugify from "slugify";
 import { asyncHandler } from "../../../utils/erroHandling.js";
@@ -10,13 +8,10 @@ import studentModel from "../../../../DB/models/student.model.js";
 import mongoose from "mongoose";
 import { promises as fs } from 'fs';
 import { toZonedTime } from 'date-fns-tz';
-// --- PHASE 2: Import the universal authorizer ---
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
 
-// =================================================================
-// --- PHASE 2, FIX 2.1: Internal Assignment Creation Logic (The "Spoke") ---
-// This function contains the core logic for creating an assignment and can be reused by other services.
-// =================================================================
+
+
 export const _internalCreateAssignment = async ({ name, startDate, endDate, gradeId, groupIds, file, teacherId, allowSubmissionsAfterDueDate }) => {
     const s3Key = `assignments/${slugify(name, { lower: true, strict: true })}-${Date.now()}${path.extname(file.originalname)}`;
     
@@ -56,10 +51,7 @@ export const _internalCreateAssignment = async ({ name, startDate, endDate, grad
         }
     }
 };
-/**
- * The original endpoint controller, now a thin wrapper responsible for parsing the request
- * and calling the internal "spoke" function.
- */
+
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
     if (!req.file) {
         return next(new Error("Please upload the assignment file.", { cause: 400 }));
@@ -82,6 +74,7 @@ export const CreateAssignment = asyncHandler(async (req, res, next) => {
 });
 
 
+
 // =================================================================
 // --- PHASE 2, FIX 2.2: Refactored submitAssignment Controller ---
 // =================================================================
@@ -101,6 +94,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     const hasAccess = await canAccessContent({
         user: { _id: user._id, isTeacher: req.isteacher.teacher, groupId: user.groupId },
         contentId: assignmentId,
+        isTeacher: req.isteacher.teacher, 
         contentType: 'assignment'
     });
 

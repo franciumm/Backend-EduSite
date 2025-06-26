@@ -71,8 +71,9 @@ export const editExam = asyncHandler(async (req, res, next) => {
 const authorizeExamDownload = asyncHandler(async (req, res, next) => {
     const { examId } = req.query;
 
-    const hasAccess = await canAccessContent({
-        user: { _id: req.user._id, isTeacher: req.isteacher.teacher },
+     const hasAccess = await canAccessContent({
+        user: req.user,
+        isTeacher: req.isteacher.teacher,
         contentId: examId,
         contentType: 'exam'
     });

@@ -90,12 +90,12 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     // =================================================================
     // We now use our universal authorizer to check if the student can access this exam.
     // This replaces the large, complex, and redundant inline authorization block.
-    const hasAccess = await canAccessContent({ user, contentId: examId, contentType: 'exam' });
-
-    if (!hasAccess) {
-        await fs.unlink(req.file.path);
-        return next(new Error("You are not authorized to submit to this exam.", { cause: 403 }));
-    }
+   const hasAccess = await canAccessContent({
+        user: user,
+        isTeacher: isteacher.teacher,
+        contentId: examId,
+        contentType: 'exam'
+    });
     // --- END REFACTOR ---
 
     // 2. Fetch necessary data (exam and file content)
