@@ -9,7 +9,10 @@ import { _internalCreateAssignment } from '../../Assignments/controller/start.js
 import { _internalCreateExam } from '../../Exams/controller/Start.js';
 import { _internalCreateMaterial } from '../../Materials/controller/All.js';
 import { normalizeContentName } from '../../../utils/queryHelpers.js';
-
+function capitalize(str) {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
 // =================================================================
 // --- PHASE 2, FIX 2.1: Internal Section Creation Logic (The "Spoke") ---
 // =================================================================
