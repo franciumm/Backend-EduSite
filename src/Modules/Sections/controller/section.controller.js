@@ -18,6 +18,7 @@ function capitalize(str) {
 // =================================================================
 export const _internalCreateSection = async ({ name, description, gradeId, groupIds, teacherId }) => {
     // 1. Validate all incoming IDs. This is important for a reusable function.
+    
     if (!gradeId || !mongoose.Types.ObjectId.isValid(gradeId)) {
         throw new Error("A valid Grade ID is required to create a section.");
     }

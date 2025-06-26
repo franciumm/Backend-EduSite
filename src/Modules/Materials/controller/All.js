@@ -127,16 +127,27 @@ export const getMaterials = asyncHandler(async (req, res, next) => {
   });
 });
 
+
 export const _internalCreateMaterial = async ({ name, description, gradeId, groupIds, linksArray, files, teacherId }) => {
-    // Note: The calling function (hub or route controller) is responsible for pre-validating inputs.
+    const gradeDoc = await gradeModel.findById(gradeId);
+    if (!gradeDoc) throw new Error("Wrong GradeId");
+
+    // --- FIX: Generate the slug from the name ---
+    const slug = slugify(name, { lower: true, strict: true });
+
+    // Check if a material with this slug already exists for the given grade to prevent conflicts
+    const existingMaterial = await MaterialModel.findOne({ slug, gradeId });
+    if (existingMaterial) {
+        throw new Error(`A material with the name "${name}" already exists for this grade, resulting in a duplicate slug.`);
+    }
+
     const successfulS3Keys = [];
-    const tempFilePaths = files.map(f => f.path); // Track temp paths for cleanup
+    const tempFilePaths = files.map(f => f.path);
 
     try {
-        // 1. Upload all files to S3 in parallel for maximum efficiency
         const uploadPromises = files.map(async (file) => {
             const fileContent = fs.readFileSync(file.path);
-            const s3Key = `materials/${name.replace(/\s+/g, '_')}/${Date.now()}-${file.originalname}`;
+            const s3Key = `materials/${slug}/${Date.now()}-${file.originalname}`; // Use slug in S3 path
             
             await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, file.mimetype);
             successfulS3Keys.push(s3Key);
@@ -151,9 +162,10 @@ export const _internalCreateMaterial = async ({ name, description, gradeId, grou
 
         const uploadedFilesData = await Promise.all(uploadPromises);
 
-        // 2. Create the database record
+        // --- FIX: Include the generated slug in the document to be created ---
         const newMaterial = await MaterialModel.create({
             name,
+            slug, // Add the slug here
             description,
             linksArray,
             groupIds,
@@ -163,28 +175,22 @@ export const _internalCreateMaterial = async ({ name, description, gradeId, grou
             files: uploadedFilesData,
         });
 
-        // 3. Return the successfully created document
         return newMaterial;
 
     } catch (err) {
+        // ... (Error handling remains the same)
         console.error("Internal material creation failed. Rolling back S3 files...", err);
-        // If any error occurs, attempt to clean up the successfully uploaded S3 files
         if (successfulS3Keys.length > 0) {
             await Promise.all(
                 successfulS3Keys.map(key => deleteFileFromS3(process.env.S3_BUCKET_NAME, key).catch(e => console.error(`S3 rollback failed for key: ${key}`, e)))
             );
         }
-        // Re-throw the error so the calling function (the hub or route controller) can handle it
         throw err;
     } finally {
-        // 4. Always clean up all local temporary files
-        tempFilePaths.forEach(path => {
-            if (fs.existsSync(path)) {
-                fs.unlink(path, (err) => {
-                    if (err) console.error(`Failed to delete temp file: ${path}`, err);
-                });
-            }
-        });
+        // ... (Cleanup remains the same)
+        tempFilePaths.forEach(path => fs.unlink(path, (err) => {
+            if (err) console.error(`Failed to delete temp file: ${path}`, err);
+        }));
     }
 };
 
