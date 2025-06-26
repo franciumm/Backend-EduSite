@@ -5,39 +5,30 @@ import { GetObjectCommand ,PutObjectCommand} from "@aws-sdk/client-s3";
 import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3 } from '../../../utils/S3Client.js';
 import mongoose from "mongoose";
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
-
+import { sectionModel } from '../../../../DB/models/section.model.js';
+import { canViewSubmissionsFor } from '../../../middelwares/contentAuth.js';
 import { pagination } from "../../../utils/pagination.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 
+
 export const GetAllByGroup = asyncHandler(async (req, res, next) => {
-  // Get groupId from request parameters or body. Using params is common for GET requests.
-  // Let's assume it's in the body as per your original code.
-  const { groupId } = req.query;
-
-  if (!groupId) {
-    return next(new Error("Group ID is required.", { cause: 400 }));
-  }
-
-  // Authorization check for students
-  // Note: We assume that an auth middleware has already populated req.user for students.
-  if (req.isTeacher === false) {
-    // The logic was inverted. We should check if the student is NOT in the requested group.
-    // Also, a student might belong to multiple groups, so req.user.groupIds should be an array.
-    // For this example, we'll assume req.user.groupId holds their single group ID.
-    req.user.groupId = await groupModel.findById(req.user.groupId);
-    if (req.user.groupId.toString() !== groupId) {
-      return next(new Error("Unauthorized: You do not have access to this group's assignments.", { cause: 403 }));
+    const { groupId } = req.query;
+    if (!groupId) {
+        return next(new Error("Group ID is required.", { cause: 400 }));
     }
-  }
 
-  // **THE FIX**: To find if a single value exists within an array in a document,
-  // you can query it directly. Mongoose is smart enough to translate this
-  // into a query that checks for the element in the array.
-  const assignments = await assignmentModel.find({ groupIds: groupId });
+    // The isAuth middleware already provides req.user.groupId. We use it directly
+    // and correctly compare it to the requested groupId. This removes the unnecessary database call.
+    if (req.isteacher.teacher === false) {
+        if (req.user.groupId?.toString() !== groupId) {
+            return next(new Error("Unauthorized: You do not have access to this group's assignments.", { cause: 403 }));
+        }
+    }
+    
 
-  // Use 200 OK for a successful GET request, not 201 Created.
-  res.status(200).json({ message: "Assignments fetched successfully", data: assignments });
+    const assignments = await assignmentModel.find({ groupIds: groupId });
+    res.status(200).json({ message: "Assignments fetched successfully", data: assignments });
 });
 
 
@@ -250,164 +241,170 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
         data: submissions
     });
 });
+
+
 export const getSubmissions = asyncHandler(async (req, res, next) => {
-  const { assignmentId, submissionId } = req.query;
-  const userId = req.user._id;
-  const isTeacher = req.isteacher?.teacher === true;
+    const { assignmentId, submissionId } = req.query;
+    const { user, isteacher } = req;
 
-  // 1) assignmentId required
-  if (!assignmentId) {
-    return next(new Error("Assignment ID is required", { cause: 400 }));
-  }
-
-  // 2) load assignment
-  const assignment = await assignmentModel.findById(assignmentId);
-  if (!assignment) {
-    return next(new Error("Assignment not found", { cause: 404 }));
-  }
-
-  // 3) if student, verify they’re in the assignment’s group
-  if (!isTeacher) {
-    const student = await studentModel.findById(userId);
-    if (!student) {
-      return next(new Error("Student record not found", { cause: 404 }));
+    if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
+        return next(new Error("Assignment ID is required and must be a valid ID.", { cause: 400 }));
     }
-    if (!assignment.groupId.equals(student.groupId)) {
-      return next(new Error("You’re not authorized to view these submissions", { cause: 403 }));
-    }
-  }
 
-  let submissions;
-  if (submissionId) {
-    // 4a) single submission
-    submissions = await SubassignmentModel.findOne({
-      _id: submissionId,
-      assignmentId,
-    }).populate("studentId", "userName firstName lastName email");
+    // --- REFACTOR: Use the new centralized submission authorizer ---
+    const hasAccess = await canViewSubmissionsFor({
+        user,
+        isTeacher: isteacher.teacher,
+        contentId: assignmentId,
+        contentType: 'assignment'
+    });
+
+    if (!hasAccess) {
+        return next(new Error("You are not authorized to view submissions for this assignment.", { cause: 403 }));
+    }
+    // --- END REFACTOR ---
+
+    // Now that we know the user is authorized, we can proceed to fetch the data.
+    let submissions;
+    if (submissionId) {
+        // Fetch a single submission
+        if (!mongoose.Types.ObjectId.isValid(submissionId)) {
+            return next(new Error("Invalid Submission ID format.", { cause: 400 }));
+        }
+        submissions = await SubassignmentModel.findOne({
+            _id: submissionId,
+            assignmentId, // Ensure it belongs to the correct parent assignment
+        }).populate("studentId", "userName firstName lastName email");
+
+        // Extra check: if student, they can only view their own submission, even if they have access to the assignment.
+        if (!isteacher.teacher && submissions && !submissions.studentId._id.equals(user._id)) {
+            return next(new Error("You are not authorized to view this specific submission.", { cause: 403 }));
+        }
+
+    } else {
+        // Fetch a list of submissions
+        const { limit, skip } = pagination(req.query);
+        const query = { assignmentId };
+        
+        // If the user is a student, scope the list to only their own submissions.
+        if (!isteacher.teacher) {
+            query.studentId = user._id;
+        }
+
+        submissions = await SubassignmentModel.find(query)
+            .populate("studentId", "userName firstName lastName email")
+            .skip(skip)
+            .limit(limit)
+            .sort({ isMarked: 1, createdAt: -1 });
+    }
+    
     if (!submissions) {
-      return next(new Error("Submission not found", { cause: 404 }));
+        return res.status(404).json({ message: "No submissions found." });
     }
-    if (
-      !isTeacher &&
-      submissions.studentId._id.toString() !== userId.toString()
-    ) {
-      return next(new Error("You’re not authorized to view this submission", { cause: 403 }));
-    }
-  } else {
-    // 4b) all submissions (with pagination)
-    const { limit, skip } = pagination(req.query);
-    const query = { assignmentId };
-    if (!isTeacher) query.studentId = userId;
 
-    submissions = await SubassignmentModel.find(query)
-      .populate("studentId", "userName firstName lastName email")
-      .skip(skip)
-      .limit(limit)
-      .sort({ isMarked: 1, createdAt: -1 });
-  }
-
-  res.status(200).json({
-    message: "Submissions retrieved successfully",
-    submissions,
-  });
+    res.status(200).json({ message: "Submissions retrieved successfully", submissions });
 });
+
 
 export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
-  const { page = 1, size = 10, status } = req.query;
-
-  const user = req.user; // The authenticated user
-  const isTeacher = req.isteacher.teacher;
-  const currentDate = new Date();
-
-  try {
-    const query = {};
-
-    if (isTeacher) {
-        if (req.query.groupId && mongoose.Types.ObjectId.isValid(req.query.groupId)) {
-        query.groupIds = mongoose.Types.ObjectId(req.query.groupId);
-      }
-    } else {
-      // For students, filter by their group
-      
-        let student = await studentModel.findById(user._id).lean();
-          if (!student) {
-        return res.status(404).json({ message: "Student not found" });
-      }
-      query.groupIds  = student.groupId;
-    }
-
-
-    if (status) {
-      if (status === "active") {
-        query.startDate = { $lte: currentDate };
-        query.endDate = { $gte: currentDate };
-      } else if (status === "upcoming") {
-        query.startDate = { $gt: currentDate };
-      } else if (status === "expired") {
-        query.endDate = { $lt: currentDate };
-      }
-    }
-
-    // Pagination helpers
+    const { page = 1, size = 10, status } = req.query;
+    const { user } = req;
+    const currentDate = new Date();
     const { limit, skip } = pagination({ page, size });
 
-    // Fetch assignments
-    const assignments = await assignmentModel
-      .find(query)
-      .sort({ startDate: 1 }) // Sort by start date
-      .skip(skip)
-      .limit(limit)
-      .select("name startDate endDate groupIds rejectedStudents enrolledStudents")
-      .populate("groupIds", "groupname"); 
+    // 1. Find the student's group and all sections they have access to.
+    const student = await studentModel.findById(user._id).select('groupId').lean();
+    if (!student) {
+        return res.status(404).json({ message: "Student not found." });
+    }
+    
+    // 2. Aggregate all assignment IDs the student can access via sections.
+    let sectionAssignmentIds = [];
+    if (student.groupId) {
+        const sections = await sectionModel.find({ groupIds: student.groupId }).select('linkedAssignments').lean();
+        sectionAssignmentIds = sections.flatMap(sec => sec.linkedAssignments);
+    }
+    
+    // 3. Build the main query using the full additive permission model.
+    const baseMatch = {
+        $or: [
+            { enrolledStudents: user._id },          // Path A: Manually enrolled in the assignment.
+            { _id: { $in: sectionAssignmentIds } },  // Path B: Assignment is in a section they can access.
+        ]
+    };
 
-    // Total count for pagination
-    const totalAssignments = await assignmentModel.countDocuments(query);
+    // Path C: Student's group is directly assigned (only if they have a group).
+    if (student.groupId) {
+        baseMatch.$or.push({ groupIds: student.groupId });
+    }
 
-    // Response
+    // 4. Dynamically add the timeline status filter to the main query.
+    if (status) {
+        if (status === "active") { baseMatch.startDate = { $lte: currentDate }; baseMatch.endDate = { $gte: currentDate }; }
+        else if (status === "upcoming") { baseMatch.startDate = { $gt: currentDate }; }
+        else if (status === "expired") { baseMatch.endDate = { $lt: currentDate }; }
+    }
+
+    // 5. Execute queries for data and total count in parallel for max efficiency.
+    const [assignments, totalAssignments] = await Promise.all([
+        assignmentModel.find(baseMatch)
+            .sort({ startDate: 1 })
+            .skip(skip)
+            .limit(limit)
+            .select("name startDate endDate groupIds")
+            .lean(),
+        assignmentModel.countDocuments(baseMatch)
+    ]);
+
+    // 6. Send the final, correct, and performant response.
     res.status(200).json({
-      message: "Assignments fetched successfully",
-      totalAssignments,
-      totalPages: Math.ceil(totalAssignments / limit),
-      currentPage: parseInt(page, 10),
-      assignments,
+        message: "Assignments fetched successfully",
+        totalAssignments,
+        totalPages: Math.ceil(totalAssignments / limit),
+        currentPage: parseInt(page, 10),
+        assignments,
     });
-  } catch (error) {
-    console.error("Error fetching assignments:", error);
-    next(new Error("Failed to fetch assignments", { cause: 500 }));
-  }
 });
 
-
-export const ViewSub = asyncHandler(async(req, res, next) =>{
-
-
-  const userId    = req.user._id;
-  const isTeacher = req.isteacher.teacher;
-  const { SubassignmentId } = req.query;
-
-  // fetch it
-  const assignment = await SubassignmentModel.findById(SubassignmentId);
-  if (!assignment) {
-    return next(new Error("Subassignment not found", { cause: 404 }));
-  }
-
-  if (!isTeacher) {
-    
-    if ( assignment.studentId != userId ) {
-      return next(new Error("You are not valid to it boy ", { cause: 403 }));
+export const ViewSub = asyncHandler(async (req, res, next) => {
+    // --- FIX 1.3: Correct and Robust Authorization ---
+    const { SubassignmentId } = req.query; // Changed from assignmentId
+    if (!SubassignmentId || !mongoose.Types.ObjectId.isValid(SubassignmentId)) {
+        return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
-  }
 
-  // anyone authorized gets a presigned GET URL
-  const presignedUrl = await getPresignedUrlForS3(
-    assignment.bucketName,
-    assignment.key,
-    60 * 30
-  );
-  res.status(200).json({
-    message:     "SubAssg  is ready for viewing",
-    presignedUrl,
-  });
+    const submission = await SubassignmentModel.findById(SubassignmentId);
+    if (!submission) {
+        return next(new Error("Submission not found", { cause: 404 }));
+    }
+
+    let isAuthorized = false;
+    // Rule 1: The student who owns the submission can view it.
+    if (req.user._id.equals(submission.studentId)) {
+        isAuthorized = true;
+    }
+    // Rule 2: A teacher can view any submission for an assignment they created.
+    else if (req.isteacher.teacher === true) {
+        const originalAssignment = await assignmentModel.findById(submission.assignmentId).select('createdBy').lean();
+        if (originalAssignment && originalAssignment.createdBy.equals(req.user._id)) {
+            isAuthorized = true;
+        }
+    }
+
+    if (!isAuthorized) {
+        return next(new Error("You are not authorized to view this submission.", { cause: 403 }));
+    }
+    // --- END FIX ---
+    
+    const presignedUrl = await getPresignedUrlForS3(
+        submission.bucketName,
+        submission.key,
+        60 * 30 // 30-minute expiry
+    );
+    res.status(200).json({
+        message: "Submission is ready for viewing",
+        presignedUrl,
+    });
 });
 
 

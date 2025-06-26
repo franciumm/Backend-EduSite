@@ -42,11 +42,7 @@ const studentSchema = new Schema(
     confirmEmail: {
       type: Boolean,
       default: false,
-    },
-    submittedassignments: {
-      type: [Schema.Types.ObjectId],
-      ref: "subassignment",
-    },
+    }
    
   },
   { timestamps: true }

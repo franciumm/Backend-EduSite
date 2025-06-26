@@ -1,7 +1,7 @@
 import { asyncHandler } from "../../../utils/erroHandling.js";
 import { assignmentModel } from "../../../../DB/models/assignment.model.js";
-import { s3 } from "../../../utils/S3Client.js";
-import { GetObjectCommand ,PutObjectCommand,DeleteObjectCommand,DeleteObjectsCommand } from "@aws-sdk/client-s3";
+
+import {  PutObjectCommand,DeleteObjectCommand,DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
 import { streamToBuffer } from "../../../utils/streamToBuffer.js";
 import { PDFDocument, rgb } from "pdf-lib";
@@ -10,63 +10,50 @@ import studentModel from "../../../../DB/models/student.model.js";
 import mongoose from "mongoose";
 import { toZonedTime } from 'date-fns-tz';
 import { deleteFileFromS3, uploadFileToS3 } from '../../../utils/S3Client.js';
-
-// --- CORRECTED IMPORTS ---
-// Import the standard 'fs' for synchronous operations
+import { canAccessContent } from '../../../middelwares/contentAuth.js';
+import { assignmentModel } from '../../../../DB/models/assignment.model.js';
+import { s3, GetObjectCommand } from '../../../utils/S3Client.js';
 import fs from "fs";
-// Import the promise-based 'fs' API with a unique alias 'fsPromises' for async/await
 import { promises as fsPromises } from 'fs';
+
+
 
 
 export const downloadAssignment = asyncHandler(async (req, res, next) => {
     const { assignmentId } = req.query;
-    const uaeTimeZone = 'Asia/Dubai';
 
-    // 1. Fetch assignment
-    const assignment = await assignmentModel.findById(assignmentId);
+    // Use the now-imported authorizer to correctly check permissions.
+    const hasAccess = await canAccessContent({
+        user: { _id: req.user._id, isTeacher: req.isteacher.teacher, groupId: req.user.groupId },
+        contentId: assignmentId,
+        contentType: 'assignment'
+    });
+
+    if (!hasAccess) {
+        return next(new Error("You are not authorized to access this assignment.", { cause: 403 }));
+    }
+
+    const assignment = await assignmentModel.findById(assignmentId).select('bucketName key startDate endDate allowSubmissionsAfterDueDate').lean();
     if (!assignment) {
-        return next(new Error("Assignment not found", { cause: 404 }));
+        return next(new Error("Assignment not found.", { cause: 404 }));
     }
 
-    // 2. Authorize student or teacher
-    const isTeacher = req.isteacher.teacher === true;
-    if (!isTeacher) {
-        const student = await studentModel.findById(req.user._id);
-        if (!student) {
-            return next(new Error("Student record not found", { cause: 404 }));
-        }
-
-        if (!student.groupId) {
-            return next(new Error("You are not assigned to any group.", { cause: 403 }));
-        }
-
-        const studentGroupIdStr = student.groupId.toString();
-        const assignmentGroupIdsStr = assignment.groupIds.map(id => id.toString());
-
-        if (!assignmentGroupIdsStr.includes(studentGroupIdStr)) {
-            return next(new Error("You’re not in the right group for this assignment", { cause: 403 }));
-        }
-
+    // This timeline check remains a good secondary validation for students.
+    if (req.isteacher.teacher === false) {
+        const uaeTimeZone = 'Asia/Dubai';
         const now = toZonedTime(new Date(), uaeTimeZone);
-        const timeline = { start: assignment.startDate, end: assignment.endDate };
- if ((now < timeline.start || now > timeline.end)&& (assignment.allowSubmissionsAfterDueDate==false)) {
-            return next(new Error(`This Assignment is not available at this time. (Available from ${timeline.start.toLocaleString()} to ${timeline.end.toLocaleString()})`, { cause: 200 }));
-        }}
-    
-
-    // 3. Proceed with S3 download
-    const { bucketName, key } = assignment;
-    try {
-        const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
-        const response = await s3.send(command);
-
-        res.setHeader("Content-Disposition", `attachment; filename="${key.split("/").pop()}"`);
-        res.setHeader("Content-Type", response.ContentType);
-        response.Body.pipe(res);
-    } catch (error) {
-        console.error("Error downloading file from S3:", error);
-        next(new Error("Error downloading file from S3", { cause: 500 }));
+        if ((now < assignment.startDate || now > assignment.endDate) && !assignment.allowSubmissionsAfterDueDate) {
+            return next(new Error(`This Assignment is not available at this time.`, { cause: 200 }));
+        }
     }
+
+    const { bucketName, key } = assignment;
+    const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
+    const response = await s3.send(command);
+
+    res.setHeader("Content-Disposition", `attachment; filename="${key.split("/").pop()}"`);
+    res.setHeader("Content-Type", response.ContentType);
+    response.Body.pipe(res);
 });
 
 export const editAssignment = asyncHandler(async (req, res, next) => {
@@ -121,50 +108,55 @@ export const editAssignment = asyncHandler(async (req, res, next) => {
 });
 
 export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) => {
-  const { submissionId } = req.query;
+    const { submissionId } = req.query;
 
-  if (!submissionId) {
-    return next(new Error("Submission ID is required", { cause: 400 }));
-  }
+    if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
+        return next(new Error("Submission ID is required and must be valid.", { cause: 400 }));
+    }
 
-  const submission = await SubassignmentModel.findById(submissionId)
-    .populate("assignmentId", "name") 
-    .populate("studentId", "userName firstName lastName"); 
+    const submission = await SubassignmentModel.findById(submissionId)
+        .populate("assignmentId", "name") // Populate to get assignment details
+        .populate("studentId", "userName"); // Populate to get student details
 
-  if (!submission) {
-    return next(new Error("Submission not found", { cause: 404 }));
-  }
+    if (!submission) {
+        return next(new Error("Submission not found", { cause: 404 }));
+    }
 
-  if (
-    req.isteacher.teacher === false && 
-    submission.studentId._id.toString() !== req.user._id.toString()
-  ) {
-    return next(
-      new Error("You are not allowed to download this submission", { cause: 403 })
-    );
-  }
+    // --- REFACTOR: Use the centralized submission authorizer ---
+    // Rule 1: Student can download their own submission.
+    // Rule 2: Teacher can download any submission for an assignment they created.
+    let isAuthorized = false;
+    if (req.user._id.equals(submission.studentId._id)) {
+        isAuthorized = true;
+    } else if (req.isteacher.teacher) {
+        const hasAccess = await canViewSubmissionsFor({
+            user: req.user,
+            isTeacher: true,
+            contentId: submission.assignmentId._id,
+            contentType: 'assignment'
+        });
+        if (hasAccess) isAuthorized = true;
+    }
 
-  const { bucketName, key } = submission;
+    if (!isAuthorized) {
+        return next(new Error("You are not authorized to download this submission.", { cause: 403 }));
+    }
+    // --- END REFACTOR ---
 
-  try {
-    const command = new GetObjectCommand({
-      Bucket: bucketName,
-      Key: key,
-    });
+    const { bucketName, key } = submission;
+    try {
+        const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
+        const response = await s3.send(command);
 
-    const response = await s3.send(command);
-
-    const fileName = `${submission.assignmentId.name}_${submission.studentId.userName}.pdf`;
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    res.setHeader("Content-Type", response.ContentType);
-
-    response.Body.pipe(res);
-  } catch (error) {
-    console.error("Error downloading the submission from S3:", error);
-    return next(new Error("Error downloading the submission", { cause: 500 }));
-  }
+        const fileName = `${submission.assignmentId.name}_${submission.studentId.userName}.pdf`;
+        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+        res.setHeader("Content-Type", response.ContentType || 'application/pdf');
+        response.Body.pipe(res);
+    } catch (error) {
+        console.error("Error downloading the submission from S3:", error);
+        return next(new Error("Error downloading the submission", { cause: 500 }));
+    }
 });
-
 
 export const markAssignment = asyncHandler(async (req, res, next) => {
   const { submissionId, score, notes } = req.body;

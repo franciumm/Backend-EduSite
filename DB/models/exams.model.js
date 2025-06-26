@@ -57,6 +57,10 @@ examSchema.pre('deleteOne', { document: true, query: false }, async function (ne
     if (this.key && this.bucketName) {
         await deleteFileFromS3(this.bucketName, this.key);
     }
+     await sectionModel.updateMany(
+        { linkedExams: this._id },
+        { $pull: { linkedExams: this._id } }
+    );
     
     next();
 });

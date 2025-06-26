@@ -1,6 +1,7 @@
 import {Schema, model} from "mongoose";
 import { deleteFileFromS3 } from "../../src/utils/S3Client.js";
 import { SubassignmentModel } from "./submitted_assignment.model.js";
+import { sectionModel } from "./section.model.js";
 
 const assignmentSchema = new Schema({
     name: { type: String, required: true },
@@ -48,6 +49,10 @@ const assignmentSchema = new Schema({
         // Delete all the submission database records
         await SubassignmentModel.deleteMany({ assignmentId: this._id });
     }
+      await sectionModel.updateMany(
+        { linkedAssignments: this._id },
+        { $pull: { linkedAssignments: this._id } }
+    );
     next();
 });
 

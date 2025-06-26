@@ -9,174 +9,68 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 import { deleteFileFromS3, uploadFileToS3 } from "../../../utils/S3Client.js";
 
-// --- CORRECTED IMPORTS ---
-// Import the synchronous parts of 'fs' for functions like 'readFileSync'
 import fs from 'fs'; 
-// Import the promise-based parts of 'fs' under a new name 'fsPromises' for async/await
 import { promises as fsPromises } from 'fs';
+import { canAccessContent } from "../../../middelwares/contentAuth.js";
+
+
+const authorizeExamDownload = asyncHandler(async (req, res, next) => {
+    const { examId } = req.query;
+
+    const hasAccess = await canAccessContent({
+        user: { _id: req.user._id, isTeacher: req.isteacher.teacher },
+        contentId: examId,
+        contentType: 'exam'
+    });
+
+    if (!hasAccess) {
+        return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
+    }
+
+    // If access is granted, attach the exam to the request for the next middleware.
+    req.exam = await examModel.findById(examId).select('bucketName key Name startdate enddate').lean();
+    if (!req.exam) {
+        return next(new Error("Exam not found.", { cause: 404 }));
+    }
+
+    next();
+});
+
+// The file streaming logic remains the same.
+const streamExamFile = asyncHandler(async (req, res, next) => {
+    const { bucketName, key, Name } = req.exam;
+
+    const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
+    const s3Response = await s3.send(command);
+
+    const safeFilename = encodeURIComponent(Name.replace(/[^a-zA-Z0-9.\-_]/g, '_') + '.pdf');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeFilename}`);
+    res.setHeader('Content-Type', s3Response.ContentType || "application/pdf");
+    if(s3Response.ContentLength) {
+        res.setHeader('Content-Length', s3Response.ContentLength);
+    }
+    s3Response.Body.pipe(res);
+});
 
 const validateExamId = (req, res, next) => {
     const { examId } = req.query;
-    if (!examId || !mongoose.Types.ObjectId.isValid(examId)) { // Added ObjectId validation
-        return next(new Error("A valid Exam ID is required in the query.", { cause: 400 }));
-    }
-    next();
-};
-
-export const editExam = asyncHandler(async (req, res, next) => {
-    const { examId, ...updateData } = req.body;
-    const teacherId = req.user._id;
-
     if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
         return next(new Error("A valid Exam ID is required.", { cause: 400 }));
     }
-
-    const exam = await examModel.findById(examId);
-    if (!exam) {
-        return next(new Error("Exam not found.", { cause: 404 }));
-    }
-
-    if (!exam.createdBy.equals(teacherId)) {
-        return next(new Error("You are not authorized to edit this exam.", { cause: 403 }));
-    }
-
-    if (req.file) {
-        if (exam.key) {
-            await deleteFileFromS3(exam.bucketName, exam.key)
-                .catch(err => console.error("Non-critical error: Failed to delete old S3 file during edit:", err));
-        }
-        
-        // Use the aliased 'fsPromises' for async operations
-        const fileContent = await fsPromises.readFile(req.file.path);
-        const newKey = `exams/${exam.Name.replace(/\s+/g, '_')}-${Date.now()}.pdf`;
-        
-        await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, "application/pdf");
-        
-        exam.key = newKey;
-        exam.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
-        exam.bucketName = process.env.S3_BUCKET_NAME;
-
-        // Use the aliased 'fsPromises' for async operations
-        await fsPromises.unlink(req.file.path);
-    }
-    
-    // Sanitize and update name if provided
-    if (updateData.Name) {
-        updateData.Name = updateData.Name.trim();
-    }
-    
-    Object.keys(updateData).forEach(key => {
-        if (updateData[key] !== undefined && updateData[key] !== null) {
-            exam[key] = updateData[key];
-        }
-    });
-
-    const updatedExam = await exam.save();
-
-    res.status(200).json({
-        message: "Exam updated successfully.",
-        exam: updatedExam,
-    });
-});
-// --- 2. Authorization & Enrollment Middleware (Asynchronous & Optimized) ---
-
-const authorizeAndEnrollUser = async (req, res, next) => {
-    // --- SETUP ---
-    const { examId } = req.query;
-    const { user, isteacher } = req;
-    const isTeacher = isteacher?.teacher === true;
-    const uaeTimeZone = 'Asia/Dubai';
-
-    const exam = await examModel.findById(examId);
-    if (!exam) {
-        return next(new Error("Exam not found.", { cause: 404 }));
-    }
-
-    if (isTeacher) {
-        req.exam = exam;
-        return next();
-    }
-
-    // --- STUDENT AUTHORIZATION (remains the same) ---
-    const studentId = user._id;
-    // ... (Your existing authorization logic for groups, rejections, etc.)
-    const student = await studentModel.findById(user._id);
-    user.groupId = student.groupId;
-    const isInGroup = exam.groupIds.some(gid => gid.equals(user.groupId));
-    if (!isInGroup) {
-        return next(new Error("You are not in an authorized group for this exam.", { cause: 200 }));
-    }
-
-    // --- EXPLICIT UAE TIME ZONE CHECK ---
-
-    // Step 1: Get the current time, explicitly represented as UAE time.
-    const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
-
-    // Step 2: Get the exam's start and end times, also explicitly represented as UAE time.
-    const examStartTimeInUAE = exam.startdate;
-    const examEndTimeInUAE = exam.enddate;
-
-    // Step 3: Compare the UAE times directly. This is now perfectly clear.
-    if (nowInUAE < examStartTimeInUAE || nowInUAE > examEndTimeInUAE) {
-        // The error message formatting remains the same and is already correct.
-        const friendlyFormat = "eeee, MMMM d, yyyy 'at' h:mm a (z)";
-        const friendlyStartDate = examStartTimeInUAE;
-        const friendlyEndDate = examEndTimeInUAE;
-        const errorMessage = `This exam is not available at this time. (Available from ${friendlyStartDate} to ${friendlyEndDate})`;
-        
-        return next(new Error(errorMessage, { cause: 200 }));
-    }
-
-    // --- ATOMIC ENROLLMENT (Remains the same) ---
-    const updatedExam = await examModel.findByIdAndUpdate(
-        examId,
-        { $addToSet: { enrolledStudents: studentId } },
-        { new: true }
-    );
-
-    req.exam = updatedExam;
     next();
 };
 
-// --- 3. File Streaming Middleware (Asynchronous) ---
-// This logic is already well-designed. Minor improvements for clarity.
-const streamExamFile = async (req, res, next) => {
-    const exam = req.exam;
-
-    // --- Data Integrity Check ---
-    // Before we even try to call S3, verify that the required data exists.
-    if (!exam || !exam.bucketName || !exam.key) {
-        console.error("Data Integrity Error: Exam document is missing S3 bucketName or key.", { examId: exam._id });
-        return next(new Error("Cannot download file: exam data is incomplete.", { cause: 500 }));
-    }
-
-    const { bucketName, key, Name } = req.exam;
-
-    try {
-        const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
-        const s3Response = await s3.send(command);
-
-        const safeFilename = encodeURIComponent(Name.replace(/[^a-zA-Z0-9.\-_]/g, '_') + '.pdf');
-        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeFilename}`);
-        res.setHeader('Content-Type', s3Response.ContentType || "application/pdf");
- if(s3Response.ContentLength) {
-             res.setHeader('Content-Length', s3Response.ContentLength);
-        }
-        s3Response.Body.pipe(res);
-        
-    } catch (err) {
-        console.error("S3 File Streaming Error:", err);
-        return next(new Error("Failed to download the exam file.", { cause: 500 }));
-    }
-};
-
-// --- 4. Final Exported Pipeline ---
-// The modular structure is excellent and is preserved.
+// --- PHASE 3: The final, updated export using the new authorization middleware ---
 export const downloadExam = [
     validateExamId,
-    asyncHandler(authorizeAndEnrollUser),
-    asyncHandler(streamExamFile),
+    authorizeExamDownload, // Replaces the old authorizeAndEnrollUser
+    streamExamFile,
 ];
+
+
+
+
+
 
 export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
     // --- Phase 1: Fail Fast - Input Validation ---

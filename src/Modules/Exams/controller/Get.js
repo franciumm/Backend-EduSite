@@ -8,113 +8,98 @@ import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
+import { canAccessContent } from "../../../middelwares/contentAuth.js";
+
 
 export const getExams = asyncHandler(async (req, res, next) => {
-  const { page = 1, size = 10, groupId, gradeId, status } = req.query;
-const uaeTimeZone = 'Asia/Dubai';
-  // Extract user details and role
-  const user = req.user;
-  const isTeacher = req.isteacher.teacher;
-  const currentDate =  toZonedTime(new Date(), uaeTimeZone);
+    // ... (logic for teachers and initial setup remains the same)
+    const { page = 1, size = 10, groupId, gradeId, status } = req.query;
+    const uaeTimeZone = 'Asia/Dubai';
+    const user = req.user;
+    const isTeacher = req.isteacher.teacher;
+    const currentDate = toZonedTime(new Date(), uaeTimeZone);
+    const { limit, skip } = pagination({ page, size });
 
-  // 1. Pagination helpers
-  const { limit, skip } = pagination({ page, size });
+    let query = {};
+    let totalExams = 0;
+    let exams = [];
 
-  let exams = [];
-  let totalExams = 0;
+    if (isTeacher) {
+        if (groupId) query.groupIds = groupId;
+        if (gradeId) query.grade = gradeId;
+        if (status === "active") { query.startdate = { $lte: currentDate }; query.enddate = { $gte: currentDate }; }
+        if (status === "upcoming") { query.startdate = { $gt: currentDate }; }
+        if (status === "expired") { query.enddate = { $lt: currentDate }; }
 
-  // 2. Teacher logic
-  if (isTeacher) {
-    // Build a query object
-    const query = {};
+        [exams, totalExams] = await Promise.all([
+            examModel.find(query).sort({ startdate: 1 }).skip(skip).limit(limit).select("Name startdate enddate groupIds grade").lean(),
+            examModel.countDocuments(query)
+        ]);
+    } else {
+        const student = await studentModel.findById(user._id).select('groupId').lean();
+        if (!student) {
+            return res.status(200).json({ message: "No exams found.", exams: [], totalExams: 0, totalPages: 0, currentPage: 1 });
+        }
 
-    // Optional filters
-    if (groupId && mongoose.Types.ObjectId.isValid(groupId)) {
-      query.groupIds = groupId; // exam must include this group
+        // =================================================================
+        // --- FINAL PERFECTION: Build the $or array dynamically and safely ---
+        // =================================================================
+        const orConditions = [
+            // Path 2: Student is a specific exception
+            { "exceptionStudents.studentId": user._id },
+            // Path 3: Student was manually enrolled
+            { enrolledStudents: user._id }
+        ];
+
+        // Path 1: Student's group is assigned (ONLY if they have a group)
+        if (student.groupId) {
+            orConditions.push({ groupIds: student.groupId });
+        }
+        
+        const baseMatch = { $or: orConditions };
+
+        const pipeline = [
+            { $match: baseMatch },
+            { $addFields: { studentException: { $first: { $filter: { input: "$exceptionStudents", as: "ex", cond: { $eq: ["$$ex.studentId", user._id] } } } } } },
+            { $addFields: { effectiveStartDate: { $ifNull: ["$studentException.startdate", "$startdate"] }, effectiveEndDate: { $ifNull: ["$studentException.enddate", "$enddate"] } } }
+        ];
+
+        if (status) {
+            const statusMatch = {};
+            if (status === "active") { statusMatch.effectiveStartDate = { $lte: currentDate }; statusMatch.effectiveEndDate = { $gte: currentDate }; }
+            if (status === "upcoming") { statusMatch.effectiveStartDate = { $gt: currentDate }; }
+            if (status === "expired") { statusMatch.effectiveEndDate = { $lt: currentDate }; }
+            pipeline.push({ $match: statusMatch });
+        }
+        
+        const results = await examModel.aggregate([
+            ...pipeline,
+            {
+                $facet: {
+                    metadata: [{ $count: "total" }],
+                    data: [
+                        { $sort: { effectiveStartDate: 1 } },
+                        { $skip: skip },
+                        { $limit: limit },
+                        { $project: { Name: 1, startdate: 1, enddate: 1, groupIds: 1, grade: 1, exceptionStudents: 1 } }
+                    ]
+                }
+            }
+        ]);
+        
+        exams = results[0].data;
+        totalExams = results[0].metadata[0]?.total || 0;
     }
-    if (gradeId && mongoose.Types.ObjectId.isValid(gradeId)) {
-      query.grade = gradeId; // exam must match this grade
-    }
 
-    // Timeline status (using main exam timeline)
-    if (status === "active") {
-      query.startdate = { $lte: currentDate };
-      query.enddate = { $gte: currentDate };
-    } else if (status === "upcoming") {
-      query.startdate = { $gt: currentDate };
-    } else if (status === "expired") {
-      query.enddate = { $lt: currentDate };
-    }
-
-    // Fetch (with pagination)
-    exams = await examModel
-      .find(query)
-      .sort({ startdate: 1 }) // soonest exam first
-      .skip(skip)
-      .limit(limit)
-      .select("Name startdate enddate groupIds grade exceptionStudents path");
-
-    totalExams = await examModel.countDocuments(query);
-  } else {
-    
-   
-      let student = await studentModel.findById(user._id).lean();
-          if (!student) {
-        return res.status(404).json({ message: "Student not found" });
-      };
-     var studentQuery = {
-      $or: [
-        { groupIds : student.groupId },
-        { enrolledStudents: user._id },
-        { "exceptionStudents.studentId": user._id },
-      ],
-    };
-    
-
-
-    
-    let allExams = await examModel
-      .find(studentQuery)
-      .sort({ startdate: 1 })
-      .select("Name startdate enddate groupIds grade exceptionStudents");
-
-   
-    const filtered = allExams.filter((exam) => {
-      
-      if (!status) return true; 
-      const exceptionEntry = exam.exceptionStudents.find(
-        (ex) => ex.studentId.toString() === user._id.toString()
-      );
-
-      const examStart = exceptionEntry ? exceptionEntry.startdate : exam.startdate;
-      const examEnd = exceptionEntry ? exceptionEntry.enddate : exam.enddate;
-
-      if (status === "active") {
-        return examStart <= currentDate && examEnd >= currentDate;
-      } else if (status === "upcoming") {
-        return examStart > currentDate;
-      } else if (status === "expired") {
-        return examEnd < currentDate;
-      }
-      // If we get here, no match
-      return false;
+    res.status(200).json({
+        message: "Exams fetched successfully",
+        exams,
+        totalExams,
+        totalPages: Math.ceil(totalExams / limit),
+        currentPage: parseInt(page, 10),
     });
-
-    totalExams = filtered.length;
-
-    // Step C: Apply pagination in memory
-    exams = filtered.slice(skip, skip + limit);
-  }
-
-  // 4. Return the response
-  res.status(200).json({
-    message: "Exams fetched successfully",
-    exams,
-    totalExams,
-    totalPages: Math.ceil(totalExams / limit),
-    currentPage: parseInt(page, 10),
-  });
 });
+
 // export const getSubmittedExams = asyncHandler(async (req, res, next) => {
 //   const { page = 1, size = 10, groupId, gradeId, status } = req.query;
 
