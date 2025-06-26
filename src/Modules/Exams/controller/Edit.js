@@ -8,7 +8,6 @@ import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 import { deleteFileFromS3, uploadFileToS3 } from "../../../utils/S3Client.js";
-
 import fs from 'fs'; 
 import { promises as fsPromises } from 'fs';
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
@@ -68,7 +67,7 @@ export const editExam = asyncHandler(async (req, res, next) => {
         exam: updatedExam,
     });
 });
-c
+
 const authorizeAndEnrollUser = async (req, res, next) => {
     // --- SETUP ---
     const { examId } = req.query;
