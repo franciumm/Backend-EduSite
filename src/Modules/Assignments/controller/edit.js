@@ -7,7 +7,7 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import mongoose from "mongoose";
 import { toZonedTime } from 'date-fns-tz';
-import { deleteFileFromS3, uploadFileToS3,GetObjectCommand } from '../../../utils/S3Client.js';
+import { deleteFileFromS3, uploadFileToS3 } from '../../../utils/S3Client.js';
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
 import { assignmentModel } from '../../../../DB/models/assignment.model.js';
 import { s3 } from '../../../utils/S3Client.js';
