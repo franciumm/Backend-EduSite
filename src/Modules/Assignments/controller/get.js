@@ -305,17 +305,17 @@ export const getSubmissions = asyncHandler(async (req, res, next) => {
     res.status(200).json({ message: "Submissions retrieved successfully", submissions });
 });
 
-
 export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
     const { page = 1, size = 10, status } = req.query;
     const { user } = req;
     const currentDate = new Date();
     const { limit, skip } = pagination({ page, size });
 
-    // 1. Find the student's group and all sections they have access to.
+    // 1. Find the student to get their group ID.
     const student = await studentModel.findById(user._id).select('groupId').lean();
     if (!student) {
-        return res.status(404).json({ message: "Student not found." });
+        // If the user is not a student, they have no assignments.
+        return res.status(200).json({ message: "No assignments found.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
     }
     
     // 2. Aggregate all assignment IDs the student can access via sections.
@@ -325,15 +325,15 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
         sectionAssignmentIds = sections.flatMap(sec => sec.linkedAssignments);
     }
     
-    // 3. Build the main query using the full additive permission model.
+    // 3. Build the main query using all three valid access paths.
     const baseMatch = {
         $or: [
-            { enrolledStudents: user._id },          // Path A: Manually enrolled in the assignment.
-            { _id: { $in: sectionAssignmentIds } },  // Path B: Assignment is in a section they can access.
+            { enrolledStudents: user._id },
+            { _id: { $in: sectionAssignmentIds } }
         ]
     };
 
-    // Path C: Student's group is directly assigned (only if they have a group).
+    // Safely add the group-based access path only if the student has a group.
     if (student.groupId) {
         baseMatch.$or.push({ groupIds: student.groupId });
     }
@@ -345,7 +345,7 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
         else if (status === "expired") { baseMatch.endDate = { $lt: currentDate }; }
     }
 
-    // 5. Execute queries for data and total count in parallel for max efficiency.
+    // 5. Execute queries for paginated data and total count in parallel for max efficiency.
     const [assignments, totalAssignments] = await Promise.all([
         assignmentModel.find(baseMatch)
             .sort({ startDate: 1 })
@@ -356,7 +356,6 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
         assignmentModel.countDocuments(baseMatch)
     ]);
 
-    // 6. Send the final, correct, and performant response.
     res.status(200).json({
         message: "Assignments fetched successfully",
         totalAssignments,
@@ -365,6 +364,7 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
         assignments,
     });
 });
+
 
 export const ViewSub = asyncHandler(async (req, res, next) => {
     // --- FIX 1.3: Correct and Robust Authorization ---

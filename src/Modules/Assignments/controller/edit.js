@@ -21,12 +21,12 @@ export const downloadAssignment = asyncHandler(async (req, res, next) => {
 
     // Use the now-imported authorizer to correctly check permissions.
     const hasAccess = await canAccessContent({
-        user: { _id: req.user._id, isTeacher: req.isteacher.teacher, groupId: req.user.groupId },
+        user: req.user, // Pass the entire user object
+        isTeacher: req.isteacher.teacher, // Pass isTeacher as a separate property
         contentId: assignmentId,
         contentType: 'assignment'
     });
-
-    if (!hasAccess) {
+    if (!hasAccess ) {
         return next(new Error("You are not authorized to access this assignment.", { cause: 403 }));
     }
 
