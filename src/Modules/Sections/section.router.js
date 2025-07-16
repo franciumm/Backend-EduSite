@@ -9,7 +9,11 @@ import { allowedExtensions } from "../../utils/allowedExtensions.js";
 const router = Router();
 
 // --- Teacher Routes (Write-Access) ---
-
+router.get(
+    "",
+    isAuth,
+    sectionController.getSections
+);
 // Create a new, empty section container
 router.post(
     "/create",
@@ -47,11 +51,7 @@ router.delete(
 // View the aggregated content of a single section
 
 // Get a list of all sections (with filtering)
-router.get(
-    "",
-    isAuth,
-    sectionController.getSections
-);
+
 
 router.get(
     "/:sectionId",
