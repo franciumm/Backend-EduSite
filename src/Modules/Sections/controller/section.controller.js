@@ -1,5 +1,3 @@
-
-import { pagination } from '../../../utils/pagination.js';
 // src/Modules/Sections/controller/section.controller.js
 
 import { asyncHandler } from '../../../utils/erroHandling.js';
@@ -11,6 +9,7 @@ import { _internalCreateAssignment } from '../../Assignments/controller/start.js
 import { _internalCreateExam } from '../../Exams/controller/Start.js';
 import { _internalCreateMaterial } from '../../Materials/controller/All.js';
 import { normalizeContentName } from '../../../utils/queryHelpers.js';
+import { pagination } from '../../../utils/pagination.js';
 function capitalize(str) {
     if (!str) return '';
     return str.charAt(0).toUpperCase() + str.slice(1);
@@ -256,10 +255,19 @@ export const getSections = asyncHandler(async (req, res, next) => {
 
     // 2. Teacher Logic: Broad filtering capabilities
     if (isTeacher) {
-        if (groupId) query.groupIds = groupId;
-        if (gradeId) query.gradeId = gradeId;
+        if (gradeId) {
+             if (!mongoose.Types.ObjectId.isValid(gradeId)) {
+                return next(new Error("A valid Grade ID is required.", { cause: 400 }));
+            }
+            query.gradeId = gradeId;
+        }
+        if (groupId) {
+            if (!mongoose.Types.ObjectId.isValid(groupId)) {
+                return next(new Error("A valid Group ID is required.", { cause: 400 }));
+            }
+            query.groupIds = groupId;
+        }
 
-        // Fetch paginated data and total count simultaneously
         [sections, totalSections] = await Promise.all([
             sectionModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
             sectionModel.countDocuments(query)
@@ -267,24 +275,26 @@ export const getSections = asyncHandler(async (req, res, next) => {
     } 
     // 3. Student Logic: Access based on group membership
     else {
-        // Find the student's group
         const student = await studentModel.findById(user._id).select('groupId').lean();
 
-        // If student or group doesn't exist, they have access to no sections
         if (!student || !student.groupId) {
             return res.status(200).json({
-                message: "No sections found.",
+                message: "No sections found for this student.",
                 data: [],
                 total: 0,
                 totalPages: 0,
-                currentPage: 1
+                currentPage: parseInt(page, 10)
             });
         }
         
-        // Build the query to find sections linked to the student's group
         query = { groupIds: student.groupId };
-
-        // Fetch paginated data and total count for the student's view
+         if (gradeId) {
+            if (!mongoose.Types.ObjectId.isValid(gradeId)) {
+                return next(new Error("A valid Grade ID is required.", { cause: 400 }));
+            }
+            query.gradeId = gradeId;
+        }
+        
         [sections, totalSections] = await Promise.all([
             sectionModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
             sectionModel.countDocuments(query)
@@ -292,7 +302,7 @@ export const getSections = asyncHandler(async (req, res, next) => {
     }
 
     // 4. Final paginated response
-    res.status(200).json({
+    return res.status(200).json({
         message: "Sections fetched successfully",
         data: sections,
         total: totalSections,
