@@ -1,5 +1,6 @@
 
 import { pagination } from '../../../utils/pagination.js';
+// src/Modules/Sections/controller/section.controller.js
 
 import { asyncHandler } from '../../../utils/erroHandling.js';
 import { sectionModel } from '../../../../DB/models/section.model.js';
@@ -99,8 +100,6 @@ export const updateSectionLinks = asyncHandler(async (req, res, next) => {
     }
     res.status(200).json({ message: "Section updated successfully.", data: updatedSection });
 });
-
-
 const buildContentMap = (inputArray, type) => ({
     $map: {
         input: inputArray,
@@ -112,8 +111,6 @@ const buildContentMap = (inputArray, type) => ({
         }
     }
 });
-
-
 export const viewSectionById = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
     const sectionForAuth = await sectionModel.findById(sectionId).select('groupIds').lean();
