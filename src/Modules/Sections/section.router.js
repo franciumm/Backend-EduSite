@@ -8,12 +8,16 @@ import { allowedExtensions } from "../../utils/allowedExtensions.js";
 
 const router = Router();
 
-// --- Teacher Routes (Write-Access) ---
+// --- Routes without parameters ---
+
+// Get a paginated list of all sections (with optional filters)
+// Must be defined before any routes that use a parameter like '/:sectionId'
 router.get(
     "/",
     isAuth,
     sectionController.getSections
 );
+
 // Create a new, empty section container
 router.post(
     "/create",
@@ -21,44 +25,40 @@ router.post(
     sectionController.createSection
 );
 
-// Update a section by adding/removing links to content
+// --- Routes with parameters ---
+
+// Create content (e.g., assignment, exam) and link it to a specific section
+router.post(
+    "/:sectionId/create-and-link",
+    AdminAuth,
+    multerCloudFunction(allowedExtensions.Files).fields([
+        { name: 'assignmentFile', maxCount: 15 },
+        { name: 'examFile', maxCount: 15 },
+        { name: 'materialFiles', maxCount: 15 }
+    ]),
+    sectionController.createAndLinkContent
+);
+
+// Update a section by adding/removing links to its content
 router.put(
     "/:sectionId/update-links",
     AdminAuth,
     sectionController.updateSectionLinks
 );
 
-router.post(
-    "/:sectionId/create-and-link",
-    AdminAuth,
-    // We use .any() because it could be a single file for an exam/assignment
-    // or multiple files for a material. Our controller will handle the logic.
-     multerCloudFunction(allowedExtensions.Files).fields([
-        { name: 'assignmentFile', maxCount: 15 },
-        { name: 'examFile', maxCount: 15 },
-        { name: 'materialFiles', maxCount: 15 } // Materials can have multiple files
-    ]),
-    sectionController.createAndLinkContent
-);
-// Delete a section container
+// Delete a specific section container
 router.delete(
     "/:sectionId",
     AdminAuth,
     sectionController.deleteSection
 );
 
-
-// View the aggregated content of a single section
-
-// Get a list of all sections (with filtering)
-
-
+// Get the aggregated content and details of a specific section
+// This is the most generic GET route with a parameter, so it comes last.
 router.get(
     "/:sectionId",
     isAuth,
     sectionController.viewSectionById
 );
-
-
 
 export default router;
