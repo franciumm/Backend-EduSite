@@ -41,4 +41,3 @@
     "node": "22.x"
   }
 }
-vercel project ls --update-required --scope VERCEL_TEAM_SLUG
