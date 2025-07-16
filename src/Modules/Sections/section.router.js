@@ -10,7 +10,7 @@ const router = Router();
 
 // --- Teacher Routes (Write-Access) ---
 router.get(
-    "",
+    "/",
     isAuth,
     sectionController.getSections
 );
