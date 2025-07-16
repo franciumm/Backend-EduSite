@@ -1,3 +1,5 @@
+
+import { pagination } from '../../../utils/pagination.js';
 // src/Modules/Sections/controller/section.controller.js
 
 import { asyncHandler } from '../../../utils/erroHandling.js';
@@ -238,5 +240,63 @@ export const createAndLinkContent = asyncHandler(async (req, res, next) => {
         message: `${type} created and linked to the section successfully.`,
         createdContent,
         updatedSection: section
+    });
+});
+
+export const getSections = asyncHandler(async (req, res, next) => {
+    // 1. Initial setup from request
+    const { page = 1, size = 10, groupId, gradeId } = req.query;
+    const { user, isteacher } = req;
+    const isTeacher = isteacher.teacher;
+    const { limit, skip } = pagination({ page, size });
+
+    let query = {};
+    let totalSections = 0;
+    let sections = [];
+
+    // 2. Teacher Logic: Broad filtering capabilities
+    if (isTeacher) {
+        if (groupId) query.groupIds = groupId;
+        if (gradeId) query.gradeId = gradeId;
+
+        // Fetch paginated data and total count simultaneously
+        [sections, totalSections] = await Promise.all([
+            sectionModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+            sectionModel.countDocuments(query)
+        ]);
+    } 
+    // 3. Student Logic: Access based on group membership
+    else {
+        // Find the student's group
+        const student = await studentModel.findById(user._id).select('groupId').lean();
+
+        // If student or group doesn't exist, they have access to no sections
+        if (!student || !student.groupId) {
+            return res.status(200).json({
+                message: "No sections found.",
+                data: [],
+                total: 0,
+                totalPages: 0,
+                currentPage: 1
+            });
+        }
+        
+        // Build the query to find sections linked to the student's group
+        query = { groupIds: student.groupId };
+
+        // Fetch paginated data and total count for the student's view
+        [sections, totalSections] = await Promise.all([
+            sectionModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+            sectionModel.countDocuments(query)
+        ]);
+    }
+
+    // 4. Final paginated response
+    res.status(200).json({
+        message: "Sections fetched successfully",
+        data: sections,
+        total: totalSections,
+        totalPages: Math.ceil(totalSections / limit),
+        currentPage: parseInt(page, 10),
     });
 });
