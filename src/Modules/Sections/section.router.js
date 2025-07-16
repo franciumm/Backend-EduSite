@@ -48,7 +48,7 @@ router.delete(
 
 // Get a list of all sections (with filtering)
 router.get(
-    "/",
+    "",
     isAuth,
     sectionController.getSections
 );
