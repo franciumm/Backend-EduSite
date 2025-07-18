@@ -130,7 +130,7 @@ export const viewSectionById = asyncHandler(async (req, res, next) => {
         { $lookup: { from: 'sections', localField: 'linkedSections', foreignField: '_id', as: 'nestedSections' } },
         {
             $project: {
-                _id: 1, name: 1, description: 1,
+                _id: 1, name: 1, description: 1,gradeId: 1,
                 content: {
                     $concatArrays: [
                         buildContentMap("$assignments", "assignment"),
