@@ -11,26 +11,54 @@ import { pagination } from "../../../utils/pagination.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 
-
 export const GetAllByGroup = asyncHandler(async (req, res, next) => {
-    const { groupId } = req.query;
-    if (!groupId) {
-        return next(new Error("Group ID is required.", { cause: 400 }));
-    }
+    const { gradeId, groupId } = req.query;
+    const query = {};
 
-    // The isAuth middleware already provides req.user.groupId. We use it directly
-    // and correctly compare it to the requested groupId. This removes the unnecessary database call.
+    // --- Student Logic ---
     if (req.isteacher.teacher === false) {
-        if (req.user.groupId?.toString() !== groupId) {
-            return next(new Error("Unauthorized: You do not have access to this group's assignments.", { cause: 403 }));
+        const studentGradeId = req.user.gradeId?.toString();
+        const studentGroupId = req.user.groupId?.toString();
+
+        // A student must be enrolled in a grade to see any assignments.
+        if (!studentGradeId) {
+            return next(new Error("Unauthorized: You are not associated with any grade.", { cause: 403 }));
+        }
+
+        // Authorization check: If a gradeId is specified in the query, it MUST match the student's own gradeId.
+        if (gradeId && gradeId !== studentGradeId) {
+            return next(new Error("Unauthorized: You can only view assignments for your own grade.", { cause: 403 }));
+        }
+
+        // Securely scope the database query to the student's specific grade.
+        query.gradeId = studentGradeId;
+
+        // If the student belongs to a group, also filter by their group.
+        // The assignmentModel stores group affiliations in an array called 'groupIds'.
+        if (studentGroupId) {
+            query.groupIds = studentGroupId;
+        }
+
+    // --- Teacher Logic ---
+    } else {
+        // Teachers must provide at least one filter to prevent fetching all records.
+        if (!gradeId && !groupId) {
+            return next(new Error("Query failed: A gradeId or groupId is required for teachers.", { cause: 400 }));
+        }
+
+        // Build query based on provided filters.
+        if (gradeId) {
+            query.gradeId = gradeId;
+        }
+        if (groupId) {
+            query.groupIds = groupId;
         }
     }
-    
 
-    const assignments = await assignmentModel.find({ groupIds: groupId });
+    // Execute the constructed query
+    const assignments = await assignmentModel.find(query);
     res.status(200).json({ message: "Assignments fetched successfully", data: assignments });
 });
-
 
 export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
     const { groupId, assignmentId, studentId, status, page = 1, size = 10 } = req.query;
