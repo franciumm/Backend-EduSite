@@ -17,9 +17,8 @@ function capitalize(str) {
 // =================================================================
 // --- PHASE 2, FIX 2.1: Internal Section Creation Logic (The "Spoke") ---
 // =================================================================
-export const _internalCreateSection = async ({ name, description, gradeId, groupIds, teacherId }) => {
-    // 1. Validate all incoming IDs. This is important for a reusable function.
-    
+export const _internalCreateSection = async ({ name, description, gradeId, groupIds, teacherId, itemsToAdd }) => {
+    // 1. Validation for core fields remains the same.
     if (!gradeId || !mongoose.Types.ObjectId.isValid(gradeId)) {
         throw new Error("A valid Grade ID is required to create a section.");
     }
@@ -27,29 +26,48 @@ export const _internalCreateSection = async ({ name, description, gradeId, group
         throw new Error("At least one valid Group ID is required to create a section.");
     }
     
-    // 2. Check for uniqueness to prevent duplicate section names within the same grade.
+    // 2. Uniqueness check remains the same.
     const existingSection = await sectionModel.findOne({ name, gradeId });
     if (existingSection) {
         throw new Error("A section with this name already exists for this grade. Please choose a different name.");
     }
 
-    // 3. Create the section document.
+    // --- NEW: Logic to handle optional initial linking ---
+    const initialLinkedContent = {};
+    if (itemsToAdd && Array.isArray(itemsToAdd) && itemsToAdd.length > 0) {
+        const capitalize = (str) => str ? str.charAt(0).toUpperCase() + str.slice(1) : '';
+
+        itemsToAdd.forEach(item => {
+            // Basic validation for each item in the array
+            if (item && item.type && item.id && mongoose.Types.ObjectId.isValid(item.id)) {
+                const fieldName = `linked${capitalize(item.type)}s`;
+                
+                if (!initialLinkedContent[fieldName]) {
+                    initialLinkedContent[fieldName] = [];
+                }
+                // Add the ID, ensuring no duplicates within the initial payload
+                if (!initialLinkedContent[fieldName].includes(item.id)) {
+                    initialLinkedContent[fieldName].push(item.id);
+                }
+            }
+        });
+    }
+    // --- End of new logic ---
+
+    // 3. Create the section document, now spreading the initial links.
+    // If `initialLinkedContent` is empty, this does nothing. If it has content,
+    // it will add fields like `linkedAssignments: [...]` to the creation object.
     const section = await sectionModel.create({
         name,
         description,
         gradeId,
         groupIds,
         createdBy: teacherId,
-        // Linked content arrays are initialized as empty.
-        linkedAssignments: [],
-        linkedExams: [],
-        linkedMaterials: [],
-        linkedSections: [],
+        ...initialLinkedContent
     });
 
     return section;
 };
-
 /**
  * The original endpoint controller, now a thin wrapper around the internal logic.
  */
