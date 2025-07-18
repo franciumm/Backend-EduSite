@@ -112,7 +112,7 @@ const buildContentMap = (inputArray, type) => ({
 });
 export const viewSectionById = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
-    const sectionForAuth = await sectionModel.findById(sectionId).select('groupIds').lean();
+    const sectionForAuth = await sectionModel.findById(sectionId).select('groupIds gradeId').lean();
     if (!sectionForAuth) {
         return next(new Error("Section not found", { cause: 404 }));
     }
