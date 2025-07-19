@@ -333,53 +333,68 @@ export const getSubmissions = asyncHandler(async (req, res, next) => {
     res.status(200).json({ message: "Submissions retrieved successfully", submissions });
 });
 
+
 export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
     const { page = 1, size = 10, status } = req.query;
     const { user } = req;
     const currentDate = new Date();
     const { limit, skip } = pagination({ page, size });
 
-    // 1. Find the student to get their group ID.
+    // 1. Find the student to determine their enrollment details.
     const student = await studentModel.findById(user._id).select('groupId').lean();
     if (!student) {
-        // If the user is not a student, they have no assignments.
-        return res.status(200).json({ message: "No assignments found.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
+        // If the user is not a valid student, return an empty result.
+        return res.status(200).json({ message: "No assignments found for this user.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
     }
     
-    // 2. Aggregate all assignment IDs the student can access via sections.
-    let sectionAssignmentIds = [];
+    // 2. Dynamically build an array of conditions for the $or query.
+    // This array will hold all the valid ways the student can access an assignment.
+    const orConditions = [];
+
+    // Path A: The student is individually enrolled in the assignment.
+    orConditions.push({ enrolledStudents: user._id });
+
+    // Paths B and C are only possible if the student belongs to a group.
     if (student.groupId) {
+        // Path B: The assignment is open to the student's entire group.
+        orConditions.push({ groupIds: student.groupId });
+
+        // Path C: The assignment is linked to a section that the student's group belongs to.
         const sections = await sectionModel.find({ groupIds: student.groupId }).select('linkedAssignments').lean();
-        sectionAssignmentIds = sections.flatMap(sec => sec.linkedAssignments);
+        if (sections.length > 0) {
+            const sectionAssignmentIds = sections.flatMap(sec => sec.linkedAssignments);
+            // Only add this condition if there are any assignments linked via sections.
+            if (sectionAssignmentIds.length > 0) {
+                orConditions.push({ _id: { $in: sectionAssignmentIds } });
+            }
+        }
     }
     
-    // 3. Build the main query using all three valid access paths.
+    // 3. Construct the main query object.
+    // The query must find assignments that satisfy ANY of the conditions in the orConditions array.
     const baseMatch = {
-        $or: [
-            { enrolledStudents: user._id },
-            { _id: { $in: sectionAssignmentIds } }
-        ]
+        $or: orConditions
     };
 
-    // Safely add the group-based access path only if the student has a group.
-    if (student.groupId) {
-        baseMatch.$or.push({ groupIds: student.groupId });
-    }
-
-    // 4. Dynamically add the timeline status filter to the main query.
+    // 4. Dynamically add the optional timeline status filter to the main query.
     if (status) {
-        if (status === "active") { baseMatch.startDate = { $lte: currentDate }; baseMatch.endDate = { $gte: currentDate }; }
-        else if (status === "upcoming") { baseMatch.startDate = { $gt: currentDate }; }
-        else if (status === "expired") { baseMatch.endDate = { $lt: currentDate }; }
+        if (status === "active") {
+            baseMatch.startDate = { $lte: currentDate };
+            baseMatch.endDate = { $gte: currentDate };
+        } else if (status === "upcoming") {
+            baseMatch.startDate = { $gt: currentDate };
+        } else if (status === "expired") {
+            baseMatch.endDate = { $lt: currentDate };
+        }
     }
 
-    // 5. Execute queries for paginated data and total count in parallel for max efficiency.
+    // 5. Execute the queries for paginated data and total count in parallel for maximum efficiency.
     const [assignments, totalAssignments] = await Promise.all([
         assignmentModel.find(baseMatch)
             .sort({ startDate: 1 })
             .skip(skip)
             .limit(limit)
-            .select("name startDate endDate groupIds")
+            .select("name startDate endDate groupIds") // Select fields relevant to the student
             .lean(),
         assignmentModel.countDocuments(baseMatch)
     ]);
@@ -392,7 +407,6 @@ export const getAssignmentsForStudent = asyncHandler(async (req, res, next) => {
         assignments,
     });
 });
-
 
 export const ViewSub = asyncHandler(async (req, res, next) => {
     // --- FIX 1.3: Correct and Robust Authorization ---

@@ -10,13 +10,13 @@ import { _internalCreateExam } from '../../Exams/controller/Start.js';
 import { _internalCreateMaterial } from '../../Materials/controller/All.js';
 import { normalizeContentName } from '../../../utils/queryHelpers.js';
 import { pagination } from '../../../utils/pagination.js';
+
+
 function capitalize(str) {
     if (!str) return '';
     return str.charAt(0).toUpperCase() + str.slice(1);
 }
-// =================================================================
-// --- PHASE 2, FIX 2.1: Internal Section Creation Logic (The "Spoke") ---
-// =================================================================
+
 export const _internalCreateSection = async ({ name, description, gradeId, groupIds, teacherId, itemsToAdd }) => {
     // 1. Validation for core fields remains the same.
     if (!gradeId || !mongoose.Types.ObjectId.isValid(gradeId)) {
@@ -68,9 +68,6 @@ export const _internalCreateSection = async ({ name, description, gradeId, group
 
     return section;
 };
-/**
- * The original endpoint controller, now a thin wrapper around the internal logic.
- */
 export const createSection = asyncHandler(async (req, res, next) => {
     const newSection = await _internalCreateSection({
         ...req.body,
@@ -78,9 +75,6 @@ export const createSection = asyncHandler(async (req, res, next) => {
     });
     res.status(201).json({ message: "Section container created successfully.", data: newSection });
 });
-
-
-// ... (updateSectionLinks, viewSectionById, deleteSection remain unchanged)
 export const updateSectionLinks = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
     const { itemsToAdd, itemsToRemove } = req.body; 
@@ -181,8 +175,6 @@ export const deleteSection = asyncHandler(async (req, res, next) => {
 
     res.status(200).json({ message: "Section container deleted successfully." });
 });
-
-
 export const createAndLinkContent = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
     const { type, data } = req.body;
@@ -259,7 +251,6 @@ export const createAndLinkContent = asyncHandler(async (req, res, next) => {
         updatedSection: section
     });
 });
-
 export const getSections = asyncHandler(async (req, res, next) => {
     // 1. Initial setup from request
     const { page = 1, size = 10, groupId, gradeId } = req.query;
