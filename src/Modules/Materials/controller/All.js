@@ -9,6 +9,7 @@ import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3 } from '../../../
 import { pagination } from '../../../utils/pagination.js';
 import materialModel from '../../../../DB/models/material.model.js';
 import { gradeModel } from "../../../../DB/models/grades.model.js";
+import { canAccessContent } from '../../../middelwares/contentAuth.js';
 
 
 export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
