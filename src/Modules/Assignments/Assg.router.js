@@ -24,7 +24,7 @@ router.get("/submissions/View/:assignmentId", isAuth, Get.ViewSub);
 router.get("/submissions/download", isAuth, Edit.downloadSubmittedAssignment);
 router.get("/submissions", isAuth, Get.findSubmissions);
 router.get('/download',isAuth,Edit.downloadAssignment );
-router.get('/all',isAuth,Get.getAssignmentsForStudent );
+router.get('/all',isAuth,Get.getAssignmentsForUser );
 router.get('/group/all',isAuth,Get.GetAllByGroup );
 
 export default router ;
