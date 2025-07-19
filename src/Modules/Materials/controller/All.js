@@ -12,6 +12,7 @@ import { gradeModel } from "../../../../DB/models/grades.model.js";
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
 
 
+
 export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
   // 1. Get groupId from request parameters, as defined in the route.
   const { groupId } = req.params;
@@ -197,19 +198,29 @@ export const _internalCreateMaterial = async ({ name, description, gradeId, grou
 
 export const viewMaterial = asyncHandler(async (req, res, next) => {
     const { materialId } = req.params;
+    let hasAccess = false;
 
-    // --- PHASE 3 REFACTOR ---
-    const hasAccess = await canAccessContent({
-        user: { _id: req.user._id, isTeacher: req.isteacher.teacher },
-        contentId: materialId,
-        contentType: 'material'
-    });
+    // --- FIX: Implement Role-Based Access Control ---
+    // 1. Check if the user is a teacher. Teachers have universal access to view materials.
+    if (req.isteacher.teacher === true) {
+        hasAccess = true;
+    } 
+    // 2. If the user is a student, use the existing authorization logic.
+    else {
+        hasAccess = await canAccessContent({
+            user: { _id: req.user._id, isTeacher: req.isteacher.teacher },
+            contentId: materialId,
+            contentType: 'material'
+        });
+    }
+    // --- END FIX ---
 
+    // 3. If access is not granted after checking roles, deny the request.
     if (!hasAccess) {
         return next(new Error("You are not authorized to view this material", { cause: 403 }));
     }
-    // --- END REFACTOR ---
 
+    // 4. If access is granted, proceed to fetch and return the material.
     const material = await MaterialModel.findById(materialId);
     if (!material) {
         return next(new Error("Material not found", { cause: 404 }));
@@ -234,7 +245,6 @@ export const viewMaterial = asyncHandler(async (req, res, next) => {
         files: filesWithUrls,
     });
 });
-  
 
 // export const getMaterials = asyncHandler(async (req, res, next) => {
 //   const { page = 1, size = 4 } = req.query; // Pagination defaults
