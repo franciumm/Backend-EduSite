@@ -134,9 +134,11 @@ export const _internalCreateMaterial = async ({ name, description, gradeId, grou
     const gradeDoc = await gradeModel.findById(gradeId);
     if (!gradeDoc) throw new Error("Wrong GradeId");
 
-    // --- FIX: Generate the slug from the name ---
-    const slug = slugify(name, { lower: true, strict: true });
-
+     const slug = slugify(name, {
+      lower: true,     
+      strict: true,    
+      remove: /[*+~.()'"!:@]/g 
+    });
     // Check if a material with this slug already exists for the given grade to prevent conflicts
     const existingMaterial = await MaterialModel.findOne({ slug, gradeId });
     if (existingMaterial) {
@@ -167,7 +169,7 @@ export const _internalCreateMaterial = async ({ name, description, gradeId, grou
         // --- FIX: Include the generated slug in the document to be created ---
         const newMaterial = await MaterialModel.create({
             name,
-            slug, // Add the slug here
+           slug:  slug, // Add the slug here
             description,
             linksArray,
             groupIds,
