@@ -139,10 +139,9 @@ export const _internalCreateMaterial = async ({ name, description, gradeId, grou
       strict: true,    
       remove: /[*+~.()'"!:@]/g 
     });
-    // Check if a material with this slug already exists for the given grade to prevent conflicts
-    const existingMaterial = await MaterialModel.findOne({ slug, gradeId });
+    const existingMaterial = await MaterialModel.findOne({ name,gradeId });
     if (existingMaterial) {
-        throw new Error(`A material with the name "${name}" already exists for this grade, resulting in a duplicate slug.`);
+        throw new Error(`A material with the name "${name}" already exists for this grade.`);
     }
 
     const successfulS3Keys = [];
@@ -169,7 +168,7 @@ export const _internalCreateMaterial = async ({ name, description, gradeId, grou
         // --- FIX: Include the generated slug in the document to be created ---
         const newMaterial = await MaterialModel.create({
             name,
-           slug:  slug, // Add the slug here
+          
             description,
             linksArray,
             groupIds,
