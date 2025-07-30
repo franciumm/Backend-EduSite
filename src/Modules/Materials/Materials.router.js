@@ -10,11 +10,14 @@ const router = Router();
 router.post(
     "/create",
     AdminAuth, 
-     multerCloudFunction(allowedExtensions.Files).array("files", 10), 
     materialsController.createMaterial
   );
   
-
+router.post(
+    "/generate-upload-url",
+    AdminAuth,
+    materialsController.generateUploadUrl // We will create this function next
+);
 
 
   // Get materials for a group (students and teachers)

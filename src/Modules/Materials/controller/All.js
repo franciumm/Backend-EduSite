@@ -10,8 +10,9 @@ import { pagination } from '../../../utils/pagination.js';
 import materialModel from '../../../../DB/models/material.model.js';
 import { gradeModel } from "../../../../DB/models/grades.model.js";
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
-
-
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { nanoid } from 'nanoid';
 
 export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
   // 1. Get groupId from request parameters, as defined in the route.
@@ -46,37 +47,73 @@ function generateSlug(text) {
 }
 
 export const createMaterial = asyncHandler(async (req, res, next) => {
-    const { name, description, gradeId } = req.body;
-    
-    const parseJsonInput = (input) => {
-        if (!input) return [];
-        if (Array.isArray(input)) return input;
-        try { return JSON.parse(input); } catch { return [input]; }
-    };
-    const groupIds = parseJsonInput(req.body.groupIds ?? req.body["groupIds[]"]);
-    const linksArray = parseJsonInput(req.body.linksArray ?? req.body["links[]"]);
+    // 1. All data now comes from the JSON body, including file info
+    const { name, description, gradeId, groupIds, linksArray, files } = req.body;
+    const teacherId = req.user._id;
 
-    if (!req.files || req.files.length === 0) {
-        return next(new Error("Please upload at least one file.", { cause: 400 }));
+    // 2. The 'files' array is sent by the client after the S3 upload is complete.
+    if (!files || files.length === 0) {
+        return next(new Error("File information is missing from the request.", { cause: 400 }));
+    }
+    if (!name || !gradeId) {
+        return next(new Error("Material name and grade are required.", { cause: 400 }));
     }
 
-    // Call the internal creation function with data parsed from the request
-    const newMaterial = await _internalCreateMaterial({
+    const slug = slugify(name, { lower: true, strict: true });
+
+    // 3. Check for duplicates like before
+    const existingMaterial = await MaterialModel.findOne({ slug, gradeId });
+    if (existingMaterial) {
+        throw new Error(`A material with the name "${name}" already exists for this grade.`);
+    }
+
+    // 4. Create the document in MongoDB with the file info from the client
+    const newMaterial = await MaterialModel.create({
         name,
+        slug,
         description,
-        gradeId,
-        groupIds,
         linksArray,
-        files: req.files,
-        teacherId: req.user._id,
+        groupIds,
+        gradeId,
+        createdBy: teacherId,
+        bucketName: process.env.S3_BUCKET_NAME,
+        files: files, // This now comes directly from the request body
     });
 
     res.status(201).json({
-        message: "Material created and files uploaded successfully",
+        message: "Material created successfully",
         material: newMaterial
     });
 });
+export const generateUploadUrl = asyncHandler(async (req, res, next) => {
+    // Get details from the frontend's request body
+    const { fileName, fileType, materialName } = req.body;
 
+    if (!fileName || !fileType || !materialName) {
+        return next(new Error("fileName, fileType, and materialName are required.", { cause: 400 }));
+    }
+
+    // Generate a unique file path in S3 to prevent overwrites
+    const slug = slugify(materialName, { lower: true, strict: true });
+    const uniqueFileName = `${nanoid()}-${fileName}`;
+    const s3Key = `materials/${slug}/${uniqueFileName}`;
+
+    // Create a command to put an object in S3
+    const command = new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: s3Key,
+        ContentType: fileType, // IMPORTANT: The client must send this exact content type
+    });
+
+    // Generate the presigned URL which is valid for a short time (e.g., 5 minutes)
+    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
+
+    res.status(200).json({
+        message: "Upload URL generated successfully.",
+        uploadUrl, // The URL the frontend will upload the file to
+        s3Key,     // The key of the file in S3, for saving in the database later
+    });
+});
 
 
 // ── 2) List materials (students & teachers) ────────────────────────────────────
