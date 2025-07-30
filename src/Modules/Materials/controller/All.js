@@ -5,7 +5,7 @@ import { asyncHandler } from '../../../utils/erroHandling.js';
 import MaterialModel from '../../../../DB/models/material.model.js';
 import { groupModel } from '../../../../DB/models/groups.model.js';
 import studentModel from '../../../../DB/models/student.model.js';
-import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3,s3Client } from '../../../utils/S3Client.js';
+import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3,S3Client } from '../../../utils/S3Client.js';
 import { pagination } from '../../../utils/pagination.js';
 import materialModel from '../../../../DB/models/material.model.js';
 import { gradeModel } from "../../../../DB/models/grades.model.js";
@@ -13,7 +13,9 @@ import { canAccessContent } from '../../../middelwares/contentAuth.js';
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { nanoid } from 'nanoid';
-
+const s3Client = new S3Client({
+    region: process.env.AWS_REGION,
+});
 
 export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
   // 1. Get groupId from request parameters, as defined in the route.
