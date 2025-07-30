@@ -282,11 +282,10 @@ export const getSections = asyncHandler(async (req, res, next) => {
             sectionModel.countDocuments(query)
         ]);
     } 
-    // 3. Student Logic: Access based on group membership
     else {
-        const student = await studentModel.findById(user._id).select('groupId').lean();
+        const student = await studentModel.findById(user._id);
 
-        if (!student || !student.groupId) {
+        if (!student ) {
             return res.status(200).json({
                 message: "No sections found for this student.",
                 data: [],
