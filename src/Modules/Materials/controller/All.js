@@ -17,6 +17,7 @@ const s3Client = new S3Client({
     region: process.env.AWS_REGION,
 });
 
+
 export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
   // 1. Get groupId from request parameters, as defined in the route.
   const { groupId } = req.params;
