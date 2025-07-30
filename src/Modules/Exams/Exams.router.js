@@ -20,7 +20,7 @@ router.get("/download", isAuth, Edit.downloadExam);
 router.get("/submissions/download", isAuth, Edit.downloadSubmittedExam);
 router.post ('/create',AdminAuth,multerCloudFunction(allowedExtensions.Files).single('file'),Start.createExam);
 router.post("/submit",isAuth,multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitExam);
-router.put("/mark", AdminAuth, multerCloudFunction(allowedExtensions.Files).single("file"),Edit.markSubmissionWithPDF);
+router.put("/mark", AdminAuth, Edit.markSubmissionWithPDF);
 router.post("/add-exception",  AdminAuth, Edit.addExceptionStudent);
 router.post("/add-rejected", AdminAuth , Edit.addRejectedStudent);
 router.delete("/delete", AdminAuth, Edit.deleteExam);

@@ -17,7 +17,7 @@ router.post ('/create',AdminAuth,multerCloudFunction(allowedExtensions.Files).si
 router.post( "/submit", isAuth,  multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitAssignment);
 router.put("/edit", AdminAuth, multerCloudFunction(allowedExtensions.Files).single('file'), Edit.editAssignment);
 
-router.put("/mark", AdminAuth, multerCloudFunction(allowedExtensions.Files).single("file"), Edit.markAssignment);
+router.put("/mark", AdminAuth,  Edit.markAssignment);
 
 router.get("/submissions/View/:assignmentId", isAuth, Get.ViewSub);
 
