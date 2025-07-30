@@ -18,9 +18,14 @@ const submittedAssignmentSchema = new Schema(
       type: Boolean,
       default: false,
     },
+     annotationData : {
+    type : String ,
+     default : null
+  },
     SubmitDate: Date,
 assignmentname:  { type: String, required: true },
   },
+ 
   { timestamps: true }
 );
 

@@ -20,7 +20,11 @@ const submittedExamSchema = new Schema(
     isLate: {
       type: Boolean,
       default: false,
-    },
+    }, 
+    annotationData : {
+    type : String ,
+     default : null
+  },
     teacherFeedback: { type: String, default: "" },
   },
   { timestamps: true }

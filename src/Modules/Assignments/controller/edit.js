@@ -150,51 +150,33 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
 });
 
 export const markAssignment = asyncHandler(async (req, res, next) => {
-  const { submissionId, score, notes } = req.body;
+  const { submissionId, score, notes, annotationData } = req.body;
 
   const submission = await SubassignmentModel.findById(submissionId).populate("assignmentId studentId");
   if (!submission) {
     return next(new Error("Submission not found", { cause: 404 }));
   }
 
-  const { bucketName, key } = submission;
-
-  if (!req.file) {
-    return next(new Error("Please upload the marked PDF file", { cause: 400 }));
-  }
+ 
 
   try {
-    // The synchronous 'fs' is correctly used here, no change needed
-    const fileContent = fs.readFileSync(req.file.path);
+   
+    
 
-    const s3Params = {
-      Bucket: bucketName,
-      Key: key, 
-      Body: fileContent,
-      ContentType: "application/pdf",
-    };
-
-    await s3.send(new PutObjectCommand(s3Params));
-
+   
     submission.score = score || submission.score; 
     submission.notes = notes || submission.notes;
     submission.isMarked = true; 
+    submission.annotationData = annotationData;
     await submission.save();
 
-    // The synchronous 'fs' is correctly used here, no change needed
-    fs.unlinkSync(req.file.path);
-
+  
     res.status(200).json({
       message: "Submission marked and replaced successfully",
       updatedSubmission: submission,
     });
   } catch (error) {
     console.error("Error marking and replacing the submission:", error);
-
-    if (req.file && fs.existsSync(req.file.path)) {
-      // The synchronous 'fs' is correctly used here, no change needed
-      fs.unlinkSync(req.file.path);
-    }
 
     return next(new Error("Failed to mark and replace the submission", { cause: 500 }));
   }
