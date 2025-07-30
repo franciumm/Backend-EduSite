@@ -47,7 +47,7 @@ export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, g
             path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
             createdBy: teacherId,
             exceptionStudents,
-            allowSubmissionsAfterDueDate
+            allowSubmissionsAfterDueDate: allowSubmissionsAfterDueDate||false
         }], { session });
 
         await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
