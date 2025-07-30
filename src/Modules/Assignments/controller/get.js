@@ -415,8 +415,7 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
 });
 
 export const ViewSub = asyncHandler(async (req, res, next) => {
-    // --- FIX 1.3: Correct and Robust Authorization ---
-    const { SubassignmentId } = req.query; // Changed from assignmentId
+    const { SubassignmentId } = req.query; 
     if (!SubassignmentId || !mongoose.Types.ObjectId.isValid(SubassignmentId)) {
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
@@ -433,8 +432,8 @@ export const ViewSub = asyncHandler(async (req, res, next) => {
     }
     // Rule 2: A teacher can view any submission for an assignment they created.
     else if (req.isteacher.teacher === true) {
-        const originalAssignment = await assignmentModel.findById(submission.assignmentId).select('createdBy').lean();
-        if (originalAssignment && originalAssignment.createdBy.equals(req.user._id)) {
+        const originalAssignment = await assignmentModel.findById(submission.assignmentId);
+        if (originalAssignment ) {
             isAuthorized = true;
         }
     }
@@ -442,16 +441,11 @@ export const ViewSub = asyncHandler(async (req, res, next) => {
     if (!isAuthorized) {
         return next(new Error("You are not authorized to view this submission.", { cause: 403 }));
     }
-    // --- END FIX ---
-    
-    const presignedUrl = await getPresignedUrlForS3(
-        submission.bucketName,
-        submission.key,
-        60 * 30 // 30-minute expiry
-    );
+   
+   
     res.status(200).json({
         message: "Submission is ready for viewing",
-        presignedUrl,
+        submission,
     });
 });
 
