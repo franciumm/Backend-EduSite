@@ -177,37 +177,10 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
         return next(new Error("This submission record has no associated file, it may have been corrupted or uploaded incorrectly.", { cause: 404 }));
     }
 
-    try {
-        const command = new GetObjectCommand({
-            Bucket: bucketName,
-            Key: key,
-        });
-
-        const s3Response = await s3.send(command);
-
-        // Sanitize filename to prevent security vulnerabilities and ensure compatibility.
-        const originalFilename = fileKey.split("/").pop() || 'submission.pdf';
-        const safeFilename = encodeURIComponent(originalFilename.replace(/[^a-zA-Z0-9.\-_]/g, '_'));
-
-        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeFilename}`);
-        res.setHeader('Content-Type', s3Response.ContentType || "application/octet-stream"); // Fallback MIME type
-        if (s3Response.ContentLength) {
-            res.setHeader('Content-Length', s3Response.ContentLength);
-        }
-
-        s3Response.Body.pipe(res);
-        
-    } catch (error) {
-        console.error("Error fetching submitted exam from S3:", error);
-        
-        // Provide a more specific error to the client if the file doesn't exist on S3
-        if (error.name === 'NoSuchKey') {
-            return next(new Error("The submitted file could not be found in storage.", { cause: 404 }));
-        }
-        
-        // For all other S3 errors (AccessDenied, etc.), return a generic server error.
-        return next(new Error("Failed to download the submitted exam due to a storage error.", { cause: 500 }));
-    }
+  return res.status(200).json({
+    message: "Marked PDF Downloaded successfully",
+    submission: submission,
+  });
 });
 
 
