@@ -10,9 +10,10 @@ import { pagination } from '../../../utils/pagination.js';
 import materialModel from '../../../../DB/models/material.model.js';
 import { gradeModel } from "../../../../DB/models/grades.model.js";
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { nanoid } from 'nanoid';
+import { s3Client } from '../../../utils/S3Client.js'; // <-- ADD THIS LINE
 
 export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
   // 1. Get groupId from request parameters, as defined in the route.
