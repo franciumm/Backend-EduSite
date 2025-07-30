@@ -119,9 +119,7 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
         return next(new Error("Submission not found", { cause: 404 }));
     }
 
-    // --- REFACTOR: Use the centralized submission authorizer ---
-    // Rule 1: Student can download their own submission.
-    // Rule 2: Teacher can download any submission for an assignment they created.
+    
     let isAuthorized = false;
     if (req.user._id.equals(submission.studentId._id)) {
         isAuthorized = true;
@@ -132,21 +130,10 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
     if (!isAuthorized) {
         return next(new Error("You are not authorized to download this submission.", { cause: 403 }));
     }
-    // --- END REFACTOR ---
-
     const { bucketName, key } = submission;
-    try {
-        const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
-        const response = await s3.send(command);
-
-        const fileName = `${submission.assignmentId.name}_${submission.studentId.userName}.pdf`;
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        res.setHeader("Content-Type", response.ContentType || 'application/pdf');
-        response.Body.pipe(res);
-    } catch (error) {
-        console.error("Error downloading the submission from S3:", error);
-        return next(new Error("Error downloading the submission", { cause: 500 }));
-    }
+ res.status(200).json({
+    submission
+ })
 });
 
 export const markAssignment = asyncHandler(async (req, res, next) => {
