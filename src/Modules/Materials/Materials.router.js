@@ -16,7 +16,7 @@ router.post(
 router.post(
     "/generate-upload-url",
     AdminAuth,
-    materialsController.generateUploadUrl // We will create this function next
+    materialsController.generateUploadUrl 
 );
 
 
