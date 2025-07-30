@@ -283,9 +283,9 @@ export const getSections = asyncHandler(async (req, res, next) => {
         ]);
     } 
     else {
-        const student = await studentModel.findById(user._id);
+        const student = await studentModel.findById(user._id).select('groupId').lean();
 
-        if (!student ) {
+        if (!student || !student.groupId) {
             return res.status(200).json({
                 message: "No sections found for this student.",
                 data: [],
