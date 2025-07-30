@@ -139,9 +139,13 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
 export const markAssignment = asyncHandler(async (req, res, next) => {
   const { submissionId, score, notes, annotationData } = req.body;
 
-  const submission = await SubassignmentModel.findById(submissionId).populate("assignmentId studentId");
+  const submission = await SubassignmentModel.findById(submissionId);
   
   
+  
+  if (!submission) {
+    return next(new Error("Submission not found", { cause: 404 }));
+  }
 
  
 
