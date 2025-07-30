@@ -215,17 +215,14 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
 
 
 export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
-  const { submissionId, score, feedback } = req.body;
+  const { submissionId, score, feedback ,annotationData} = req.body;
 
   // 1. Validate submissionId
   if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
     return next(new Error("Valid submissionId is required", { cause: 400 }));
   }
 
-  // 2. Check file
-  if (!req.file) {
-    return next(new Error("Please upload the marked PDF file", { cause: 400 }));
-  }
+
 
   // 3. Find the existing submission
   const subExam = await SubexamModel.findById(submissionId);
@@ -233,48 +230,13 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
     return next(new Error("Submission not found", { cause: 404 }));
   }
 
-  // 4. Delete old PDF from S3 (optional but likely desired)
-  //    so we don't keep the student's original or cause confusion.
-  if (subExam.bucketName && subExam.key) {
-    try {
-      await s3.send(
-        new DeleteObjectCommand({
-          Bucket: subExam.bucketName,
-          Key: subExam.key,
-        })
-      );
-    } catch (delErr) {
-      console.error("Error deleting old PDF:", delErr);
-      // Not critical enough to stop the process
-    }
-  }
 
-  // 5. Upload new PDF (the "marked" version) to S3
-  let newKey;
-  try {
-    // The synchronous 'fs' is correctly used here, so no change is needed.
-    const fileContent = fs.readFileSync(req.file.path);
-    newKey = `MarkedSubmissions/${submissionId}_${Date.now()}.pdf`;
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: newKey,
-        Body: fileContent,
-        ContentType: "application/pdf",
-        ACL: "private",
-      })
-    );
-    // The synchronous 'fs' is correctly used here, so no change is needed.
-    fs.unlinkSync(req.file.path);
-  } catch (err) {
-    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    return next(new Error("Error uploading marked PDF to S3", { cause: 500 }));
-  }
-
+ 
+ 
   // 6. Overwrite the subexam doc with new PDF fields + new score/feedback
-  subExam.bucketName = process.env.S3_BUCKET_NAME;
-  subExam.key = newKey;
-  subExam.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
+  subExam.bucketName ;
+  subExam.key ;
+  subExam.path ;
 
   // score and feedback
   if (typeof score !== "undefined") {
@@ -283,7 +245,9 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
   if (typeof feedback !== "undefined") {
     subExam.teacherFeedback = feedback;
   }
-
+ if (typeof annotationData !== "undefined") {
+    subExam.annotationData = annotationData;
+  }
   // 7. Save and return updated submission
   const updatedSubmission = await subExam.save();
   return res.status(200).json({

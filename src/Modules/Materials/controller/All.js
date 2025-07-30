@@ -114,7 +114,7 @@ export const generateUploadUrl = asyncHandler(async (req, res, next) => {
     });
 
     // Generate the presigned URL which is valid for a short time (e.g., 5 minutes)
-    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
+    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
 
     res.status(200).json({
         message: "Upload URL generated successfully.",
