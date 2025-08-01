@@ -1,5 +1,6 @@
 import { Schema, model } from "mongoose";
 import { deleteFileFromS3 } from "../../src/utils/S3Client.js"; 
+import { sectionModel } from "./section.model.js";
 
 const materialSchema = new Schema(
   {
