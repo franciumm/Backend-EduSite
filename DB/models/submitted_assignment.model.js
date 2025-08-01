@@ -20,7 +20,8 @@ const submittedAssignmentSchema = new Schema(
     },
      annotationData : {
     type : String ,
-     default : null
+     default : null,
+     select : false
   },
     SubmitDate: Date,
 assignmentname:  { type: String, required: true },
