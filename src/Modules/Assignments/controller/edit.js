@@ -157,7 +157,7 @@ export const markAssignment = asyncHandler(async (req, res, next) => {
     submission.score = score || submission.score; 
     submission.notes = notes || submission.notes;
     submission.isMarked = true; 
-    submission.annotationData = annotationData;
+    submission.annotationData = annotationData|| submission.annotationData ;
     await submission.save();
 
   
