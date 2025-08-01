@@ -170,10 +170,10 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
     // or the student who owns the submission. Access is granted.
 
     // --- Phase 4: S3 File Streaming ---
-    const { bucketName, key } = submission;
+    const {  key,bucketName } = submission;
 
     // Pre-flight check: Ensure there is actually a file to download.
-    if (!fileBucket || !key) {
+    if (!bucketName || !key) {
         return next(new Error("This submission record has no associated file, it may have been corrupted or uploaded incorrectly.", { cause: 404 }));
     }
 
