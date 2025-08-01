@@ -9,7 +9,6 @@ import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
-import { annotate } from "pdfkit";
 
 export const getExams = asyncHandler(async (req, res, next) => {
     const { gradeId, groupId } = req.query;
@@ -322,9 +321,9 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
             ...basePipeline,
             { $sort: { createdAt: -1 } }, { $skip: skip }, { $limit: limit },
             {
-                $project: {
+                $project: {  annotationData: 1,
                     _id: 1, createdAt: 1, updatedAt: 1, score: 1, notes: 1, fileBucket: 1, fileKey: 1,
-                    filePath: 1, teacherFeedback: 1,annotationData : 1,
+                    filePath: 1, teacherFeedback: 1,
                     examId: { _id: '$examData._id', Name: '$examData.Name', startdate: '$examData.startdate', enddate: '$examData.enddate' },
                     studentId: { _id: '$studentData._id', userName: '$studentData.userName', firstName: '$studentData.firstName', lastName: '$studentData.lastName' }
                 }
