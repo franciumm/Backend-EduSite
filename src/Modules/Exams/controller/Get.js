@@ -365,7 +365,8 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
         ...studentPipeline,
         { $sort: { createdAt: -1 } }, { $skip: skip }, { $limit: limit },
         { $project: {
-            _id: 1, createdAt: 1, updatedAt: 1, score: 1, notes: 1, fileBucket: 1, fileKey: 1, filePath: 1, teacherFeedback: 1,annotationData: 1,
+          annotationData: 1,
+            _id: 1, createdAt: 1, updatedAt: 1, score: 1, notes: 1, fileBucket: 1, fileKey: 1, filePath: 1, teacherFeedback: 1,
             examId: { _id: '$examData._id', Name: '$examData.Name', startdate: '$examData.startdate', enddate: '$examData.enddate' },
         }}
     ];
