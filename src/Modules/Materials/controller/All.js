@@ -353,5 +353,5 @@ if (material.createdBy.toString() !== req.user._id.toString()) {
 
     await material.deleteOne();
 
-    res.status(200).json({ message: "Material and all associated files deleted successfully" });
+    res.status(200).json({ message: "Material deleted successfully" });
 });
