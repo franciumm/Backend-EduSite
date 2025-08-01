@@ -17,7 +17,7 @@ const bootstrape =  async (app,express)=>{
   
     DBConnect();
  
-    app.use(express.urlencoded({ extended: false }));
+    app.use(express.urlencoded({ limit :'10mb', extended: false }));
 
     app.use('/group',group);
     app.use('/exams',exam);
