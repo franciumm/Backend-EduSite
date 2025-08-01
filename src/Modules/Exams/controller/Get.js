@@ -10,96 +10,82 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
 
-
 export const getExams = asyncHandler(async (req, res, next) => {
-    // ... (logic for teachers and initial setup remains the same)
-    const { page = 1, size = 10, groupId, gradeId, status } = req.query;
-    const uaeTimeZone = 'Asia/Dubai';
-    const user = req.user;
+    const { gradeId, groupId } = req.query;
     const isTeacher = req.isteacher.teacher;
-    const currentDate = toZonedTime(new Date(), uaeTimeZone);
-    const { limit, skip } = pagination({ page, size });
-
     let query = {};
-    let totalExams = 0;
-    let exams = [];
 
+    // --- Teacher Logic ---
+    // Simplified to fetch all matching exams without pagination or status filters.
     if (isTeacher) {
-        if (groupId) query.groupIds = groupId;
-        if (gradeId) query.grade = gradeId;
-        if (status === "active") { query.startdate = { $lte: currentDate }; query.enddate = { $gte: currentDate }; }
-        if (status === "upcoming") { query.startdate = { $gt: currentDate }; }
-        if (status === "expired") { query.enddate = { $lt: currentDate }; }
+        // Teachers must provide a filter to avoid fetching all exams in the system.
+        if (!gradeId && !groupId) {
+            return next(new Error("Query failed: A gradeId or groupId is required for teachers.", { cause: 400 }));
+        }
 
-        [exams, totalExams] = await Promise.all([
-            examModel.find(query).sort({ startdate: 1 }).skip(skip).limit(limit).select("Name startdate enddate groupIds grade").lean(),
-            examModel.countDocuments(query)
-        ]);
+        // Build a simple query based on provided filters.
+        if (gradeId) {
+            // The field in the exam model is 'grade'.
+            query.grade = gradeId;
+        }
+        if (groupId) {
+            // Matches if the groupId is present in the groupIds array.
+            query.groupIds = groupId;
+        }
+
+    // --- Student Logic ---
+    // This logic is comprehensive, finding all exams a student is eligible for.
     } else {
-        const student = await studentModel.findById(user._id).select('groupId').lean();
-        if (!student) {
-            return res.status(200).json({ message: "No exams found.", exams: [], totalExams: 0, totalPages: 0, currentPage: 1 });
+        const studentId = req.user._id;
+        const studentGradeId = req.user.gradeId?.toString();
+        const studentGroupId = req.user.groupId?.toString();
+
+        // A student must be in a grade to see any exams.
+        if (!studentGradeId) {
+            return next(new Error("Unauthorized: You are not associated with any grade.", { cause: 403 }));
         }
 
-        // =================================================================
-        // --- FINAL PERFECTION: Build the $or array dynamically and safely ---
-        // =================================================================
+        // Authorization check: A student can only query for their own grade.
+        if (gradeId && gradeId !== studentGradeId) {
+            return next(new Error("Unauthorized: You can only view exams for your own grade.", { cause: 403 }));
+        }
+
+        // Base query is always scoped to the student's grade.
+        query.grade = studentGradeId;
+
+        // Build a complex $or condition to find all exams visible to the student.
+        // A student can see an exam if ANY of the following are true.
         const orConditions = [
-            // Path 2: Student is a specific exception
-            { "exceptionStudents.studentId": user._id },
-            // Path 3: Student was manually enrolled
-            { enrolledStudents: user._id }
+            // 1. They are manually enrolled in the exam.
+            { enrolledStudents: studentId },
+            // 2. They are listed as an exception with a custom timeline.
+            { "exceptionStudents.studentId": studentId }
         ];
 
-        // Path 1: Student's group is assigned (ONLY if they have a group)
-        if (student.groupId) {
-            orConditions.push({ groupIds: student.groupId });
+        // 3. The exam is assigned to their group OR to the entire grade.
+        if (studentGroupId) {
+            // Exam is for their specific group.
+            orConditions.push({ groupIds: studentGroupId });
+            // Exam is for the whole grade (i.e., has no group IDs).
+            orConditions.push({ groupIds: { $size: 0 } });
+        } else {
+            // If not in a group, they can only see grade-wide exams.
+            orConditions.push({ groupIds: { $size: 0 } });
         }
         
-        const baseMatch = { $or: orConditions };
-
-        const pipeline = [
-            { $match: baseMatch },
-            { $addFields: { studentException: { $first: { $filter: { input: "$exceptionStudents", as: "ex", cond: { $eq: ["$$ex.studentId", user._id] } } } } } },
-            { $addFields: { effectiveStartDate: { $ifNull: ["$studentException.startdate", "$startdate"] }, effectiveEndDate: { $ifNull: ["$studentException.enddate", "$enddate"] } } }
-        ];
-
-        if (status) {
-            const statusMatch = {};
-            if (status === "active") { statusMatch.effectiveStartDate = { $lte: currentDate }; statusMatch.effectiveEndDate = { $gte: currentDate }; }
-            if (status === "upcoming") { statusMatch.effectiveStartDate = { $gt: currentDate }; }
-            if (status === "expired") { statusMatch.effectiveEndDate = { $lt: currentDate }; }
-            pipeline.push({ $match: statusMatch });
-        }
-        
-        const results = await examModel.aggregate([
-            ...pipeline,
-            {
-                $facet: {
-                    metadata: [{ $count: "total" }],
-                    data: [
-                        { $sort: { effectiveStartDate: 1 } },
-                        { $skip: skip },
-                        { $limit: limit },
-                        { $project: { Name: 1, startdate: 1, enddate: 1, groupIds: 1, grade: 1, exceptionStudents: 1 } }
-                    ]
-                }
-            }
-        ]);
-        
-        exams = results[0].data;
-        totalExams = results[0].metadata[0]?.total || 0;
+        query.$or = orConditions;
     }
 
+    // Execute a single, powerful query to get all matching documents.
+    // .lean() is used for performance as we are only reading data.
+    const exams = await examModel.find(query).lean();
+
+    // Respond in the same format as the assignment controller.
     res.status(200).json({
         message: "Exams fetched successfully",
-        exams,
-        totalExams,
-        totalPages: Math.ceil(totalExams / limit),
-        currentPage: parseInt(page, 10),
+        data: exams,
     });
 });
-
 // export const getSubmittedExams = asyncHandler(async (req, res, next) => {
 //   const { page = 1, size = 10, groupId, gradeId, status } = req.query;
 
