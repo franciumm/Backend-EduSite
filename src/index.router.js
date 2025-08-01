@@ -11,7 +11,7 @@ import search from "./Modules/Search/search.router.js"     // 2. Import the new 
 
 const bootstrape =  async (app,express)=>{
     const whitelist = ["http://127.0.0.1:5500"];
-    app.use(express.json());
+    app.use(express.json({limit :'10mb'}));
     
     app.use(cors());
   
