@@ -7,7 +7,7 @@ import studentModel from '../../../../DB/models/student.model.js';
 import mongoose from 'mongoose';
 import { _internalCreateAssignment } from '../../Assignments/controller/start.js';
 import { _internalCreateExam } from '../../Exams/controller/Start.js';
-import { _internalCreateMaterial } from '../../Materials/controller/All.js';
+import { createMaterial } from '../../Materials/controller/All.js';
 import { normalizeContentName } from '../../../utils/queryHelpers.js';
 import { pagination } from '../../../utils/pagination.js';
 
