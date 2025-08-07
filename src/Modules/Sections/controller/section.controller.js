@@ -101,28 +101,14 @@ export const createSection = asyncHandler(async (req, res, next) => {
 export const updateSectionLinks = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
     const { itemsToAdd, itemsToRemove } = req.body; 
-    const { user, isteacher } = req;
+    const {  isteacher } = req;
    
 
     // 1. Block non-teachers immediately.
     if (!isteacher) {
         return next(new Error("Forbidden: You do not have permission to create sections.", { cause: 403 }));
     }
- if (user.role === 'assistant') {
-     const ishe = await sectionModel.findById(sectionId );
-        const permittedGroupIds = user.permissions.sections?.map(id => id.toString()) || [];
 
-        // Check if the assistant has any section permissions at all.
-        if (permittedGroupIds.length === 0) {
-            return next(new Error("Forbidden: You are not authorized to create sections for any group.", { cause: 403 }));
-        }
-
-        // Check if every groupID in the request is included in the assistant's permissions.
-        const isAllowed =  permittedGroupIds.includes(ishe.createdBy);
-        if (!isAllowed) {
-            return next(new Error("Forbidden: You do not have permission to create a section for one or more of the selected groups.", { cause: 403 }));
-        }
-    }
     // 2. Handle Assistant Role: Check permissions before proceeding.
    
     const updateOperations = { $addToSet: {}, $pull: {} };

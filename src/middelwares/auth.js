@@ -4,8 +4,57 @@ import  { teacherModel }  from '../../DB/models/teacher.model.js'
 import { asyncHandler } from '../utils/erroHandling.js'
 import { generateToken, verifyToken } from '../utils/tokenFunctions.js'
 import studentModel from '../../DB/models/student.model.js'
+import { sectionModel } from '../../DB/models/section.model.js'; // Make sure this path is correct
 
 
+
+
+export const canEditSection = asyncHandler(async (req, res, next) => {
+    // 1. This action is for teachers only.
+    if (!req.isteacher) {
+        return next(new Error('Forbidden: This action is only available to teachers.', { cause: 403 }));
+    }
+
+    // 2. A main_teacher has universal edit access.
+    if (req.user.role === 'main_teacher') {
+        return next();
+    }
+
+    // 3. Logic for assistants.
+    if (req.user.role === 'assistant') {
+        // We need the section's ID from the request. It could be in params, body, or query.
+        const sectionId = req.params.sectionId || req.body.sectionId || req.query.sectionId;
+        if (!sectionId) {
+            return next(new Error('Bad Request: Section ID is required.', { cause: 400 }));
+        }
+
+        const section = await sectionModel.findById(sectionId).select('groupIds').lean();
+        if (!section) {
+            return next(new Error('Not Found: The specified section does not exist.', { cause: 404 }));
+        }
+
+        // Get the groups the assistant is allowed to manage.
+        const permittedGroupIds = req.user.permissions.groups?.map(id => id.toString()) || [];
+        if (permittedGroupIds.length === 0) {
+            return next(new Error('Forbidden: You are not assigned to manage any groups.', { cause: 403 }));
+        }
+
+        // Get the groups this section belongs to.
+        const sectionGroupIds = section.groupIds.map(id => id.toString());
+
+        // Check if there is any overlap between the assistant's permitted groups and the section's groups.
+        const hasPermission = sectionGroupIds.some(groupId => permittedGroupIds.includes(groupId));
+
+        if (hasPermission) {
+            return next(); // The assistant has permission for at least one of the section's groups.
+        } else {
+            return next(new Error('Forbidden: You do not have permission to edit this section as you do not manage its associated groups.', { cause: 403 }));
+        }
+    }
+
+    // Fallback deny.
+    return next(new Error('Forbidden: You are not authorized for this action.', { cause: 403 }));
+});
 
 export const canManageGroupStudents = asyncHandler(async (req, res, next) => {
     // 1. Check if the user is a teacher. isAuth must run first.

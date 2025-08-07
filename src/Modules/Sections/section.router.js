@@ -1,7 +1,7 @@
 // src/Modules/Sections/section.router.js
 
 import { Router } from "express";
-import { AdminAuth, isAuth } from "../../middelwares/auth.js";
+import { canEditSection, isAuth } from "../../middelwares/auth.js";
 import * as sectionController from "./controller/section.controller.js";
 import { multerCloudFunction } from "../../utils/MulterCloud.js";
 import { allowedExtensions } from "../../utils/allowedExtensions.js";
@@ -30,7 +30,7 @@ router.post(
 // Update a section by adding/removing links to its content
 router.put(
     "/:sectionId/update-links",
-    isAuth,
+    isAuth,canEditSection,
     sectionController.updateSectionLinks
 );
 
