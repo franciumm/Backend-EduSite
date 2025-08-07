@@ -209,26 +209,30 @@ export const viewSectionById = asyncHandler(async (req, res, next) => {
 });
 export const deleteSection = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
-     const isMainTeacher = req.user.role === 'main_teacher';
-    const isOwner = sectionModel.createdBy.equals(req.user._id);
-     if (!isMainTeacher && !isOwner) {
-        return next(new Error("You are not authorized to delete this assignment.", { cause: 403 }));
-    }
 
-    
-    // Using findOneAndDelete will correctly trigger the 'pre' hook we defined on the model
-    const section = await sectionModel.findOneAndDelete({
-        _id: sectionId,
-        createdBy: req.user._id
-    });
+    // 1. Fetch the section from the database first, selecting only the 'createdBy' field for the check.
+    const section = await sectionModel.findById(sectionId).select('createdBy');
 
+    // 2. Check if the section even exists.
     if (!section) {
-        return next(new Error("Section not found or you are not authorized to delete it.", { cause: 404 }));
+        return next(new Error("Section not found.", { cause: 404 }));
     }
 
-    res.status(200).json({ message: "Section container deleted successfully." });
-});
+    // 3. Perform authorization checks.
+    const isMainTeacher = req.user.role === 'main_teacher';
+    // Now it's safe to check the 'createdBy' field on the fetched document.
+    const isOwner = section.createdBy.equals(req.user._id); 
 
+    if (!isMainTeacher && !isOwner) {
+        // If the user is neither a main teacher nor the owner, deny access.
+        return next(new Error("Forbidden: You are not authorized to delete this section.", { cause: 403 }));
+    }
+
+    // 4. If authorization passes, delete the document.
+    await sectionModel.findByIdAndDelete(sectionId);
+
+    res.status(200).json({ message: "Section deleted successfully." });
+});
 export const getSections = asyncHandler(async (req, res, next) => {
     // 1. Initial setup from request
     const { page = 1, size = 10, groupId, gradeId } = req.query;
