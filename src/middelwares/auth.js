@@ -7,6 +7,41 @@ import studentModel from '../../DB/models/student.model.js'
 
 
 
+export const canManageGroupStudents = asyncHandler(async (req, res, next) => {
+    // 1. Check if the user is a teacher. isAuth must run first.
+    if (!req.isteacher) {
+        return next(new Error('Forbidden: This action is only available to teachers.', { cause: 403 }));
+    }
+
+    const { role, permissions } = req.user;
+    const { groupid } = req.body;
+
+    // 2. If the user is a main_teacher, they have unrestricted access.
+    if (role === 'main_teacher') {
+        return next();
+    }
+
+    // 3. If the user is an assistant, check their permissions.
+    if (role === 'assistant') {
+        if (!groupid) {
+            return next(new Error('Group ID is required in the request body.', { cause: 400 }));
+        }
+
+        // Get the assistant's permitted groups.
+        const permittedGroupIds = permissions.groups?.map(id => id.toString()) || [];
+        
+        // Check if the requested groupid is in their list of permitted groups.
+        if (permittedGroupIds.includes(groupid)) {
+            return next();
+        } else {
+            return next(new Error('Forbidden: You do not have permission to manage this group.', { cause: 403 }));
+        }
+    }
+
+    // 4. Fallback for any other case (should not be reached).
+    return next(new Error('Forbidden: You are not authorized to perform this action.', { cause: 403 }));
+});
+
 export const isAuth = asyncHandler(async (req, res, next) => {
     const { authorization } = req.headers
     if (!authorization || !authorization.startsWith('MonaEdu')) {

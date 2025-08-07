@@ -2,7 +2,7 @@ import { Router } from "express";
 import * as Start from "./controller/start.js";
 import * as Edit from "./controller/edit.js";
 import * as Search from "./controller/search.js";
-import { AdminAuth } from "../../middelwares/auth.js";
+import { AdminAuth, isAuth ,canManageGroupStudents} from "../../middelwares/auth.js";
 import { requestTimeout } from "../../middelwares/requestTimeout.js"; 
 const router = Router();
 
@@ -10,12 +10,12 @@ const router = Router();
 
 router.post('/create', AdminAuth, Start.create);
 
-router.get('/all', AdminAuth, Search.getall);
-router.get("/grades", AdminAuth, Search.Bygrade);
-router.get("/id", AdminAuth, Search.ById);
+router.get('/all', isAuth, Search.getall);
+router.get("/grades", isAuth, Search.Bygrade);
+router.get("/id", isAuth, Search.ById);
 
 router.delete("/deletegroup", AdminAuth, Edit.groupDelete);
-router.delete("/removestudent", AdminAuth, Edit.removeStudent);
-router.put("/addstudent", AdminAuth, Edit.addStudent);
+router.delete("/removestudent", isAuth,canManageGroupStudents, Edit.removeStudent);
+router.put("/addstudent", isAuth,canManageGroupStudents, Edit.addStudent);
 
 export default router;

@@ -25,6 +25,7 @@ const teacherSchema = new Schema(
       permissions: {
         assignments: [{ type: Schema.Types.ObjectId, ref: 'group' }],
         sections:    [{ type: Schema.Types.ObjectId, ref: 'group' }],
+        groups:      [{ type: Schema.Types.ObjectId, ref: 'group' }],
 
         exams:       [{ type: Schema.Types.ObjectId, ref: 'group' }],
         materials:   [{ type: Schema.Types.ObjectId, ref: 'group' }]
