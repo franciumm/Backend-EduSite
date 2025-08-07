@@ -20,9 +20,9 @@ export const downloadAssignment = asyncHandler(async (req, res, next) => {
     const { assignmentId } = req.query;
 
     // Use the now-imported authorizer to correctly check permissions.
-    const hasAccess = await canAccessContent({
-        user: req.user, // Pass the entire user object
-        isTeacher: req.isteacher.teacher, // Pass isTeacher as a separate property
+   const hasAccess = await canAccessContent({
+        user: req.user,
+         isTeacher: req.isteacher, 
         contentId: assignmentId,
         contentType: 'assignment'
     });
@@ -62,10 +62,17 @@ export const editAssignment = asyncHandler(async (req, res, next) => {
     }
 
     const assignment = await assignmentModel.findById(assignmentId);
+
     if (!assignment) {
         return next(new Error("Assignment not found.", { cause: 404 }));
     }
+ const isMainTeacher = req.user.role === 'main_teacher';
+    const isOwner = assignment.createdBy.equals(req.user._id);
 
+    if (!isMainTeacher && !isOwner) {
+        return next(new Error("You are not authorized to edit this assignment.", { cause: 403 }));
+    }
+    
     if (!assignment.createdBy.equals(teacherId)) {
         return next(new Error("You are not authorized to edit this assignment.", { cause: 403 }));
     }
@@ -121,16 +128,21 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
 
     
     let isAuthorized = false;
-    if (req.user._id.equals(submission.studentId._id)) {
+    if (!req.isteacher && req.user._id.equals(submission.studentId)) {
         isAuthorized = true;
-    } else if (req.isteacher.teacher) {
-        isAuthorized = true;
+    } else if (req.isteacher) {
+        isAuthorized = await canViewSubmissionsFor({
+            user: req.user,
+            isTeacher: true,
+            contentId: submission.assignmentId,
+            contentType: 'assignment'
+        });
+       
     }
 
     if (!isAuthorized) {
         return next(new Error("You are not authorized to download this submission.", { cause: 403 }));
     }
-    const { bucketName, key } = submission;
  res.status(200).json({
     submission
  })
@@ -138,6 +150,7 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
 
 export const markAssignment = asyncHandler(async (req, res, next) => {
   const { submissionId, score, notes, annotationData } = req.body;
+    if (!submissionId) return next(new Error("Submission ID is required.", { cause: 400 }));
 
   const submission = await SubassignmentModel.findById(submissionId).populate("assignmentId studentId");
   
@@ -148,6 +161,17 @@ export const markAssignment = asyncHandler(async (req, res, next) => {
   }
 
  
+if (!req.isteacher) return next(new Error("Forbidden.", { cause: 403 }));
+     const hasAccess = await canViewSubmissionsFor({
+        user: req.user,
+        isTeacher: true,
+        contentId: submission.assignmentId,
+        contentType: 'assignment'
+    });
+
+    if (!hasAccess) {
+        return next(new Error("You are not authorized to mark submissions for this assignment.", { cause: 403 }));
+    }
 
   try {
    
@@ -174,26 +198,19 @@ export const markAssignment = asyncHandler(async (req, res, next) => {
 
 export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, next) => {
     const { assignmentId } = req.body;
-    const teacherId = req.user._id;
-
-    if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
-        return next(new Error("A valid Assignment ID is required.", { cause: 400 }));
-    }
-
-    // FIX: Fetch the full document
-    const assignment = await assignmentModel.findById(assignmentId);
+    if (!req.isteacher) return next(new Error("Forbidden.", { cause: 403 }));
+    if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) return next(new Error("A valid Assignment ID is required.", { cause: 400 }));
+ const assignment = await assignmentModel.findById(assignmentId);
     if (!assignment) {
         return next(new Error("Assignment not found.", { cause: 404 }));
     }
-
-    // Authorization
-    if (!assignment.createdBy.equals(teacherId)) {
+    const isMainTeacher = req.user.role === 'main_teacher';
+    const isOwner = assignment.createdBy.equals(req.user._id);
+     if (!isMainTeacher && !isOwner) {
         return next(new Error("You are not authorized to delete this assignment.", { cause: 403 }));
     }
 
-    // FIX: This single line triggers the powerful cascading delete middleware you wrote.
-    await assignment.deleteOne();
-
+ await assignment.deleteOne();
     res.status(200).json({
         message: "Assignment and all related data deleted successfully.",
     });
@@ -206,23 +223,29 @@ export const deleteSubmittedAssignment = asyncHandler(async (req, res, next) => 
     if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
-
-    // FIX: Fetch the full document, not a .lean() object
-    const submission = await SubassignmentModel.findById(submissionId);
+const submission = await SubassignmentModel.findById(submissionId);
     if (!submission) {
         return next(new Error("Submission not found.", { cause: 404 }));
     }
 
-    // Authorization logic is fine, but we need the full document for it
-    const assignment = await assignmentModel.findById(submission.assignmentId).select('createdBy').lean();
-    let isAuthorized = user._id.equals(submission.studentId) || (isteacher?.teacher === true && assignment?.createdBy.equals(user._id));
     
+    let isAuthorized = false;
+    if (!req.isteacher && req.user._id.equals(submission.studentId)) {
+        isAuthorized = true; // Student owner
+    } else if (req.isteacher) {
+        // *** FIX: Use centralized helper for all teachers ***
+        isAuthorized = await canViewSubmissionsFor({
+            user: req.user,
+            isTeacher: true,
+            contentId: submission.assignmentId,
+            contentType: 'assignment'
+        });
+    }
+
     if (!isAuthorized) {
         return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
     }
     
-    // FIX: This single line replaces all manual S3 and DB cleanup.
-    // It triggers the pre('deleteOne') hook in the submittedAssignmentSchema.
     await submission.deleteOne();
 
     res.status(200).json({ message: "Submission deleted successfully." });

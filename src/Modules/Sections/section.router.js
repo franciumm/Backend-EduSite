@@ -10,8 +10,6 @@ const router = Router();
 
 // --- Routes without parameters ---
 
-// Get a paginated list of all sections (with optional filters)
-// Must be defined before any routes that use a parameter like '/:sectionId'
 router.get(
     "/",
     isAuth,
@@ -21,7 +19,7 @@ router.get(
 // Create a new, empty section container
 router.post(
     "/create",
-    AdminAuth,
+    isAuth,
     sectionController.createSection
 );
 
@@ -42,14 +40,14 @@ router.post(
 // Update a section by adding/removing links to its content
 router.put(
     "/:sectionId/update-links",
-    AdminAuth,
+    isAuth,
     sectionController.updateSectionLinks
 );
 
 // Delete a specific section container
 router.delete(
     "/:sectionId",
-    AdminAuth,
+    isAuth,
     sectionController.deleteSection
 );
 

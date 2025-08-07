@@ -19,20 +19,19 @@ export const getExams = asyncHandler(async (req, res, next) => {
     // Simplified to fetch all matching exams without pagination or status filters.
     if (isTeacher) {
         // Teachers must provide a filter to avoid fetching all exams in the system.
-        if (!gradeId && !groupId) {
-            return next(new Error("Query failed: A gradeId or groupId is required for teachers.", { cause: 400 }));
+         if (req.user.role === 'main_teacher') {
+            if (!gradeId && !groupId) {
+                return next(new Error("Query failed: A gradeId or groupId is required for the main teacher.", { cause: 400 }));
+            }
+            if (gradeId) query.grade = gradeId;
+            if (groupId) query.groupIds = groupId;
+        } else if (req.user.role === 'assistant') {
+            const groupIds = req.user.permissions.exams || [];
+            if (groupIds.length === 0) {
+                return res.status(200).json({ message: "No exams found.", data: [] });
+            }
+            query = { groupIds: { $in: groupIds } };
         }
-
-        // Build a simple query based on provided filters.
-        if (gradeId) {
-            // The field in the exam model is 'grade'.
-            query.grade = gradeId;
-        }
-        if (groupId) {
-            // Matches if the groupId is present in the groupIds array.
-            query.groupIds = groupId;
-        }
-
     // --- Student Logic ---
     // This logic is comprehensive, finding all exams a student is eligible for.
     } else {

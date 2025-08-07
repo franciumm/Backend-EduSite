@@ -12,47 +12,60 @@ const contentModels = {
     material: materialModel,
 };
 
+// --- START: MODIFIED canAccessContent ---
 export const canAccessContent = async ({ user, isTeacher, contentId, contentType }) => {
-    if (isTeacher) return true;
-
-    const student = await studentModel.findById(user._id).select('groupId').lean();
-    if (!student) return false;
-
-    const studentGroupId = student.groupId;
-
-    const [hasDirectAccess, hasSectionAccess] = await Promise.all([
-        checkDirectAccess({ user, contentId, contentType, studentGroupId }),
-        checkSectionAccess({ contentId, contentType, studentGroupId })
-    ]);
-
-    return hasDirectAccess || hasSectionAccess;
-};
-
-// =================================================================
-// --- PHASE 1: New Authorizer for Viewing Submissions ---
-// This function checks if a user is allowed to see the submissions for a specific assignment/exam.
-// =================================================================
-/**
- * @param {object} options
- * @param {object} options.user - The authenticated user object.
- * @param {boolean} options.isTeacher - Flag indicating if the user is a teacher.
- * @param {string} options.contentId - The ID of the parent assignment or exam.
- * @param {string} options.contentType - The type of content ('assignment' or 'exam').
- * @returns {Promise<boolean>} - True if the user can view submissions, false otherwise.
- */
-export const canViewSubmissionsFor = async ({ user, isTeacher, contentId, contentType }) => {
-    // Rule 1: A teacher can view submissions for content they created.
-    if (isTeacher) {
-        const Model = contentModels[contentType];
-        const content = await Model.findOne({ _id: contentId, createdBy: user._id }).select('_id').lean();
-        return !!content;
+    // 1. Main teacher has universal access.
+    if (isTeacher && user.role === 'main_teacher') {
+        return true;
     }
 
-    // Rule 2: A student can view submissions for content they have access to.
-    // This correctly re-uses our existing `canAccessContent` logic, preventing duplication.
-    return await canAccessContent({ user, isTeacher, contentId, contentType });
-};
+    // 2. Assistant access logic.
+    if (isTeacher && user.role === 'assistant') {
+        const Model = contentModels[contentType];
+        const content = await Model.findById(contentId).select('groupIds').lean();
+        if (!content) return false;
 
+        // Get the assistant's permitted groups for this content type.
+        const permittedGroupIds = user.permissions[contentType + 's']?.map(id => id.toString()) || [];
+        if (permittedGroupIds.length === 0) return false;
+
+        // Check if there is an overlap between the content's groups and the assistant's permitted groups.
+        const contentGroupIds = content.groupIds.map(id => id.toString());
+        return contentGroupIds.some(groupId => permittedGroupIds.includes(groupId));
+    }
+
+    // 3. Student access logic (remains unchanged).
+    if (!isTeacher) {
+        const student = await studentModel.findById(user._id).select('groupId').lean();
+        if (!student || !student.groupId) return false;
+
+        const [hasDirectAccess, hasSectionAccess] = await Promise.all([
+            checkDirectAccess({ user, contentId, contentType, studentGroupId: student.groupId }),
+            checkSectionAccess({ contentId, contentType, studentGroupId: student.groupId })
+        ]);
+        return hasDirectAccess || hasSectionAccess;
+    }
+
+    return false; // Default deny
+};
+// --- END: MODIFIED canAccessContent ---
+
+export const canViewSubmissionsFor = async ({ user, isTeacher, contentId, contentType }) => {
+    // For assistants, we must verify they created the content OR have permission.
+    if (isTeacher && user.role === 'main_teacher') {
+        return true;
+    }
+    if (isTeacher && user.role === 'assistant') {
+        return canAccessContent({ user, isTeacher, contentId, contentType });
+    } 
+    if (!isTeacher) {
+        return canAccessContent({ user, isTeacher, contentId, contentType });
+    }
+
+    
+
+    return false;
+};
 
 // --- Private Helpers (Unchanged) ---
 const checkDirectAccess = async ({ user, contentId, contentType, studentGroupId }) => {

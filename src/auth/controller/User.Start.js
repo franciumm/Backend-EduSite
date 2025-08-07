@@ -266,28 +266,32 @@ export const getUnassignedByGrade = asyncHandler(async (req, res, next) => {
   });
 });
 export const AdminLogin = asyncHandler(async(req,res,next)=>{
-    const {email , password}= req.body;
-    const user = await teacherModel.findOne({email});
- 
-    
-    if(!user){
-return next(new Error ('The Teacher Doesn`t exist try to signUp',{cause : 404}))
+    const { email, password } = req.body;
+    const user = await teacherModel.findOne({ email });
+
+    if (!user) {
+        return next(new Error('Invalid email or password.', { cause: 404 }));
     }
-    const isPassMatch = bycrypt.compareSync(password , user.password) 
-    if(!isPassMatch){
-        return next(Error('The Password is wrong ', {cause :401 }))
+
+    const isPassMatch = bycrypt.compareSync(password, user.password);
+    if (!isPassMatch) {
+        return next(new Error('Invalid email or password.', { cause: 401 }));
     }
-    const token =generateToken({payload : {
-        email ,
-        password , 
+
+    // Create a rich payload that includes the user's role and permissions
+    const tokenPayload = {
         _id: user._id,
-        
-    },
-signature:process.env.SIGN_IN_TOKEN_SECRET,
+        email: user.email,
+        role: user.role,
+        permissions: user.permissions // Include permissions in the token
+    };
 
-});
+    const token = generateToken({
+        payload: tokenPayload,
+        signature: process.env.SIGN_IN_TOKEN_SECRET,
+    });
 
-    res.status(200).json({token});
+    res.status(200).json({  token });
 
 })
 

@@ -69,6 +69,29 @@ export const _internalCreateSection = async ({ name, description, gradeId, group
     return section;
 };
 export const createSection = asyncHandler(async (req, res, next) => {
+          const { user, isteacher } = req;
+    const { groupIds } = req.body;
+
+    // 1. Block non-teachers immediately.
+    if (!isteacher) {
+        return next(new Error("Forbidden: You do not have permission to create sections.", { cause: 403 }));
+    }
+
+    // 2. Handle Assistant Role: Check permissions before proceeding.
+    if (user.role === 'assistant') {
+        const permittedGroupIds = user.permissions.sections?.map(id => id.toString()) || [];
+
+        // Check if the assistant has any section permissions at all.
+        if (permittedGroupIds.length === 0) {
+            return next(new Error("Forbidden: You are not authorized to create sections for any group.", { cause: 403 }));
+        }
+
+        // Check if every groupID in the request is included in the assistant's permissions.
+        const isAllowed = groupIds.every(reqGroupId => permittedGroupIds.includes(reqGroupId));
+        if (!isAllowed) {
+            return next(new Error("Forbidden: You do not have permission to create a section for one or more of the selected groups.", { cause: 403 }));
+        }
+    }
     const newSection = await _internalCreateSection({
         ...req.body,
         teacherId: req.user._id,
@@ -78,7 +101,30 @@ export const createSection = asyncHandler(async (req, res, next) => {
 export const updateSectionLinks = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
     const { itemsToAdd, itemsToRemove } = req.body; 
+    const { user, isteacher } = req;
+   
 
+    // 1. Block non-teachers immediately.
+    if (!isteacher) {
+        return next(new Error("Forbidden: You do not have permission to create sections.", { cause: 403 }));
+    }
+ if (user.role === 'assistant') {
+     const ishe = await sectionModel.findById(sectionId );
+        const permittedGroupIds = user.permissions.sections?.map(id => id.toString()) || [];
+
+        // Check if the assistant has any section permissions at all.
+        if (permittedGroupIds.length === 0) {
+            return next(new Error("Forbidden: You are not authorized to create sections for any group.", { cause: 403 }));
+        }
+
+        // Check if every groupID in the request is included in the assistant's permissions.
+        const isAllowed =  permittedGroupIds.includes(ishe.createdBy);
+        if (!isAllowed) {
+            return next(new Error("Forbidden: You do not have permission to create a section for one or more of the selected groups.", { cause: 403 }));
+        }
+    }
+    // 2. Handle Assistant Role: Check permissions before proceeding.
+   
     const updateOperations = { $addToSet: {}, $pull: {} };
     function capitalize(str) { return str.charAt(0).toUpperCase() + str.slice(1); }
 
@@ -127,13 +173,28 @@ export const viewSectionById = asyncHandler(async (req, res, next) => {
     const sectionForAuth = await sectionModel.findById(sectionId).select('groupIds gradeId').lean();
     if (!sectionForAuth) {
         return next(new Error("Section not found", { cause: 404 }));
-    }
-    if (req.isteacher.teacher === false) {
+    } 
+    if (user.role === 'assistant') {
+     const ishe = await sectionModel.findById(sectionId );
+        const permittedGroupIds = user.permissions.sections?.map(id => id.toString()) || [];
+
+        // Check if the assistant has any section permissions at all.
+        if (permittedGroupIds.length === 0) {
+            return next(new Error("Forbidden: You are not authorized to create sections for any group.", { cause: 403 }));
+        }
+
+        // Check if every groupID in the request is included in the assistant's permissions.
+        const isAllowed =  permittedGroupIds.includes(ishe.createdBy);
+        if (!isAllowed) {
+            return next(new Error("Forbidden: You do not have permission to create a section for one or more of the selected groups.", { cause: 403 }));
+        }
+    }else if (req.isteacher.teacher === false) {
         const student = await studentModel.findById(req.user._id).select('groupId').lean();
         if (!student?.groupId || !sectionForAuth.groupIds.map(id => id.toString()).includes(student.groupId.toString())) {
             return next(new Error("You are not authorized to view this section.", { cause: 403 }));
         }
     }
+
     const aggregation = [
         { $match: { _id: new mongoose.Types.ObjectId(sectionId) } },
         { $lookup: { from: 'assignments', localField: 'linkedAssignments', foreignField: '_id', as: 'assignments' } },
@@ -162,6 +223,12 @@ export const viewSectionById = asyncHandler(async (req, res, next) => {
 });
 export const deleteSection = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
+     const isMainTeacher = req.user.role === 'main_teacher';
+    const isOwner = sectionModel.createdBy.equals(req.user._id);
+     if (!isMainTeacher && !isOwner) {
+        return next(new Error("You are not authorized to delete this assignment.", { cause: 403 }));
+    }
+
     
     // Using findOneAndDelete will correctly trigger the 'pre' hook we defined on the model
     const section = await sectionModel.findOneAndDelete({
@@ -175,82 +242,7 @@ export const deleteSection = asyncHandler(async (req, res, next) => {
 
     res.status(200).json({ message: "Section container deleted successfully." });
 });
-export const createAndLinkContent = asyncHandler(async (req, res, next) => {
-    const { sectionId } = req.params;
-    const { type, data } = req.body;
-    
-    // Validation for type and data remains the same
-    if (!type || !['assignment', 'exam', 'material', 'section'].includes(type)) { // Added 'section' to valid types
-        return next(new Error("A valid 'type' (assignment, exam, material, section) is required.", { cause: 400 }));
-    }
-    if (!data) {
-        return next(new Error("A 'data' object with content details is required.", { cause: 400 }));
-    }
 
-    let contentData;
-    try {
-        contentData = JSON.parse(data);
-    } catch (error) {
-        return next(new Error("The 'data' field must be a valid JSON string.", { cause: 400 }));
-    }
-    
-    const section = await sectionModel.findById(sectionId);
-    if (!section) {
-        return next(new Error("The parent section was not found.", { cause: 404 }));
-    }
-    
-    // Default the new content's grade and groups to the parent section's settings for consistency
-    contentData.gradeId = contentData.gradeId || section.gradeId;
-    contentData.groupIds = contentData.groupIds || section.groupIds;
-    contentData.teacherId = req.user._id;
-
-    // Handle file uploads based on type
-    if (type === 'material') {
-        if (!req.files?.materialFiles || req.files.materialFiles.length === 0) return next(new Error("At least one file is required for materials.", { cause: 400 }));
-        contentData.files = req.files.materialFiles;
-    } else if (type === 'assignment' || type === 'exam') {
-        if (!req.files?.[`${type}File`] || req.files[`${type}File`].length === 0) return next(new Error(`A file is required for an ${type}.`, { cause: 400 }));
-        contentData.file = req.files[`${type}File`][0];
-    }
-    // Note: Creating a section does not require a file upload.
-
-    let createdContent;
-    try {
-        switch (type) {
-            case 'material':
-                createdContent = await _internalCreateMaterial(contentData);
-                break;
-            case 'assignment':
-                createdContent = await _internalCreateAssignment(contentData);
-                break;
-            case 'exam':
-                contentData.Name = contentData.name;
-                contentData.startdate = contentData.startDate;
-                contentData.enddate = contentData.endDate;
-                createdContent = await _internalCreateExam(contentData);
-                break;
-            // --- ADDED THIS CASE ---
-            case 'section':
-                createdContent = await _internalCreateSection(contentData);
-                break;
-            default:
-                return next(new Error("Invalid content type.", { cause: 400 }));
-        }
-    } catch (creationError) {
-        return next(creationError);
-    }
-
-    // Link the new content to the parent section
-    const linkFieldName = `linked${capitalize(type)}s`;
-    section[linkFieldName].push(createdContent._id);
-    await section.save();
-
-    res.status(201).json({
-        message: `${type} created and linked to the section successfully.`,
-        createdContent,
-        updatedSection: section
-    });
-});
 export const getSections = asyncHandler(async (req, res, next) => {
     // 1. Initial setup from request
     const { page = 1, size = 10, groupId, gradeId } = req.query;
@@ -264,17 +256,26 @@ export const getSections = asyncHandler(async (req, res, next) => {
 
     // 2. Teacher Logic: Broad filtering capabilities
     if (isTeacher) {
-        if (gradeId) {
-             if (!mongoose.Types.ObjectId.isValid(gradeId)) {
-                return next(new Error("A valid Grade ID is required.", { cause: 400 }));
+    // --- START: NEW ASSISTANT LOGIC ---
+        if (user.role === 'main_teacher') {
+            // Main teacher logic is unchanged
+            if (gradeId) {
+                if (!mongoose.Types.ObjectId.isValid(gradeId)) return next(new Error("A valid Grade ID is required.", { cause: 400 }));
+                query.gradeId = gradeId;
             }
-            query.gradeId = gradeId;
-        }
-        if (groupId) {
-            if (!mongoose.Types.ObjectId.isValid(groupId)) {
-                return next(new Error("A valid Group ID is required.", { cause: 400 }));
+            if (groupId) {
+                if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("A valid Group ID is required.", { cause: 400 }));
+                query.groupIds = groupId;
             }
-            query.groupIds = groupId;
+        } else if (user.role === 'assistant') {
+            // An assistant sees a section if it's assigned to any group they have *any* permissions for.
+            const { assignments = [], exams = [], materials = [] } = user.permissions;
+            const allPermittedGroups = [...new Set([...assignments, ...exams, ...materials])]; // Get unique group IDs
+
+            if (allPermittedGroups.length === 0) {
+                return res.status(200).json({ message: "No sections found.", data: [], total: 0, totalPages: 0, currentPage: parseInt(page, 10) });
+            }
+            query = { groupIds: { $in: allPermittedGroups } };
         }
 
         [sections, totalSections] = await Promise.all([

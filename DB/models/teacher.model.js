@@ -16,6 +16,18 @@ const teacherSchema = new Schema(
       password: {
         type: String,
         required: [true, 'Password must be typed'],
+      },
+       role: {
+        type: String,
+        enum: ['main_teacher', 'assistant'],
+        default: 'assistant'
+      },
+      permissions: {
+        assignments: [{ type: Schema.Types.ObjectId, ref: 'group' }],
+        sections:    [{ type: Schema.Types.ObjectId, ref: 'group' }],
+
+        exams:       [{ type: Schema.Types.ObjectId, ref: 'group' }],
+        materials:   [{ type: Schema.Types.ObjectId, ref: 'group' }]
       }
     },
     { timestamps: true }

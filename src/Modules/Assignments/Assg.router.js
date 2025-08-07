@@ -9,15 +9,15 @@ import { allowedExtensions } from "../../utils/allowedExtensions.js";
 
 const router = Router();
 
-router.delete("/delete", AdminAuth, Edit.deleteAssignmentWithSubmissions);
+router.delete("/delete", isAuth, Edit.deleteAssignmentWithSubmissions);
 router.delete("/submission/delete", isAuth, Edit.deleteSubmittedAssignment);
 
 
-router.post ('/create',AdminAuth,multerCloudFunction(allowedExtensions.Files).single('file'),Start.CreateAssignment);
+router.post ('/create',isAuth,multerCloudFunction(allowedExtensions.Files).single('file'),Start.CreateAssignment);
 router.post( "/submit", isAuth,  multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitAssignment);
-router.put("/edit", AdminAuth, multerCloudFunction(allowedExtensions.Files).single('file'), Edit.editAssignment);
+router.put("/edit", isAuth, multerCloudFunction(allowedExtensions.Files).single('file'), Edit.editAssignment);
 
-router.put("/mark", AdminAuth,  Edit.markAssignment);
+router.put("/mark", isAuth,  Edit.markAssignment);
 
 router.get("/submissions/View/:assignmentId", isAuth, Get.ViewSub);
 

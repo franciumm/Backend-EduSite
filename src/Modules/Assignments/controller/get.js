@@ -15,43 +15,44 @@ export const GetAllByGroup = asyncHandler(async (req, res, next) => {
     const { gradeId, groupId } = req.query;
     const query = {};
 
-    // --- Student Logic ---
-    if (req.isteacher.teacher === false) {
-        const studentGradeId = req.user.gradeId?.toString();
+    
+   if (req.isteacher) { // Teacher Logic
+        const { user } = req;
+        if (user.role === 'main_teacher') {
+            // Main teacher has unrestricted access, build query from params.
+            if (!gradeId && !groupId) return next(new Error("Query failed: A gradeId or groupId is required.", { cause: 400 }));
+            if (gradeId) query.gradeId = gradeId;
+            if (groupId) query.groupIds = groupId;
+        } else if (user.role === 'assistant') {
+            // Assistant MUST query by a group they have permission for.
+            if (!groupId) return next(new Error("Assistants must query by a specific groupId.", { cause: 400 }));
+
+            const permittedGroupIds = new Set(user.permissions.assignments.map(id => id.toString()));
+            if (!permittedGroupIds.has(groupId)) {
+                return next(new Error("Forbidden: You do not have permission to view assignments for this group.", { cause: 403 }));
+            }
+            // If permitted, proceed with the query.
+            query.groupIds = groupId;
+            if (gradeId) query.gradeId = gradeId;
+        }
+    }  else {
+         const studentGradeId = req.user.gradeId?.toString();
         const studentGroupId = req.user.groupId?.toString();
 
-        // A student must be enrolled in a grade to see any assignments.
         if (!studentGradeId) {
             return next(new Error("Unauthorized: You are not associated with any grade.", { cause: 403 }));
         }
-
-        // Authorization check: If a gradeId is specified in the query, it MUST match the student's own gradeId.
-        if (gradeId && gradeId !== studentGradeId) {
-            return next(new Error("Unauthorized: You can only view assignments for your own grade.", { cause: 403 }));
-        }
-
-        // Securely scope the database query to the student's specific grade.
+        // Enforce student's own grade
         query.gradeId = studentGradeId;
 
-        // If the student belongs to a group, also filter by their group.
-        // The assignmentModel stores group affiliations in an array called 'groupIds'.
+        // If a groupId is passed in query, it MUST match the student's own group.
+        if (groupId && groupId !== studentGroupId) {
+            return next(new Error("Unauthorized: You can only view assignments for your own group.", { cause: 403 }));
+        }
+        
+        // If no groupId is passed, or if it matches, filter by the student's group.
         if (studentGroupId) {
             query.groupIds = studentGroupId;
-        }
-
-    // --- Teacher Logic ---
-    } else {
-        // Teachers must provide at least one filter to prevent fetching all records.
-        if (!gradeId && !groupId) {
-            return next(new Error("Query failed: A gradeId or groupId is required for teachers.", { cause: 400 }));
-        }
-
-        // Build query based on provided filters.
-        if (gradeId) {
-            query.gradeId = gradeId;
-        }
-        if (groupId) {
-            query.groupIds = groupId;
         }
     }
 
@@ -159,6 +160,31 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
     const skip = (pageNum - 1) * limit;
 
     const filter = {};
+    if (req.isteacher) {
+        const { user } = req;
+        let hasAccess = false;
+        // If an assignmentId is provided, it's the most specific check.
+        if (assignmentId) {
+            hasAccess = await canViewSubmissionsFor({ user, isTeacher: true, contentId: assignmentId, contentType: 'assignment' });
+        } else if (groupId) {
+            // If only a groupId is provided, check if the assistant has permission for that group.
+            if (user.role === 'main_teacher') {
+                hasAccess = true;
+            } else if (user.role === 'assistant') {
+                const permittedGroupIds = new Set(user.permissions.assignments.map(id => id.toString()));
+                if (permittedGroupIds.has(groupId)) {
+                    hasAccess = true;
+                }
+            }
+        } else if (!studentId) { // Allow teachers to query by studentId without other filters
+             return next(new Error("A groupId or assignmentId is required for this query.", { cause: 400 }));
+        }
+        if (!hasAccess && !studentId) { // if hasAccess is false, studentId must be present to continue
+            return next(new Error("Forbidden: You are not authorized to view submissions for this content.", { cause: 403 }));
+        }
+    } else { // Students can only query their own submissions.
+         studentId = req.user._id.toString();
+    }
     // ... (The dynamic filter construction from the previous answer remains the same) ...
     if (groupId) {
         if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("Invalid Group ID format.", { cause: 400 }));
@@ -343,12 +369,17 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
     let baseMatch = {};
 
     // --- Main Logic Branch: Check if the user is a teacher or a student ---
-    if (isteacher.teacher === true) {
-        // --- Teacher Logic ---
-        // A teacher sees all assignments they have created.
-        baseMatch = { createdBy: user._id };
-
-    } else {
+     if (isteacher) { // Use isteacher boolean directly
+          if (user.role === 'main_teacher') {
+            baseMatch = {};
+        } else if (user.role === 'assistant') {
+            const groupIds = user.permissions.assignments || [];
+            if (groupIds.length === 0) {
+                return res.status(200).json({ message: "No assignments found.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
+            }
+            baseMatch = { groupIds: { $in: groupIds } };
+        }
+    }  else {
         // --- Student Logic ---
         // 1. Find the student to determine their enrollment details.
         const student = await studentModel.findById(user._id).select('groupId').lean();
@@ -420,34 +451,30 @@ export const ViewSub = asyncHandler(async (req, res, next) => {
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
 
-    const submission = await SubassignmentModel.findById(SubassignmentId);
+    const submission = await SubassignmentModel.findById(SubassignmentId).lean();
     if (!submission) {
         return next(new Error("Submission not found", { cause: 404 }));
     }
 
     let isAuthorized = false;
-    // Rule 1: The student who owns the submission can view it.
-    if (req.user._id.equals(submission.studentId)) {
-        isAuthorized = true;
-    }
-    // Rule 2: A teacher can view any submission for an assignment they created.
-    else if (req.isteacher.teacher === true) {
-        const originalAssignment = await assignmentModel.findById(submission.assignmentId);
-        if (originalAssignment ) {
-            isAuthorized = true;
-        }
+    if (!req.isteacher && req.user._id.equals(submission.studentId)) {
+        isAuthorized = true; // Student owns this submission.
+    } else if (req.isteacher) {
+        // Use the centralized helper for teachers.
+        isAuthorized = await canViewSubmissionsFor({
+            user: req.user,
+            isTeacher: true,
+            contentId: submission.assignmentId,
+            contentType: 'assignment'
+        });
     }
 
     if (!isAuthorized) {
         return next(new Error("You are not authorized to view this submission.", { cause: 403 }));
     }
    
-   
     res.status(200).json({
         message: "Submission is ready for viewing",
         submission,
     });
 });
-
-
-

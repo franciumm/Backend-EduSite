@@ -6,95 +6,52 @@ import { generateToken, verifyToken } from '../utils/tokenFunctions.js'
 import studentModel from '../../DB/models/student.model.js'
 
 
-export const isAuth = asyncHandler(async (req, res, next) => {
-    try {
-    
-    const { authorization } = req.headers
-    if (!authorization ) {
-        return next(new Error('Please login first', { cause: 400 }))
-    }
 
-    if (!authorization.startsWith('MonaEdu')) {
-        return next(new Error('invalid token prefix', { cause: 400 }))
+export const isAuth = asyncHandler(async (req, res, next) => {
+    const { authorization } = req.headers
+    if (!authorization || !authorization.startsWith('MonaEdu')) {
+        return next(new Error('Please login first', { cause: 401 }))
     }
 
     const splitedToken = authorization.split(' ')[1]
-    
+    if (!splitedToken) {
+        return next(new Error('Token is missing', { cause: 401 }));
+    }
 
     try {
         const decodedData = verifyToken({
-        token: splitedToken,
-        signature: process.env.SIGN_IN_TOKEN_SECRET,
-        })
+            token: splitedToken,
+            signature: process.env.SIGN_IN_TOKEN_SECRET,
+        });
 
-            
-    if (!mongoose.Types.ObjectId.isValid(decodedData._id)) {
-        return next(new Error('invalid UserId', { cause: 400 }))
-    }
-    
-  
-        var findUser = await studentModel.findById(
-        decodedData._id,
-        'email userName gradeId groupId',
-        );
-        req.isteacher = {teacher : false} ;
-        if (!findUser) {
-           
-           
-            findUser = await teacherModel.findById(
-                decodedData._id,
-                'email',
-                );
-  
-    
-         
-                
-        if(!findUser){
-            return next(new Error('Please SignUp', { cause: 400 }))
+        if (!mongoose.Types.ObjectId.isValid(decodedData._id)) {
+            return next(new Error('Invalid user ID in token', { cause: 400 }))
         }
-        req.isteacher = {teacher : true} ;
+
+        // Try to find a student first
+        let findUser = await studentModel.findById(decodedData._id, 'email userName gradeId groupId').lean();
+        req.isteacher = false;
+
+        if (!findUser) {
+            // If not a student, try to find a teacher/assistant
+            findUser = await teacherModel.findById(decodedData._id, 'email name role permissions').lean();
+                
+            if(!findUser){
+                return next(new Error('User not found. Please sign up.', { cause: 404 }))
+            }
+            req.isteacher = true;
         }
 
         req.user = findUser;
-        next()
+        next();
     } catch (error) {
-        // token  => search in db
-        if (error == 'TokenExpiredError: jwt expired') {
-          // refresh token
-        const user = await UserModel.findOne({ token: splitedToken })
-        if (!user) {
-            return next(new Error('Wrong token', { cause: 400 }))
+        if (error.name === 'TokenExpiredError') {
+            return next(new Error('Your session has expired. Please log in again.', { cause: 401 }));
         }
-          // generate new token
-        const userToken = generateToken({
-            payload: {
-            email: user.email,
-            _id: user._id,
-            
-            },
-            signature: process.env.SIGN_IN_TOKEN_SECRET,
-            expiresIn: '2h',
-        })
-
-        if (!userToken) {
-            return next(
-            new Error('token generation fail, payload canot be empty', {
-                cause: 400,
-            }),
-            )
-        }
-
-        user.token = userToken
-        await user.save()
-        return res.status(200).json({ message: 'Token refreshed', userToken })
-        }
-        return next(new Error('invalid token', { cause: 500 }))
+        // For other JWT errors (e.g., invalid signature)
+        return next(new Error('Invalid token. Please log in again.', { cause: 401 }));
     }
-    } catch (error) {
-    console.log(error)
-    next(new Error('catch error in auth', { cause: 500 }))
-    }
-})
+});
 
 
 
@@ -123,9 +80,12 @@ export const AdminAuth = asyncHandler(async (req, res, next) => {
         }
 
         // 2. Check if the user still exists in the database
-        const teacher = await teacherModel.findById(decoded._id).select('email userName role');
+        const teacher = await teacherModel.findById(decoded._id).select('email role');
         if (!teacher) {
             return next(new Error('User not found. Please sign up or log in again.', { cause: 404 }));
+        }
+        if (teacher.role !== 'main_teacher') {
+          return next(new Error('Forbidden: You do not have sufficient permissions to perform this action.', { cause: 403 }));
         }
 
         // 3. (Optional but Recommended) Check if the user has the 'Admin' role
