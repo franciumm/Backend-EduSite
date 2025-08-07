@@ -25,17 +25,7 @@ router.post(
 
 // --- Routes with parameters ---
 
-// Create content (e.g., assignment, exam) and link it to a specific section
-router.post(
-    "/:sectionId/create-and-link",
-    AdminAuth,
-    multerCloudFunction(allowedExtensions.Files).fields([
-        { name: 'assignmentFile', maxCount: 15 },
-        { name: 'examFile', maxCount: 15 },
-        { name: 'materialFiles', maxCount: 15 }
-    ]),
-    sectionController.createAndLinkContent
-);
+
 
 // Update a section by adding/removing links to its content
 router.put(
