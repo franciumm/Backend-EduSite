@@ -535,7 +535,11 @@ export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
         firstName: "$studentInfo.firstName",
         lastName: "$studentInfo.lastName",
         status: { $cond: { if: "$submission", then: "submitted", else: "not submitted" } },
-        submittedAt: "$submission.createdAt", // Will be null if no submission
+        submittedAt: "$submission.createdAt",
+        teacherFeedback : "studentInfo.teacherFeedback" ,
+                notes : "studentInfo.notes" ,
+
+        // Will be null if no submission
         score: "$submission.score", // Include score
       },
     },
