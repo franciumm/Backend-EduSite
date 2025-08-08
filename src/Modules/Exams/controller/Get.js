@@ -192,7 +192,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
 export const getSubmittedExams = asyncHandler(async (req, res, next) => {
     const { groupId, examId, studentId, gradeId, status, page = 1, size = 10 } = req.query;
     const { user, isteacher } = req;
-    const isTeacher = isteacher === true;
+    const isTeacher = isteacher ;
     const uaeTimeZone = 'Asia/Dubai';
     const currentDate = toZonedTime(new Date(), uaeTimeZone);
 
@@ -268,7 +268,7 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
             const group = groupId ? await groupModel.findById(groupId).select('groupname').lean() : null;
 
             return res.status(200).json({
-                message: "Submission status for exam fetched successfully.",
+                message: "Student submission statuses fetched successfully.",
                 examName: exam.Name,
                 groupName: group?.groupname || "Multiple Groups",
                 total,
