@@ -325,7 +325,7 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
             total: totalSubmissions,
             totalPages: Math.ceil(totalSubmissions / limit),
             currentPage: pageNum,
-            data: submissions
+             submissions
         });
     }
 
