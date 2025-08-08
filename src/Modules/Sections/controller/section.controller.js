@@ -237,7 +237,7 @@ export const getSections = asyncHandler(async (req, res, next) => {
     // 1. Initial setup from request
     const { page = 1, size = 10, groupId, gradeId } = req.query;
     const { user, isteacher } = req;
-    const isTeacher = isteacher.teacher;
+    const isTeacher = isteacher;
     const { limit, skip } = pagination({ page, size });
 
     let query = {};

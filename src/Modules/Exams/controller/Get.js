@@ -192,7 +192,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
 export const getSubmittedExams = asyncHandler(async (req, res, next) => {
     const { groupId, examId, studentId, gradeId, status, page = 1, size = 10 } = req.query;
     const { user, isteacher } = req;
-    const isTeacher = isteacher?.teacher === true;
+    const isTeacher = isteacher === true;
     const uaeTimeZone = 'Asia/Dubai';
     const currentDate = toZonedTime(new Date(), uaeTimeZone);
 
@@ -202,6 +202,7 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
 
     //================================ Teacher Logic ================================//
     if (isTeacher) {
+      
         // --- Path A: "Group Status View" - Get status for every student in a group for a specific exam ---
         // This is triggered ONLY when a groupId and examId are provided together.
         if (groupId && examId && !studentId) {
