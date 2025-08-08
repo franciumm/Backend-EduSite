@@ -392,7 +392,7 @@ if (groupId) {
         { $project: {
           annotationData: 1,
             _id: 1, createdAt: 1, updatedAt: 1, score: 1, notes: 1, fileBucket: 1, fileKey: 1, filePath: 1, teacherFeedback: 1,
-            examId: { _id: '$examData._id', notes: '$examData.notes',Feedback : '$examData.teacherFeedback',Name: '$examData.Name', startdate: '$examData.startdate', enddate: '$examData.enddate' },
+            examId: { _id: '$examData._id',Name: '$examData.Name', startdate: '$examData.startdate', enddate: '$examData.enddate' },
         }}
     ];
     const submissions = await SubexamModel.aggregate(dataPipeline);
