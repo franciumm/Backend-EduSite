@@ -7,7 +7,7 @@ import { pagination } from "../../../utils/pagination.js";
 import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
-import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
+import { toZonedTime } from 'date-fns-tz';
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
 
 export const getExams = asyncHandler(async (req, res, next) => {
@@ -206,6 +206,13 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
         // --- Path A: "Group Status View" - Get status for every student in a group for a specific exam ---
         // This is triggered ONLY when a groupId and examId are provided together.
         if (groupId && examId && !studentId) {
+
+          if (user.role === 'assistant') {
+                const permittedGroupIds = user.permissions.exams?.map(id => id.toString()) || [];
+                if (!permittedGroupIds.includes(groupId)) {
+                    return next(new Error("Forbidden: You do not have permission to access this group's submissions.", { cause: 403 }));
+                }
+            }
             if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("Invalid Group ID format.", { cause: 400 }));
             if (!mongoose.Types.ObjectId.isValid(examId)) return next(new Error("Invalid Exam ID format.", { cause: 400 }));
 
@@ -288,6 +295,24 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
 
         // --- Path B: All Other Teacher Queries (Unchanged) ---
         const matchStage = {};
+        
+        if (user.role === 'assistant') {
+            const permittedGroupIds = user.permissions.exams?.map(id => id.toString()) || [];
+            const permittedGroupObjectIds = user.permissions.exams || [];
+
+            if (permittedGroupIds.length === 0) {
+                return res.status(200).json({ message: "You have no permissions to view any submissions.", total: 0, totalPages: 1, currentPage: pageNum, data: [] });
+            }
+if (groupId) {
+                // If a specific group is requested, check if the assistant has permission for it.
+                if (!permittedGroupIds.includes(groupId)) {
+                    return next(new Error("Forbidden: You do not have permission to access this group's submissions.", { cause: 403 }));
+                }
+            } else {
+                // If no specific group is requested, scope the query to all permitted groups.
+                matchStage["examData.groupIds"] = { $in: permittedGroupObjectIds };
+            }
+        }
         if (groupId && mongoose.Types.ObjectId.isValid(groupId)) {
             matchStage["examData.groupIds"] = new mongoose.Types.ObjectId(groupId);
         }

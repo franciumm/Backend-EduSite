@@ -26,7 +26,7 @@ const authorizeExamDownload = asyncHandler(async (req, res, next) => {
 
     const hasAccess = await canAccessContent({
         user: req.user,
-        isTeacher: req.isteacher.teacher,
+        isTeacher: req.isteacher,
         contentId: examId,
         contentType: 'exam'
     });
@@ -160,7 +160,7 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
     }
 
     // --- Phase 3: Robust Authorization (Implementing Your Business Rule) ---
-    if (isteacher?.teacher !== true) {
+    if (isteacher !== true) {
         // If the user is NOT a teacher, they must be the owner of the submission.
         if (!submission.studentId.equals(user._id)) {
             return next(new Error("You are not authorized to access this submission.", { cause: 403 }));
@@ -410,7 +410,7 @@ export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
     // --- Phase 3: Authorization (Correct and unchanged) ---
     // This logic works perfectly on the full document.
     let isAuthorized = false;
-    if (isteacher?.teacher === true) {
+    if (isteacher === true) {
         isAuthorized = true;
     } else if (user._id.equals(submission.studentId)) {
         isAuthorized = true;
