@@ -12,6 +12,7 @@ import fs from 'fs';
 import { promises as fsPromises } from 'fs';
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
 import { sectionModel } from "../../../../DB/models/section.model.js";
+const fsPromises = fs.promises;
 
 const validateExamId = (req, res, next) => {
     const { examId } = req.query;
@@ -95,7 +96,9 @@ export const editExam = asyncHandler(async (req, res, next) => {
         return next(new Error("Exam not found.", { cause: 404 }));
     }
 
-    if (!exam.createdBy.equals(teacherId)) {
+
+
+    if (!exam.createdBy.equals(teacherId) && user.role !== 'main_teacher' ) {
         return next(new Error("You are not authorized to edit this exam.", { cause: 403 }));
     }
 
