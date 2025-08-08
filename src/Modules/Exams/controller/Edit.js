@@ -293,6 +293,116 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
 
 
 
+
+export const deleteExam = asyncHandler(async (req, res, next) => {
+  const { examId } = req.body;
+  const {user ,isteacher } = req;
+
+
+
+
+  // 1. Validate input - This remains the same.
+  if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
+    return next(new Error("A valid examId is required", { cause: 400 }));
+  }
+
+  // 2. Find the specific exam document.
+  // We need the document itself so we can call .deleteOne() on it, which
+  // is what triggers your 'pre("deleteOne")' DOCUMENT middleware.
+  const exam = await examModel.findById(examId);
+
+  // 3. Handle case where exam doesn't exist.
+  if (!exam) {
+    return next(new Error("Exam not found", { cause: 404 }));
+  }
+
+   if (!isteacher) {
+            return next(new Error("Forbidden: You are not authorized to perform this action.", { cause: 403 }));
+
+    } else if (user.role === 'assistant') {
+        // For assistants, we must verify they have permission for ALL groups the exam is in.
+        const permittedGroupIds = new Set(user.permissions.exams?.map(id => id.toString()) || []);
+
+        if (permittedGroupIds.size === 0) {
+            return next(new Error("Forbidden: You do not have permissions for any groups.", { cause: 403 }));
+        }
+
+        // Check if every group associated with the exam is in the assistant's permitted list.
+        const examGroupIds = exam.groupIds.map(id => id.toString());
+        const hasPermissionForAllGroups = examGroupIds.every(id => permittedGroupIds.has(id));
+
+        if (!hasPermissionForAllGroups || user._id !== exam.createdBy ) {
+            return next(new Error("Forbidden: You do not have permission to delete this exam as it is assigned to groups you do not manage.", { cause: 403 }));
+        }
+    } 
+
+  await exam.deleteOne();
+
+  // 5. Send the success response.
+  res.status(200).json({ message: "Exam and its submissions deleted successfully" });
+});
+
+
+
+
+export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
+    // --- Phase 1: Input Validation (Correct and unchanged) ---
+    const { submissionId } = req.body;
+    const { user, isteacher } = req;
+
+    if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
+        return next(new Error("A valid Submission ID is required.", { cause: 400 }));
+    }
+
+    // --- Phase 2: Fetch the Full Mongoose Document ---
+    // We REMOVE .lean() because we need the document instance with its methods (like .deleteOne()).
+    const submission = await SubexamModel.findById(submissionId);
+    
+    if (!submission) {
+        return next(new Error("Submission not found.", { cause: 404 }));
+    }
+
+    // --- Phase 3: Authorization (Correct and unchanged) ---
+    // This logic works perfectly on the full document.
+    let isAuthorized = false;
+    if (isteacher === true && user.rol ==="main_teacher") {
+        isAuthorized = true;
+    } else if (user._id.equals(submission.studentId)) {
+        isAuthorized = true;
+    }else if(user.role === "assistant" ){
+        // To check permission, we must find which groups the exam belongs to.
+        const exam = await examModel.findById(submission.examId).select('groupIds').lean();
+
+        if (exam) {
+            const permittedGroupIds = user.permissions.exams?.map(id => id.toString()) || [];
+            const examGroupIds = exam.groupIds.map(id => id.toString());
+
+            // Check if there is any overlap between the assistant's permitted groups and the exam's groups.
+            // If the assistant manages at least one of the exam's groups, they are authorized.
+            const hasPermission = examGroupIds.some(groupId => permittedGroupIds.includes(groupId));
+            
+            if (hasPermission) {
+                isAuthorized = true;
+            }
+        }
+    }
+
+    if (!isAuthorized) {
+        return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
+    }
+    
+    // --- Phase 4: Trigger Middleware and Delete ---
+    // This single line replaces the entire transaction and manual S3 cleanup block.
+    // It will trigger your pre('deleteOne') hook, which handles the S3 file deletion
+    // before the document is removed from the database.
+    await submission.deleteOne();
+
+    // --- Phase 5: Send Success Response ---
+    res.status(200).json({ message: "Submission deleted successfully." });
+});
+
+
+
 export const addExceptionStudent = asyncHandler(async (req, res, next) => {
   const { examId, studentId, startdate, enddate } = req.body;
 
@@ -416,111 +526,4 @@ export const addRejectedStudent = asyncHandler(async (req, res, next) => {
     message: "Student added to rejected successfully",
     exam: updatedExam,
   });
-});
-
-export const deleteExam = asyncHandler(async (req, res, next) => {
-  const { examId } = req.body;
-  const {user ,isteacher } = req;
-
-
-
-
-  // 1. Validate input - This remains the same.
-  if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
-    return next(new Error("A valid examId is required", { cause: 400 }));
-  }
-
-  // 2. Find the specific exam document.
-  // We need the document itself so we can call .deleteOne() on it, which
-  // is what triggers your 'pre("deleteOne")' DOCUMENT middleware.
-  const exam = await examModel.findById(examId);
-
-  // 3. Handle case where exam doesn't exist.
-  if (!exam) {
-    return next(new Error("Exam not found", { cause: 404 }));
-  }
-
-   if (!isteacher) {
-            return next(new Error("Forbidden: You are not authorized to perform this action.", { cause: 403 }));
-
-    } else if (user.role === 'assistant') {
-        // For assistants, we must verify they have permission for ALL groups the exam is in.
-        const permittedGroupIds = new Set(user.permissions.exams?.map(id => id.toString()) || []);
-
-        if (permittedGroupIds.size === 0) {
-            return next(new Error("Forbidden: You do not have permissions for any groups.", { cause: 403 }));
-        }
-
-        // Check if every group associated with the exam is in the assistant's permitted list.
-        const examGroupIds = exam.groupIds.map(id => id.toString());
-        const hasPermissionForAllGroups = examGroupIds.every(id => permittedGroupIds.has(id));
-
-        if (!hasPermissionForAllGroups || user._id !== exam.createdBy ) {
-            return next(new Error("Forbidden: You do not have permission to delete this exam as it is assigned to groups you do not manage.", { cause: 403 }));
-        }
-    } 
-
-  await exam.deleteOne();
-
-  // 5. Send the success response.
-  res.status(200).json({ message: "Exam and its submissions deleted successfully" });
-});
-
-
-
-
-export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
-    // --- Phase 1: Input Validation (Correct and unchanged) ---
-    const { submissionId } = req.body;
-    const { user, isteacher } = req;
-
-    if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
-        return next(new Error("A valid Submission ID is required.", { cause: 400 }));
-    }
-
-    // --- Phase 2: Fetch the Full Mongoose Document ---
-    // We REMOVE .lean() because we need the document instance with its methods (like .deleteOne()).
-    const submission = await SubexamModel.findById(submissionId);
-    
-    if (!submission) {
-        return next(new Error("Submission not found.", { cause: 404 }));
-    }
-
-    // --- Phase 3: Authorization (Correct and unchanged) ---
-    // This logic works perfectly on the full document.
-    let isAuthorized = false;
-    if (isteacher === true && user.rol ==="main_teacher") {
-        isAuthorized = true;
-    } else if (user._id.equals(submission.studentId)) {
-        isAuthorized = true;
-    }else if(user.role === "assistant" ){
-        // To check permission, we must find which groups the exam belongs to.
-        const exam = await examModel.findById(submission.examId).select('groupIds').lean();
-
-        if (exam) {
-            const permittedGroupIds = user.permissions.exams?.map(id => id.toString()) || [];
-            const examGroupIds = exam.groupIds.map(id => id.toString());
-
-            // Check if there is any overlap between the assistant's permitted groups and the exam's groups.
-            // If the assistant manages at least one of the exam's groups, they are authorized.
-            const hasPermission = examGroupIds.some(groupId => permittedGroupIds.includes(groupId));
-            
-            if (hasPermission) {
-                isAuthorized = true;
-            }
-        }
-    }
-
-    if (!isAuthorized) {
-        return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
-    }
-    
-    // --- Phase 4: Trigger Middleware and Delete ---
-    // This single line replaces the entire transaction and manual S3 cleanup block.
-    // It will trigger your pre('deleteOne') hook, which handles the S3 file deletion
-    // before the document is removed from the database.
-    await submission.deleteOne();
-
-    // --- Phase 5: Send Success Response ---
-    res.status(200).json({ message: "Submission deleted successfully." });
 });
