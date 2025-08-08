@@ -151,7 +151,7 @@ export const Signup = asyncHandler(async(req,res,next)=>{
 
 export const getMyProfile = asyncHandler(async (req, res, next) => {
     const userId = req.user._id;            
-    const isTeacher = req.isteacher.teacher;
+    const isTeacher = req.isteacher;
 
     // --- Phase 1: Prepare Queries ---
     const Model = isTeacher ? teacherModel : studentModel;
