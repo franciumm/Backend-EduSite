@@ -19,12 +19,12 @@ router.get("/submissions", isAuth, Get.getSubmittedExams);
 router.get("/download", isAuth, Edit.downloadExam);
 router.get("/submissions/download", isAuth, Edit.downloadSubmittedExam);
 router.post ('/create',isAuth,multerCloudFunction(allowedExtensions.Files).single('file'),Start.createExam);
-router.post("/submit",c,multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitExam);
+router.post("/submit",isAuth,multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitExam);
 router.put("/mark", isAuth, Edit.markSubmissionWithPDF);
 router.post("/add-exception",  AdminAuth, Edit.addExceptionStudent);
 router.post("/add-rejected", AdminAuth , Edit.addRejectedStudent);
 router.delete("/delete", isAuth, Edit.deleteExam);
-router.put("/edit", AdminAuth, multerCloudFunction(allowedExtensions.Files).single('file'), Edit.editExam);
+router.put("/edit", isAuth, multerCloudFunction(allowedExtensions.Files).single('file'), Edit.editExam);
 router.delete("/deleteSub", isAuth, Edit.deleteSubmittedExam);
 
 
