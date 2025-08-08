@@ -4,6 +4,8 @@ import { deleteFileFromS3 } from "../../src/utils/S3Client.js";
 const submittedAssignmentSchema = new Schema(
   {
     score: Number,
+    teacherFeedback: { type: String, default: "" },
+
     studentId: { type: Schema.Types.ObjectId, ref: "student",required : true },
     assignmentId: { type: Schema.Types.ObjectId, ref: "assignment",required : true },
     groupId: { type: Schema.Types.ObjectId, ref: "group",required : true },

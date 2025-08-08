@@ -149,7 +149,7 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
 });
 
 export const markAssignment = asyncHandler(async (req, res, next) => {
-  const { submissionId, score, notes, annotationData } = req.body;
+  const { submissionId, score, notes, annotationData ,teacherFeedback} = req.body;
     if (!submissionId) return next(new Error("Submission ID is required.", { cause: 400 }));
 
   const submission = await SubassignmentModel.findById(submissionId).populate("assignmentId studentId");
@@ -181,6 +181,7 @@ if (!req.isteacher) return next(new Error("Forbidden.", { cause: 403 }));
     submission.score = score || submission.score; 
     submission.notes = notes || submission.notes;
     submission.isMarked = true; 
+    submission.teacherFeedback =teacherFeedback || submission.teacherFeedback;
     submission.annotationData = annotationData|| submission.annotationData ;
     await submission.save();
 
