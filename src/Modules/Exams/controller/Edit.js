@@ -204,16 +204,12 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
             isAuthorized = true;
         }
     }
-
+ 
+    
     if (!isAuthorized) {
         return next(new Error("You are not authorized to access this submission.", { cause: 403 }));
     }
-        if (isteacher !== true && !submission.studentId.equals(user._id)) {
-        // If the user is NOT a teacher, they must be the owner of the submission.
-        
-            return next(new Error("You are not authorized to access this submission.", { cause: 403 }));
-        
-    }
+    
     // If we reach here, the user is either a teacher (who can access anything)
     // or the student who owns the submission. Access is granted.
 
@@ -268,10 +264,7 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
         return next(new Error("You are not authorized to mark submissions for this exam.", { cause: 403 }));
     }
  
-  // 6. Overwrite the subexam doc with new PDF fields + new score/feedback
-  subExam.bucketName ;
-  subExam.key ;
-  subExam.path ;
+
 
   // score and feedback
   if (typeof score !== "undefined") {
@@ -320,19 +313,15 @@ export const deleteExam = asyncHandler(async (req, res, next) => {
             return next(new Error("Forbidden: You are not authorized to perform this action.", { cause: 403 }));
 
     } else if (user.role === 'assistant') {
-        // For assistants, we must verify they have permission for ALL groups the exam is in.
-        const permittedGroupIds = new Set(user.permissions.exams?.map(id => id.toString()) || []);
-
-        if (permittedGroupIds.size === 0) {
-            return next(new Error("Forbidden: You do not have permissions for any groups.", { cause: 403 }));
+       if (!exam.createdBy.equals(user._id)) {
+            return next(new Error("Forbidden: You can only delete exams that you have created.", { cause: 403 }));
         }
-
-        // Check if every group associated with the exam is in the assistant's permitted list.
+        // For assistants, we must verify they have permission for ALL groups the exam is in.
+       const permittedGroupIds = new Set(user.permissions.exams?.map(id => id.toString()) || []);
         const examGroupIds = exam.groupIds.map(id => id.toString());
         const hasPermissionForAllGroups = examGroupIds.every(id => permittedGroupIds.has(id));
-
-        if (!hasPermissionForAllGroups || user._id !== exam.createdBy ) {
-            return next(new Error("Forbidden: You do not have permission to delete this exam as it is assigned to groups you do not manage.", { cause: 403 }));
+        if (!hasPermissionForAllGroups) {
+            return next(new Error("Forbidden: Cannot delete exam as it's in groups you don't manage.", { cause: 403 }));
         }
     } 
 
@@ -365,7 +354,7 @@ export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
     // --- Phase 3: Authorization (Correct and unchanged) ---
     // This logic works perfectly on the full document.
     let isAuthorized = false;
-    if (isteacher === true && user.rol ==="main_teacher") {
+    if (isteacher === true && user.role ==="main_teacher") {
         isAuthorized = true;
     } else if (user._id.equals(submission.studentId)) {
         isAuthorized = true;
