@@ -145,6 +145,16 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
     // --- Phase 1: Fail Fast - Input Validation ---
     const { submissionId } = req.query;
     const { user, isteacher } = req;
+  const hasAccess = await canAccessContent({
+        user: user,
+        isTeacher: isteacher,
+        contentId: examId,
+        contentType: 'exam'
+    });
+
+    if (!hasAccess) {
+        return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
+    }
 
     if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
@@ -189,6 +199,16 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
 
 export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
   const { submissionId, score, feedback ,annotationData} = req.body;
+  const hasAccess = await canAccessContent({
+        user: req.user,
+        isTeacher: req.isteacher,
+        contentId: examId,
+        contentType: 'exam'
+    });
+
+    if (!hasAccess) {
+        return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
+    }
 
   // 1. Validate submissionId
   if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
@@ -358,6 +378,10 @@ export const addRejectedStudent = asyncHandler(async (req, res, next) => {
 
 export const deleteExam = asyncHandler(async (req, res, next) => {
   const { examId } = req.body;
+  const {user ,isteacher } = req;
+
+
+
 
   // 1. Validate input - This remains the same.
   if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
@@ -374,13 +398,26 @@ export const deleteExam = asyncHandler(async (req, res, next) => {
     return next(new Error("Exam not found", { cause: 404 }));
   }
 
-  // 4. Trigger the deletion. The middleware you wrote does ALL the heavy lifting.
-  // This single line will automatically:
-  // - Find all related submissions
-  // - Delete all their associated files from S3
-  // - Delete the submission records from the database
-  // - Delete the main exam file from S3
-  // - Finally, delete the exam record itself
+   if (!isteacher) {
+            return next(new Error("Forbidden: You are not authorized to perform this action.", { cause: 403 }));
+
+    } else if (user.role === 'assistant') {
+        // For assistants, we must verify they have permission for ALL groups the exam is in.
+        const permittedGroupIds = new Set(user.permissions.exams?.map(id => id.toString()) || []);
+
+        if (permittedGroupIds.size === 0) {
+            return next(new Error("Forbidden: You do not have permissions for any groups.", { cause: 403 }));
+        }
+
+        // Check if every group associated with the exam is in the assistant's permitted list.
+        const examGroupIds = exam.groupIds.map(id => id.toString());
+        const hasPermissionForAllGroups = examGroupIds.every(id => permittedGroupIds.has(id));
+
+        if (!hasPermissionForAllGroups || user._id !== exam.createdBy ) {
+            return next(new Error("Forbidden: You do not have permission to delete this exam as it is assigned to groups you do not manage.", { cause: 403 }));
+        }
+    } 
+
   await exam.deleteOne();
 
   // 5. Send the success response.
@@ -410,10 +447,26 @@ export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
     // --- Phase 3: Authorization (Correct and unchanged) ---
     // This logic works perfectly on the full document.
     let isAuthorized = false;
-    if (isteacher === true) {
+    if (isteacher === true && user.rol ==="main_teacher") {
         isAuthorized = true;
     } else if (user._id.equals(submission.studentId)) {
         isAuthorized = true;
+    }else if(user.role === "assistant" ){
+        // To check permission, we must find which groups the exam belongs to.
+        const exam = await examModel.findById(submission.examId).select('groupIds').lean();
+
+        if (exam) {
+            const permittedGroupIds = user.permissions.exams?.map(id => id.toString()) || [];
+            const examGroupIds = exam.groupIds.map(id => id.toString());
+
+            // Check if there is any overlap between the assistant's permitted groups and the exam's groups.
+            // If the assistant manages at least one of the exam's groups, they are authorized.
+            const hasPermission = examGroupIds.some(groupId => permittedGroupIds.includes(groupId));
+            
+            if (hasPermission) {
+                isAuthorized = true;
+            }
+        }
     }
 
     if (!isAuthorized) {

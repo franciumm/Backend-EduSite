@@ -16,14 +16,14 @@ export const createExam = asyncHandler(async (req, res, next) => {
     if (!req.file) {
         return next(new Error("The exam file must be uploaded.", { cause: 400 }));
     } if (!req.isteacher) {
-        return next(new Error("Only teachers can create assignments.", { cause: 403 }));
+        return next(new Error("Only teachers can create Exams.", { cause: 403 }));
     }
       const { Name, startDate, endDate, gradeId } = req.body;
        req.body.startDate = new Date(startDate);
             req.body.endDate = new Date(endDate);
             if (isNaN(req.body.startDate.getTime()) || isNaN(req.body.endDate.getTime()) ||toZonedTime(new Date(), uaeTimeZone) > req.body.endDate || req.body.startDate >= req.body.endDate) {
               await fs.unlink(req.file.path);
-              return next(new Error("Invalid assignment timeline. Ensure dates are valid, the end date is in the future, and the start date is before the end date.", { cause: 400 }));
+              return next(new Error("Invalid Exam timeline. Ensure dates are valid, the end date is in the future, and the start date is before the end date.", { cause: 400 }));
             }
           
             
@@ -38,26 +38,26 @@ export const createExam = asyncHandler(async (req, res, next) => {
             req.body.groupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
             
              if (req.user.role === 'assistant') {
-              const permittedGroupIds = new Set(req.user.permissions.assignments.map(id => id.toString()));
+              const permittedGroupIds = new Set(req.user.permissions.exams.map(id => id.toString()));
               const requestedGroupIds = req.body.groupIds.map(id => id.toString());
       
               const hasPermissionForAllGroups = requestedGroupIds.every(id => permittedGroupIds.has(id));
       
               if (!hasPermissionForAllGroups) {
                   await fs.unlink(req.file.path);
-                  return next(new Error("You do not have permission to create assignments for one or more of the selected groups.", { cause: 403 }));
+                  return next(new Error("You do not have permission to create exams for one or more of the selected groups.", { cause: 403 }));
               }
           }
             
             if (req.user.role === 'assistant') {
-              const permittedGroupIds = new Set(req.user.permissions.assignments.map(id => id.toString()));
+              const permittedGroupIds = new Set(req.user.permissions.exams.map(id => id.toString()));
               const requestedGroupIdsStrings = groupIds.map(id => id.toString()); // Use the parsed array
       
               const hasPermissionForAllGroups = requestedGroupIdsStrings.every(id => permittedGroupIds.has(id));
       
               if (!hasPermissionForAllGroups) {
                   await fs.unlink(req.file.path);
-                  return next(new Error("You do not have permission to create assignments for one or more of the selected groups.", { cause: 403 }));
+                  return next(new Error("You do not have permission to create exams for one or more of the selected groups.", { cause: 403 }));
               }
           }
           // Perform necessary validation before calling the internal function
