@@ -408,11 +408,17 @@ if (groupId) {
 
 export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
   const { groupId, examId, status, page = 1, size = 10 } = req.query;
+    const { user } = req; // Added user from req
 
   // 1) Validate groupId - Common for both scenarios
   if (!groupId || !mongoose.Types.ObjectId.isValid(groupId)) {
     return next(new Error("A valid Group ID is required", { cause: 400 }));
-  }
+  }  if (user.role === 'assistant') {
+        const permittedGroupIds = user.permissions.exams?.map(id => id.toString()) || [];
+        if (!permittedGroupIds.includes(groupId)) {
+            return next(new Error("Forbidden: You do not have permission to access submissions for this group.", { cause: 403 }));
+        }
+    }
   const gId = new mongoose.Types.ObjectId(groupId);
 
   // Pagination helpers - Common for both scenarios
