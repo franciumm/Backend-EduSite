@@ -96,11 +96,33 @@ export const editExam = asyncHandler(async (req, res, next) => {
     }
 
 
+ if (user.role === 'main_teacher') {
+        // Rule 1: A main_teacher is always authorized. No further checks needed.
+        // Access is granted by allowing the code to continue.
+    } 
+    else if (user.role === 'assistant') {
+        // Rule 2: An assistant must pass two specific checks.
+        
+        // Check A: Is the assistant the creator of the exam?
+        if (!exam.createdBy.equals(user._id)) {
+            return next(new Error("Forbidden: You are not authorized to edit this exam because you did not create it.", { cause: 403 }));
+        }
 
-    if (!exam.createdBy.equals(teacherId) && user.role !== 'main_teacher' ) {
-        return next(new Error("You are not authorized to edit this exam.", { cause: 403 }));
+        // Check B: Does the assistant have permission for ALL groups this exam is in?
+        // This is a critical security check to prevent editing exams with escalated scope.
+        const permittedGroupIds = new Set(user.permissions.exams?.map(id => id.toString()) || []);
+        const examGroupIds = exam.groupIds.map(id => id.toString());
+        const hasPermissionForAllGroups = examGroupIds.every(id => permittedGroupIds.has(id));
+
+        if (!hasPermissionForAllGroups) {
+            return next(new Error("Forbidden: You cannot edit this exam as it is assigned to groups you do not have permission to manage.", { cause: 403 }));
+        }
+        // If both checks pass, the assistant is authorized.
+    } 
+    else {
+        // Rule 3: All other roles are denied.
+        return next(new Error("Forbidden: You are not authorized to edit exams.", { cause: 403 }));
     }
-
     if (req.file) {
         if (exam.key) {
             await deleteFileFromS3(exam.bucketName, exam.key)
@@ -214,17 +236,9 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
 
 
 export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
-  const { submissionId, score, feedback ,annotationData} = req.body;
-  const hasAccess = await canAccessContent({
-        user: req.user,
-        isTeacher: req.isteacher,
-        contentId: examId,
-        contentType: 'exam'
-    });
-
-    if (!hasAccess) {
-        return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
-    }
+  if (!req.isteacher) {
+        return next(new Error("Forbidden: This action is only available to teachers.", { cause: 403 }));
+    }  const { submissionId, score, feedback ,annotationData} = req.body;
 
   // 1. Validate submissionId
   if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
@@ -240,7 +254,19 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
   }
 
 
- 
+  const examId = subExam.examId;
+
+    // Use the content helper to verify if this teacher (main or assistant) has access to this exam.
+    const hasAccess = await canAccessContent({
+        user: req.user,
+        isTeacher: req.isteacher,
+        contentId: examId,
+        contentType: 'exam'
+    });
+
+    if (!hasAccess) {
+        return next(new Error("You are not authorized to mark submissions for this exam.", { cause: 403 }));
+    }
  
   // 6. Overwrite the subexam doc with new PDF fields + new score/feedback
   subExam.bucketName ;
