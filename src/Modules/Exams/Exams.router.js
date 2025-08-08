@@ -18,7 +18,7 @@ router.get("/student/submissions", isAuth, Get.getSubmissionsByGroup);
 router.get("/submissions", isAuth, Get.getSubmittedExams);
 router.get("/download", isAuth, Edit.downloadExam);
 router.get("/submissions/download", isAuth, Edit.downloadSubmittedExam);
-router.post ('/create',AdminAuth,multerCloudFunction(allowedExtensions.Files).single('file'),Start.createExam);
+router.post ('/create',isAuth,multerCloudFunction(allowedExtensions.Files).single('file'),Start.createExam);
 router.post("/submit",isAuth,multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitExam);
 router.put("/mark", AdminAuth, Edit.markSubmissionWithPDF);
 router.post("/add-exception",  AdminAuth, Edit.addExceptionStudent);
