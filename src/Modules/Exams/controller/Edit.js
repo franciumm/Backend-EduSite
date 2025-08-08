@@ -9,7 +9,6 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 import { deleteFileFromS3, uploadFileToS3 } from "../../../utils/S3Client.js";
 import fs from 'fs'; 
-import { promises as fsPromises } from 'fs';
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
 import { sectionModel } from "../../../../DB/models/section.model.js";
 const fsPromises = fs.promises;
@@ -148,16 +147,8 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
     // --- Phase 1: Fail Fast - Input Validation ---
     const { submissionId } = req.query;
     const { user, isteacher } = req;
-  const hasAccess = await canAccessContent({
-        user: user,
-        isTeacher: isteacher,
-        contentId: examId,
-        contentType: 'exam'
-    });
-
-    if (!hasAccess) {
-        return next(new Error("You are not authorized to access this exam.", { cause: 403 }));
-    }
+  
+    
 
     if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
@@ -172,12 +163,34 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
         return next(new Error("Submission not found.", { cause: 404 }));
     }
 
-    // --- Phase 3: Robust Authorization (Implementing Your Business Rule) ---
-    if (isteacher !== true) {
-        // If the user is NOT a teacher, they must be the owner of the submission.
-        if (!submission.studentId.equals(user._id)) {
-            return next(new Error("You are not authorized to access this submission.", { cause: 403 }));
+  let isAuthorized = false;
+
+    if (isteacher) {
+        // CRITICAL FIX: The variable 'examId' comes from the submission document.
+        const examId = submission.examId; 
+
+        // For teachers (main or assistant), use canAccessContent helper.
+        isAuthorized = await canAccessContent({
+            user: user,
+            isTeacher: true,
+            contentId: examId,
+            contentType: 'exam'
+        });
+    } else {
+        // For students, they must be the owner of the submission.
+        if (submission.studentId.equals(user._id)) {
+            isAuthorized = true;
         }
+    }
+
+    if (!isAuthorized) {
+        return next(new Error("You are not authorized to access this submission.", { cause: 403 }));
+    }
+        if (isteacher !== true && !submission.studentId.equals(user._id)) {
+        // If the user is NOT a teacher, they must be the owner of the submission.
+        
+            return next(new Error("You are not authorized to access this submission.", { cause: 403 }));
+        
     }
     // If we reach here, the user is either a teacher (who can access anything)
     // or the student who owns the submission. Access is granted.
