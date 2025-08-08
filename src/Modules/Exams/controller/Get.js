@@ -12,7 +12,7 @@ import { canAccessContent } from "../../../middelwares/contentAuth.js";
 
 export const getExams = asyncHandler(async (req, res, next) => {
     const { gradeId, groupId } = req.query;
-    const isTeacher = req.isteacher.teacher;
+    const isTeacher = req.isteacher;
     let query = {};
 
     // --- Teacher Logic ---
