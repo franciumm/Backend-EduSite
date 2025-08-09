@@ -94,8 +94,6 @@ export const getExams = asyncHandler(async (req, res, next) => {
         data: exams,
     });
 });
-// export const getSubmittedExams = asyncHandler(async (req, res, next) => {
-//   const { page = 1, size = 10, groupId, gradeId, status } = req.query;
 
 //   // Extract user details and role
 //   const user = req.user;
@@ -214,42 +212,52 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
         
         // --- Path A: Exam-Centric Student Status View ---
         // This unified path is triggered whenever an examId is provided.
+
         if (examId) {
             if (!mongoose.Types.ObjectId.isValid(examId)) return next(new Error("Invalid Exam ID format.", { cause: 400 }));
 
             const exam = await examModel.findById(examId).lean();
             if (!exam) return next(new Error("Exam not found.", { cause: 404 }));
 
-let targetGroupIds = exam.groupIds;
-            // --- Assistant Permission Filter ---
+            // Start with the full list of group IDs (as strings) from the exam.
+            let authorizedGroupIds = exam.groupIds.map(id => id.toString());
+
+            // If the user is an assistant, filter this list down to only the groups they have permission for.
             if (user.role === 'assistant') {
                 const permittedGroupIds = user.permissions.exams?.map(id => id.toString()) || [];
-                targetGroupIds = targetGroupIds.filter(id => permittedGroupIds.includes(id));
+                authorizedGroupIds = authorizedGroupIds.filter(id => permittedGroupIds.includes(id));
 
-                if (targetGroupIds.length === 0) {
+                if (authorizedGroupIds.length === 0) {
                     return res.status(200).json({ message: "You do not have permission to view any groups for this exam.", total: 0, currentPage: 1, totalPages: 1, data: [] });
                 }
             }
 
-            // --- Build Student Query based on filters ---
-            const studentQuery = { groupId: { $in: targetGroupIds } };
-
+            // Now, `authorizedGroupIds` is the definitive list of groups this user can view for this exam.
+            
+            // If the user specified a single `groupId` in the query, we must validate it and use it.
             if (groupId) {
                 if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("Invalid Group ID format.", { cause: 400 }));
-                 if (!targetGroupIds.map(id => id.toString()).includes(groupId)) {
+                // Security Check: The requested group MUST be in the list of authorized groups.
+                if (!authorizedGroupIds.includes(groupId)) {
                     return res.status(200).json({ message: "The specified group is not part of this exam or you lack permission.", total: 0, currentPage: 1, totalPages: 1, data: [] });
                 }
-                studentQuery.groupId = groupId; // Further filter students to this specific group.
+                // If it's valid, this single group becomes our target.
+                authorizedGroupIds = [groupId];
             }
 
+            // --- The Final, Correct Student Query ---
+            // Build the query using the final, validated list of group IDs, converting them back to ObjectIds.
+            const studentQuery = { 
+                groupId: { $in: authorizedGroupIds.map(id => new mongoose.Types.ObjectId(id)) } 
+            };
+            
             if (studentId) {
                 if (!mongoose.Types.ObjectId.isValid(studentId)) return next(new Error("Invalid Student ID format.", { cause: 400 }));
-                studentQuery._id = studentId; // Pinpoint a single student.
+                studentQuery._id = new mongoose.Types.ObjectId(studentId);
             }
 
-            // --- Fetch Students and Hydrate with Submissions ---
-
-const total = await studentModel.countDocuments(studentQuery);
+            const total = await studentModel.countDocuments(studentQuery);
+            
             const aggregationPipeline = [
                 { $match: studentQuery },
                 { $sort: { firstName: 1 } },
@@ -278,11 +286,6 @@ const total = await studentModel.countDocuments(studentQuery);
             
             let hydratedData = await studentModel.aggregate(aggregationPipeline);
 
-
-
-
-
-
             if (status && ['submitted', 'not submitted'].includes(status)) {
                 hydratedData = hydratedData.filter(s => s.status === status);
             }
@@ -299,7 +302,6 @@ const total = await studentModel.countDocuments(studentQuery);
                 data: hydratedData
             });
         }
-
         // --- Path B: General Submission List (no examId provided) ---
         const matchStage = {};
         
