@@ -6,7 +6,9 @@ import { examModel } from '../../DB/models/exams.model.js';
 import materialModel from '../../DB/models/material.model.js';
 import studentModel from '../../DB/models/student.model.js';
 import { toZonedTime } from 'date-fns-tz'; // Import for timezone handling
+import { CONTENT_TYPES } from '../utils/constants.js';
 const contentModels = {
+    
     [CONTENT_TYPES.ASSIGNMENT]: assignmentModel,
     [CONTENT_TYPES.EXAM]: examModel,
     [CONTENT_TYPES.MATERIAL]: materialModel,
