@@ -220,8 +220,7 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
             const exam = await examModel.findById(examId).lean();
             if (!exam) return next(new Error("Exam not found.", { cause: 404 }));
 
-            let targetGroupIds = exam.groupIds.map(id => id.toString());
-
+let targetGroupIds = exam.groupIds;
             // --- Assistant Permission Filter ---
             if (user.role === 'assistant') {
                 const permittedGroupIds = user.permissions.exams?.map(id => id.toString()) || [];
@@ -237,7 +236,7 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
 
             if (groupId) {
                 if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("Invalid Group ID format.", { cause: 400 }));
-                if (!targetGroupIds.includes(groupId)) {
+                 if (!targetGroupIds.map(id => id.toString()).includes(groupId)) {
                     return res.status(200).json({ message: "The specified group is not part of this exam or you lack permission.", total: 0, currentPage: 1, totalPages: 1, data: [] });
                 }
                 studentQuery.groupId = groupId; // Further filter students to this specific group.
@@ -382,7 +381,7 @@ const total = await studentModel.countDocuments(studentQuery);
     });
 });
 
-export const getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
+export const  getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
   const { groupId, examId, status, page = 1, size = 10 } = req.query;
     const { user } = req; // Added user from req
 // 1) Validate groupId - Common for both scenarios

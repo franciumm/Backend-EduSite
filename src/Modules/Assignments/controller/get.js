@@ -1,8 +1,5 @@
 import { asyncHandler } from "../../../utils/erroHandling.js";
 import { assignmentModel } from "../../../../DB/models/assignment.model.js";
-import { s3 } from "../../../utils/S3Client.js";
-import { GetObjectCommand ,PutObjectCommand} from "@aws-sdk/client-s3";
-import { getPresignedUrlForS3, deleteFileFromS3,uploadFileToS3 } from '../../../utils/S3Client.js';
 import mongoose from "mongoose";
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
 import { sectionModel } from '../../../../DB/models/section.model.js';
@@ -10,6 +7,7 @@ import { canViewSubmissionsFor } from '../../../middelwares/contentAuth.js';
 import { pagination } from "../../../utils/pagination.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
+import { toZonedTime } from "date-fns-tz";
 
 export const GetAllByGroup = asyncHandler(async (req, res, next) => {
     const { gradeId, groupId } = req.query;
@@ -63,40 +61,15 @@ export const GetAllByGroup = asyncHandler(async (req, res, next) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 export const findSubmissions = asyncHandler(async (req, res, next) => {
     const { groupId, assignmentId, studentId, status, page = 1, size = 10 } = req.query;
     const pageNum = Math.max(1, parseInt(page, 10));
     const limit = Math.max(1, parseInt(size, 10));
     const skip = (pageNum - 1) * limit;
 
-    // --- Authorization logic remains unchanged ---
+    // --- Authorization Check (Correctly builds the initial filter) ---
     const filter = {};
     if (req.isteacher) {
-        // ... (teacher auth logic is correct)
         const { user } = req;
         let hasAccess = false;
         if (assignmentId) {
@@ -114,46 +87,38 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
             return next(new Error("Forbidden: You are not authorized to view submissions for this content.", { cause: 403 }));
         }
     } else {
+        // For students, the filter is always scoped to their own ID.
          filter.studentId = req.user._id;
     }
     
-    if (groupId) filter.groupId = new mongoose.Types.ObjectId(groupId);
-    if (assignmentId) filter.assignmentId = new mongoose.Types.ObjectId(assignmentId);
-    if (studentId) filter.studentId = new mongoose.Types.ObjectId(studentId);
-    if (status && ['marked', 'unmarked'].includes(status)) filter.isMarked = (status === 'marked');
-
-
-    // --- Path A: Group Status View (THE FINAL, CORRECTED AGGREGATION) ---
+    // --- Path A: Group Status View (Performant Aggregation) ---
     if (groupId && assignmentId && !studentId) {
+        const assignmentObjectId = new mongoose.Types.ObjectId(assignmentId);
+        const groupObjectId = new mongoose.Types.ObjectId(groupId);
+
         const [assignment, group] = await Promise.all([
-            assignmentModel.findById(filter.assignmentId).lean(),
-            groupModel.findById(filter.groupId).lean()
+            assignmentModel.findById(assignmentObjectId).lean(),
+            groupModel.findById(groupObjectId).lean()
         ]);
         if (!assignment) return next(new Error("Assignment not found.", { cause: 404 }));
         if (!group) return next(new Error("Group not found.", { cause: 404 }));
         
-        const studentQuery = { groupId: filter.groupId };
+        const studentQuery = { groupId: groupObjectId };
         const total = await studentModel.countDocuments(studentQuery);
 
-        const aggregationPipeline = [
-            { $match: studentQuery },
-            { $sort: { firstName: 1 } },
-            { $skip: skip },
-            { $limit: limit },
+        const pipeline = [
+            { $match: studentQuery }, { $sort: { firstName: 1 } }, { $skip: skip }, { $limit: limit },
             {
                 $lookup: {
                     from: 'subassignments',
                     let: { student_id: "$_id" },
                     pipeline: [
-                        { $match: { $expr: { $and: [ { $eq: ["$studentId", "$$student_id"] }, { $eq: ["$assignmentId", filter.assignmentId] } ] } } },
-                        { $sort: { version: -1 } },
-                        { $limit: 1 },
-                        // --- NESTED POPULATION ---
+                        { $match: { $expr: { $and: [ { $eq: ["$studentId", "$$student_id"] }, { $eq: ["$assignmentId", assignmentObjectId] } ] } } },
+                        { $sort: { version: -1 } }, { $limit: 1 },
                         { $lookup: { from: 'students', localField: 'studentId', foreignField: '_id', as: 'studentId' } },
                         { $unwind: '$studentId' },
                         { $lookup: { from: 'assignments', localField: 'assignmentId', foreignField: '_id', as: 'assignmentId' } },
                         { $unwind: '$assignmentId' },
-                        // --- END NESTED POPULATION ---
                     ],
                     as: 'submissionDetails'
                 }
@@ -166,28 +131,27 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
                 }
             }
         ];
-
-        let hydratedData = await studentModel.aggregate(aggregationPipeline);
+        let data = await studentModel.aggregate(pipeline);
         
-        if (status && ['submitted', 'not submitted'].includes(status)) {
-            hydratedData = hydratedData.filter(s => s.status === status);
-        }
+        if (status) data = data.filter(s => s.status === status);
 
+        // This `return` ensures this is the final action for this code path.
         return res.status(200).json({
             message: "Submission status for group fetched successfully.",
-            assignmentName: assignment.name,
-            total,
-            totalPages: Math.ceil(total / limit),
-            currentPage: pageNum,
-            data: hydratedData
+            assignmentName: assignment.name, total, totalPages: Math.ceil(total / limit), currentPage: pageNum, data
         });
     }
 
-    // --- Path B: All Other Queries (Unchanged) ---
-    // ... (rest of the function is unchanged and correct)
-    if (Object.keys(filter).length === 0) {
-        return next(new Error("At least one query parameter is required.", { cause: 400 }));
-    }
+    // --- Path B: All Other Queries (Now correctly structured) ---
+    // This code only runs if the 'if' block above is false.
+    
+    // We now build upon the `filter` object that was created during authorization.
+    if (groupId) filter.groupId = new mongoose.Types.ObjectId(groupId);
+    if (assignmentId) filter.assignmentId = new mongoose.Types.ObjectId(assignmentId);
+    if (studentId) filter.studentId = new mongoose.Types.ObjectId(studentId);
+    if (status && ['marked', 'unmarked'].includes(status)) filter.isMarked = (status === 'marked');
+    if (Object.keys(filter).length === 0) return next(new Error("At least one query parameter is required.", { cause: 400 }));
+
     const [submissions, total] = await Promise.all([
         SubassignmentModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit)
             .populate('studentId', 'userName firstName lastName')
@@ -195,8 +159,12 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
             .populate('groupId', 'groupname').lean(),
         SubassignmentModel.countDocuments(filter)
     ]);
-    res.status(200).json({ message: "Submissions fetched successfully.", total, totalPages: Math.ceil(total / limit), currentPage: pageNum, data: submissions });
+    
+    return res.status(200).json({
+        message: "Submissions fetched successfully.", total, totalPages: Math.ceil(total / limit), currentPage: pageNum, data: submissions
+    });
 });
+
 
 export const getSubmissions = asyncHandler(async (req, res, next) => {
     const { assignmentId, submissionId } = req.query;
