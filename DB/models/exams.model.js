@@ -36,6 +36,7 @@ const examSchema = new Schema(
   },
   { timestamps: true }
 );
+examSchema.index({ grade: 1, groupIds: 1 });
 
 examSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
     const submissions = await SubexamModel.find({ examId: this._id });

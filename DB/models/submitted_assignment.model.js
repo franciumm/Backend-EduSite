@@ -33,6 +33,7 @@ assignmentname:  { type: String, required: true },
 );
 
 
+submittedAssignmentSchema.index({ assignmentId: 1, studentId: 1 });
 
 
 submittedAssignmentSchema.pre('deleteOne', { document: true, query: false }, async function (next) {

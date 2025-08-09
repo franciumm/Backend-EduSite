@@ -41,6 +41,5 @@ submittedExamSchema.pre('deleteOne', { document: true, query: false }, async fun
 });
 
 
-submittedExamSchema.index({ studentId: 1, examId: 1, version: -1 });
-
+submittedExamSchema.index({ examId: 1, studentId: 1 });
 export const SubexamModel = model("subexam", submittedExamSchema);

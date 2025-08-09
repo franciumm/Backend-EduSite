@@ -31,6 +31,10 @@ const assignmentSchema = new Schema({
   }, { timestamps: true });
 
 
+  
+assignmentSchema.index({ gradeId: 1, groupIds: 1 });
+
+
   assignmentSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
     // Delete the main assignment file
     if (this.key && this.bucketName) {

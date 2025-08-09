@@ -33,6 +33,9 @@ const materialSchema = new Schema(
   },
   { timestamps: true }
 );
+
+materialSchema.index({ gradeId: 1, groupIds: 1 });
+
 materialSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
   
 
