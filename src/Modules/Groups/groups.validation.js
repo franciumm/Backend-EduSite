@@ -1,0 +1,31 @@
+import Joi from 'joi';
+
+// A reusable schema for validating MongoDB ObjectIDs.
+const objectId = Joi.string().hex().length(24);
+
+// A reusable schema for validating headers to ensure the authorization token is present.
+export const headers = Joi.object({
+    authorization: Joi.string().required().pattern(/^MonaEdu [a-zA-Z0-9-_.]+$/)
+}).unknown(true); // Allow other headers
+
+export const createGroup = Joi.object({
+    grade: Joi.number().required(),
+    groupname: Joi.string().required().min(1).max(100)
+});
+
+export const getGroupByGrade = Joi.object({
+    grade: Joi.number().required()
+});
+
+export const getGroupById = Joi.object({
+    _id: objectId.required()
+});
+
+export const deleteGroup = Joi.object({
+    groupid: objectId.required()
+});
+
+export const addOrRemoveStudent = Joi.object({
+    groupid: objectId.required(),
+    studentid: objectId.required()
+});

@@ -25,6 +25,9 @@ const materialSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "teacher",
       required: true,
+    }, publishDate: {
+      type: Date,
+      default: null // null means it's published immediately
     },
     // The old fields like 'MaterialLinks' and 'status' are no longer needed
   },

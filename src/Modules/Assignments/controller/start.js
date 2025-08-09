@@ -53,70 +53,15 @@ export const _internalCreateAssignment = async ({ name, startDate, endDate, grad
 };
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
-    if (!req.file) {
-        return next(new Error("Please upload the assignment file.", { cause: 400 }));
-    }
-
-    const { name, startDate, endDate, gradeId } = req.body;
-    if (!req.isteacher) {
-        return next(new Error("Only teachers can create assignments.", { cause: 403 }));
-    }
-      req.body.startDate = new Date(startDate);
-      req.body.endDate = new Date(endDate);
-      if (isNaN(req.body.startDate.getTime()) || isNaN(req.body.endDate.getTime()) ||toZonedTime(new Date(), uaeTimeZone) > req.body.endDate || req.body.startDate >= req.body.endDate) {
-        await fs.unlink(req.file.path);
-        return next(new Error("Invalid assignment timeline. Ensure dates are valid, the end date is in the future, and the start date is before the end date.", { cause: 400 }));
-      }
-    
-      
-    
-
-      let raw = req.body.groupIds ?? req.body["groupIds[]"];
-      if (!raw) { await fs.unlink(req.file.path); return next(new Error("Group IDs are required.", { cause: 400 })); }
-      if (typeof raw === "string" && raw.trim().startsWith("[")) { try { raw = JSON.parse(raw); } catch {} }
-      const groupIds = Array.isArray(raw) ? raw : [raw];
-      
-      if (groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) { await fs.unlink(req.file.path); return next(new Error("One or more Group IDs are invalid.", { cause: 400 })); }
-      req.body.groupIds = groupIds.map(id => new mongoose.Types.ObjectId(id));
-      
-       if (req.user.role === 'assistant') {
-        const permittedGroupIds = new Set(req.user.permissions.assignments.map(id => id.toString()));
-        const requestedGroupIds = req.body.groupIds.map(id => id.toString());
-
-        const hasPermissionForAllGroups = requestedGroupIds.every(id => permittedGroupIds.has(id));
-
-        if (!hasPermissionForAllGroups) {
-            await fs.unlink(req.file.path);
-            return next(new Error("You do not have permission to create assignments for one or more of the selected groups.", { cause: 403 }));
-        }
-    }
-      
-      if (req.user.role === 'assistant') {
-        const permittedGroupIds = new Set(req.user.permissions.assignments.map(id => id.toString()));
-        const requestedGroupIdsStrings = groupIds.map(id => id.toString()); // Use the parsed array
-
-        const hasPermissionForAllGroups = requestedGroupIdsStrings.every(id => permittedGroupIds.has(id));
-
-        if (!hasPermissionForAllGroups) {
-            await fs.unlink(req.file.path);
-            return next(new Error("You do not have permission to create assignments for one or more of the selected groups.", { cause: 403 }));
-        }
-    }
-    // Perform necessary validation before calling the internal function
-    if (!name || !startDate || !endDate || !gradeId || !groupIds) {
-        return next(new Error("Missing required fields: name, startDate, endDate, gradeId, and groupIds are all required.", { cause: 400 }));
-    }
-
+    // All validation is now handled by the creationValidator middleware.
+    // We can safely use the `req.validatedData` object.
     const newAssignment = await _internalCreateAssignment({
-        ...req.body,
-        groupIds: groupIds.map(id => new mongoose.Types.ObjectId(id)), 
+        ...req.validatedData,
         file: req.file,
         teacherId: req.user._id,
     });
-
     res.status(201).json({ message: "Assignment created successfully", assignment: newAssignment });
 });
-
 
 
 // =================================================================
@@ -149,7 +94,7 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     // --- END REFACTOR ---
 
     const [assignment, student, fileContent] = await Promise.all([
-        assignmentModel.findById(assignmentId).lean(),
+        assignmentModel.findById(assignmentId),
         studentModel.findById(user._id).select('groupId').lean(),
         fs.readFile(req.file.path)
     ]);

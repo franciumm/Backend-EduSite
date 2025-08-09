@@ -10,7 +10,7 @@ import { _internalCreateExam } from '../../Exams/controller/Start.js';
 import { createMaterial } from '../../Materials/controller/All.js';
 import { normalizeContentName } from '../../../utils/queryHelpers.js';
 import { pagination } from '../../../utils/pagination.js';
-
+import { CONTENT_TYPES } from '../../../utils/constants.js'; 
 
 function capitalize(str) {
     if (!str) return '';
@@ -162,20 +162,20 @@ export const viewSectionById = asyncHandler(async (req, res, next) => {
         return next(new Error("Section not found", { cause: 404 }));
     } 
     if (user.role === 'assistant') {
-     const ishe = await sectionModel.findById(sectionId );
         const permittedGroupIds = user.permissions.sections?.map(id => id.toString()) || [];
-
-        // Check if the assistant has any section permissions at all.
+        
         if (permittedGroupIds.length === 0) {
-            return next(new Error("Forbidden: You are not authorized to create sections for any group.", { cause: 403 }));
+            return next(new Error("Forbidden: You are not authorized to view any sections.", { cause: 403 }));
         }
 
-        // Check if every groupID in the request is included in the assistant's permissions.
-        const isAllowed =  permittedGroupIds.includes(ishe.createdBy);
-        if (!isAllowed) {
-            return next(new Error("Forbidden: You do not have permission to create a section for one or more of the selected groups.", { cause: 403 }));
+        // Check for overlap between assistant's permissions and the section's groups.
+        const sectionGroupIds = sectionForAuth.groupIds.map(id => id.toString());
+        const hasPermission = sectionGroupIds.some(groupId => permittedGroupIds.includes(groupId));
+
+        if (!hasPermission) {
+            return next(new Error("Forbidden: You do not have permission to view this section.", { cause: 403 }));
         }
-    }else if (req.isteacher.teacher === false) {
+    } else if (!isteacher) { // Corrected check for students
         const student = await studentModel.findById(req.user._id).select('groupId').lean();
         if (!student?.groupId || !sectionForAuth.groupIds.map(id => id.toString()).includes(student.groupId.toString())) {
             return next(new Error("You are not authorized to view this section.", { cause: 403 }));
@@ -193,10 +193,9 @@ export const viewSectionById = asyncHandler(async (req, res, next) => {
                 _id: 1, name: 1, description: 1,gradeId: 1,
                 content: {
                     $concatArrays: [
-                        buildContentMap("$assignments", "assignment"),
-                        buildContentMap("$exams", "exam"),
-                        buildContentMap("$materials", "material"),
-                        buildContentMap("$nestedSections", "section")
+                        buildContentMap("$assignments", CONTENT_TYPES.ASSIGNMENT),
+                        buildContentMap("$exams", CONTENT_TYPES.EXAM),
+                        buildContentMap("$materials", CONTENT_TYPES.MATERIAL)
                     ]
                 }
             }

@@ -32,9 +32,9 @@ export const canEditSection = asyncHandler(async (req, res, next) => {
         if (!section) {
             return next(new Error('Not Found: The specified section does not exist.', { cause: 404 }));
         }
+        const permittedGroupIds = req.user.permissions.sections?.map(id => id.toString()) || [];
 
         // Get the groups the assistant is allowed to manage.
-        const permittedGroupIds = req.user.permissions.groups?.map(id => id.toString()) || [];
         if (permittedGroupIds.length === 0) {
             return next(new Error('Forbidden: You are not assigned to manage any groups.', { cause: 403 }));
         }

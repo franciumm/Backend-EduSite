@@ -5,6 +5,9 @@ import * as Start from './controller/Start.js';
 import * as Edit from "./controller/Edit.js";
 import * as Get from "./controller/Get.js"
 import { isAuth,AdminAuth } from "../../middelwares/auth.js";
+import { creationValidator } from "../../middelwares/creationValidator.js";
+import { CONTENT_TYPES } from "../../utils/constants.js";
+
 const router = Router();
 
 
@@ -18,7 +21,11 @@ router.get("/student/submissions", isAuth, Get.getSubmissionsByGroup);
 router.get("/submissions", isAuth, Get.getSubmittedExams);
 router.get("/download", isAuth, Edit.downloadExam);
 router.get("/submissions/download", isAuth, Edit.downloadSubmittedExam);
-router.post ('/create',isAuth,multerCloudFunction(allowedExtensions.Files).single('file'),Start.createExam);
+router.post ('/create',
+isAuth
+,multerCloudFunction(allowedExtensions.Files).single('file'),
+creationValidator(CONTENT_TYPES.EXAM),
+Start.createExam);
 router.post("/submit",isAuth,multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitExam);
 router.put("/mark", isAuth, Edit.markSubmissionWithPDF);
 router.post("/add-exception",  AdminAuth, Edit.addExceptionStudent);

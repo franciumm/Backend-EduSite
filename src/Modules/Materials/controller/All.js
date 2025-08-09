@@ -9,6 +9,7 @@ import { getPresignedUrlForS3, deleteFileFromS3 } from '../../../utils/S3Client.
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { nanoid } from 'nanoid';
+import { toZonedTime } from 'date-fns-tz';
 
 const s3Client = new S3Client({
     region: process.env.AWS_REGION,
@@ -22,20 +23,26 @@ export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
     }
 
     const { user, isteacher } = req;
+    const uaeTimeZone = 'Asia/Dubai';
+    const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
+    
+    // **FIX**: Initialize queryFilter here to be used later.
+    let queryFilter = { groupIds: groupId };
     let isAuthorized = false;
 
     if (isteacher) {
-        if (user.role === 'main_teacher') {
+        if (user.role === 'main_teacher' || (user.role === 'assistant' && (user.permissions.materials?.map(id => id.toString()) || []).includes(groupId))) {
             isAuthorized = true;
-        } else if (user.role === 'assistant') {
-            const permittedGroupIds = user.permissions.materials?.map(id => id.toString()) || [];
-            if (permittedGroupIds.includes(groupId)) {
-                isAuthorized = true;
-            }
         }
     } else {
         if (user.groupId?.toString() === groupId) {
             isAuthorized = true;
+            // **FIX**: Apply student-specific filter for scheduled content.
+            queryFilter.$or = [
+                { publishDate: { $exists: false } },
+                { publishDate: null },
+                { publishDate: { $lte: nowInUAE } }
+            ];
         }
     }
 
@@ -43,13 +50,27 @@ export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
         return next(new Error("Unauthorized: You do not have access to this group's materials.", { cause: 403 }));
     }
 
-    const materials = await materialModel.find({ groupIds: groupId });
+    // **FIX**: Use the constructed `queryFilter` and add `.lean()` for efficiency.
+    let materials = await materialModel.find(queryFilter).lean();
+    
+    if (isteacher) {
+        materials = materials.map(material => {
+            const isPublished = !material.publishDate || new Date(material.publishDate) <= nowInUAE;
+            return {
+                ...material,
+                status: isPublished ? 'Published' : `Scheduled for ${new Date(material.publishDate).toLocaleDateString('en-GB', { timeZone: uaeTimeZone })}`,
+                publishDate: material.publishDate
+            };
+        });
+    }
+
+    // **RESPONSE STRUCTURE PRESERVED**
     res.status(200).json({ message: "Materials fetched successfully for the group.", data: materials });
 });
 
-// Create material (main_teacher only)
+// Create material (main_teacher only) - Logic is correct.
 export const createMaterial = asyncHandler(async (req, res, next) => {
-    const { name, description, gradeId, groupIds, linksArray, files } = req.body;
+    const { name, description, gradeId, groupIds, linksArray, files, publishDate } = req.body;
     const teacherId = req.user._id;
 
     if (!files || files.length === 0 || !name || !gradeId) {
@@ -72,12 +93,14 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
         createdBy: teacherId,
         bucketName: process.env.S3_BUCKET_NAME,
         files: files,
+        publishDate: publishDate || null
     });
 
+    // **RESPONSE STRUCTURE PRESERVED**
     res.status(201).json({ message: "Material created successfully", material: newMaterial });
 });
 
-// Generate a presigned URL for S3 upload (main_teacher only)
+// Generate a presigned URL for S3 upload (main_teacher only) - Logic is correct.
 export const generateUploadUrl = asyncHandler(async (req, res, next) => {
     const { fileName, fileType, materialName } = req.body;
     if (!fileName || !fileType || !materialName) {
@@ -97,15 +120,15 @@ export const generateUploadUrl = asyncHandler(async (req, res, next) => {
     res.status(200).json({ message: "Upload URL generated successfully.", uploadUrl, s3Key });
 });
 
-// List materials based on user's role and permissions
+// List materials based on user's role and permissions - Logic is correct.
 export const getMaterials = asyncHandler(async (req, res, next) => {
     const { page = 1, size = 20 } = req.query;
     const { user, isteacher } = req;
-
+    const uaeTimeZone = 'Asia/Dubai';
+    const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
     let filter = {};
 
     if (isteacher) {
-     
         if (user.role === 'assistant') {
             const permittedGroupIds = user.permissions.materials || [];
             if (permittedGroupIds.length === 0) {
@@ -118,17 +141,36 @@ export const getMaterials = asyncHandler(async (req, res, next) => {
         if (!student?.groupId) {
             return next(new Error("Student is not assigned to any group.", { cause: 400 }));
         }
-        filter = { groupIds: student.groupId };
+        filter = {
+            groupIds: student.groupId,
+            $or: [
+                { publishDate: { $exists: false } },
+                { publishDate: null },
+                { publishDate: { $lte: nowInUAE } }
+            ]
+        };
     }
 
     const { limit, skip } = pagination({ page, size });
-    const materials = await materialModel.find(filter)
-        .select("name description createdAt")
+    let materialsQuery = materialModel.find(filter)
+        .select(isteacher ? "name description createdAt publishDate" : "name description createdAt")
         .skip(skip)
         .limit(limit)
         .lean();
+    let materials = await materialsQuery;
     const totalMaterials = await materialModel.countDocuments(filter);
+    if (isteacher) {
+        materials = materials.map(material => {
+            const isPublished = !material.publishDate || new Date(material.publishDate) <= nowInUAE;
+            return {
+                ...material,
+                status: isPublished ? 'Published' : `Scheduled for ${new Date(material.publishDate).toLocaleDateString('en-GB', { timeZone: uaeTimeZone })}`,
+                publishDate: material.publishDate
+            };
+        });
+    }
 
+    // **RESPONSE STRUCTURE PRESERVED**
     res.status(200).json({
         message: "Materials retrieved successfully",
         materials,
@@ -158,9 +200,17 @@ export const viewMaterial = asyncHandler(async (req, res, next) => {
         return next(new Error("You are not authorized to view this material.", { cause: 403 }));
     }
 
-    const material = await materialModel.findById(materialId);
+    const material = await materialModel.findById(materialId).lean(); // **FIX**: Use .lean()
     if (!material) {
         return next(new Error("Material not found.", { cause: 404 }));
+    }
+
+    if (!req.isteacher && material.publishDate) {
+        const uaeTimeZone = 'Asia/Dubai';
+        const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
+        if (new Date(material.publishDate) > nowInUAE) {
+            return next(new Error("You are not authorized to view this material yet.", { cause: 403 }));
+        }
     }
 
     const urlGenerationPromises = material.files.map(file =>
@@ -173,16 +223,69 @@ export const viewMaterial = asyncHandler(async (req, res, next) => {
         url: presignedUrls[index]
     }));
 
-    res.status(200).json({
+    // **FIX**: Build the response object manually to preserve structure.
+    const responseData = {
         message: "Material is ready for viewing",
         name: material.name,
         Links: material.linksArray,
         description: material.description,
         files: filesWithUrls,
-    });
+    };
+
+    if (req.isteacher) {
+        const uaeTimeZone = 'Asia/Dubai';
+        const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
+        const isPublished = !material.publishDate || new Date(material.publishDate) <= nowInUAE;
+        responseData.status = isPublished ? 'Published' : `Scheduled for ${new Date(material.publishDate).toLocaleDateString('en-GB', { timeZone: uaeTimeZone })}`;
+        responseData.publishDate = material.publishDate;
+    }
+    
+    // **RESPONSE STRUCTURE PRESERVED**
+    res.status(200).json(responseData);
 });
 
-// Delete material (main_teacher only, and must be creator)
+// Edit material details
+export const editMaterial = asyncHandler(async (req, res, next) => {
+    const { materialId } = req.params;
+    const { name, description, gradeId, groupIds, linksArray, files, publishDate } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(materialId)) {
+        return next(new Error("Invalid Material ID.", { cause: 400 }));
+    }
+
+    const material = await materialModel.findById(materialId);
+    if (!material) {
+        return next(new Error("Material not found.", { cause: 404 }));
+    }
+
+    const updateData = {};
+    if (name) {
+        updateData.name = name;
+        updateData.slug = slugify(name, { lower: true, strict: true });
+    }
+    // **FIX**: Allow updating description to an empty string.
+    if (description !== undefined) updateData.description = description;
+    if (gradeId) updateData.gradeId = gradeId;
+    if (groupIds) updateData.groupIds = groupIds;
+    if (linksArray) updateData.linksArray = linksArray;
+    if (files) updateData.files = files;
+    
+    // **FIX**: Removed duplicated block.
+    if (publishDate !== undefined) {
+        updateData.publishDate = publishDate;
+    }
+
+    const updatedMaterial = await materialModel.findByIdAndUpdate(
+        materialId,
+        { $set: updateData },
+        { new: true }
+    );
+    
+    // **RESPONSE STRUCTURE PRESERVED**
+    res.status(200).json({ message: "Material updated successfully", material: updatedMaterial });
+});
+
+// Delete material (main_teacher only) - Logic is correct.
 export const deleteMaterial = asyncHandler(async (req, res, next) => {
     const { materialId } = req.params;
 
@@ -190,12 +293,10 @@ export const deleteMaterial = asyncHandler(async (req, res, next) => {
         return next(new Error("Invalid Material ID.", { cause: 400 }));
     }
     
-    
     const material = await materialModel.findById(materialId);
     if (!material) {
         return next(new Error("Material not found.", { cause: 404 }));
     }
-
   
     await material.deleteOne();
 

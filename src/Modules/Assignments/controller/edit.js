@@ -13,6 +13,7 @@ import { assignmentModel } from '../../../../DB/models/assignment.model.js';
 import { s3 } from '../../../utils/S3Client.js';
 import fs from "fs";
 import { promises as fsPromises } from 'fs';
+import { CONTENT_TYPES } from "../../../utils/constants.js"; // Import constants
 
 
 
@@ -24,7 +25,7 @@ export const downloadAssignment = asyncHandler(async (req, res, next) => {
         user: req.user,
          isTeacher: req.isteacher, 
         contentId: assignmentId,
-        contentType: 'assignment'
+        contentType: CONTENT_TYPES.ASSIGNMENT
     });
     if (!hasAccess ) {
         return next(new Error("You are not authorized to access this assignment.", { cause: 403 }));
@@ -35,15 +36,7 @@ export const downloadAssignment = asyncHandler(async (req, res, next) => {
         return next(new Error("Assignment not found.", { cause: 404 }));
     }
 
-    // This timeline check remains a good secondary validation for students.
-    if (req.isteacher.teacher === false) {
-        const uaeTimeZone = 'Asia/Dubai';
-        const now = toZonedTime(new Date(), uaeTimeZone);
-        if ((now < assignment.startDate || now > assignment.endDate) && !assignment.allowSubmissionsAfterDueDate) {
-            return next(new Error(`This Assignment is not available at this time.`, { cause: 200 }));
-        }
-    }
-
+ 
     const { bucketName, key } = assignment;
     const command = new GetObjectCommand({ Bucket: bucketName, Key: key });
     const response = await s3.send(command);
@@ -135,7 +128,7 @@ export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) =
             user: req.user,
             isTeacher: true,
             contentId: submission.assignmentId,
-            contentType: 'assignment'
+            contentType:CONTENT_TYPES.ASSIGNMENT
         });
        
     }
@@ -166,7 +159,7 @@ if (!req.isteacher) return next(new Error("Forbidden.", { cause: 403 }));
         user: req.user,
         isTeacher: true,
         contentId: submission.assignmentId,
-        contentType: 'assignment'
+        contentType:  CONTENT_TYPES.ASSIGNMENT 
     });
 
     if (!hasAccess) {
@@ -239,7 +232,7 @@ const submission = await SubassignmentModel.findById(submissionId);
             user: req.user,
             isTeacher: true,
             contentId: submission.assignmentId,
-            contentType: 'assignment'
+            contentType: CONTENT_TYPES.ASSIGNMENT
         });
     }
 

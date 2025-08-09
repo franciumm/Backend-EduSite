@@ -4,82 +4,94 @@ import { SubassignmentModel } from '../../../../DB/models/submitted_assignment.m
 import { SubexamModel } from '../../../../DB/models/submitted_exams.model.js';
 import { asyncHandler } from "../../../utils/erroHandling.js";
 
-// --- Helper Function for the "Aggregate & Hydrate" Pattern (Unchanged) ---
-const hydrateGroupsWithSubmissions = async (groups) => {
-    // 1. Aggregate all student IDs from the groups
-    if (!groups || groups.length === 0) {
-        return [];
-    }
-    const studentIds = groups.flatMap(group => group.enrolledStudents.map(student => student._id));
-    if (studentIds.length === 0) {
-        return groups; // No students, no need to fetch submissions
-    }
 
-    // 2. Fetch all submissions for these students in parallel
-    const [assignmentSubmissions, examSubmissions] = await Promise.all([
-        SubassignmentModel.find({ studentId: { $in: studentIds } }).select('studentId assignmentId').lean(),
-        SubexamModel.find({ studentId: { $in: studentIds } }).select('studentId examId').lean()
-    ]);
 
-    // 3. Create Maps for ultra-fast lookups
-    const assgSubmissionsMap = new Map();
-    assignmentSubmissions.forEach(sub => {
-        const studentIdStr = sub.studentId.toString();
-        if (!assgSubmissionsMap.has(studentIdStr)) {
-            assgSubmissionsMap.set(studentIdStr, []);
-        }
-        assgSubmissionsMap.get(studentIdStr).push(sub);
-    });
 
-    const examSubmissionsMap = new Map();
-    examSubmissions.forEach(sub => {
-        const studentIdStr = sub.studentId.toString();
-        if (!examSubmissionsMap.has(studentIdStr)) {
-            examSubmissionsMap.set(studentIdStr, []);
-        }
-        examSubmissionsMap.get(studentIdStr).push(sub);
-    });
+const getAndHydrateGroupsViaAggregation = async (initialMatch) => {
+    const pipeline = [
+        // Stage 1: Initial Filter - Find only the groups the user is allowed to see.
+        { $match: initialMatch },
 
-    // 4. Hydrate the original student objects
-    groups.forEach(group => {
-        group.enrolledStudents.forEach(student => {
-            const studentIdStr = student._id.toString();
-            student.submittedassignments = assgSubmissionsMap.get(studentIdStr) || [];
-            student.submittedexams = examSubmissionsMap.get(studentIdStr) || [];
-        });
-    });
+        // Stage 2: Populate Enrolled Students - More performant than .populate()
+        {
+            $lookup: {
+                from: 'students', // The actual collection name for students
+                localField: 'enrolledStudents',
+                foreignField: '_id',
+                as: 'enrolledStudents',
+                pipeline: [
+                    // We only need specific fields for the final response
+                    { $project: { _id: 1, userName: 1, firstName: 1, lastName: 1, phone: 1, email: 1, parentPhone: 1 } }
+                ]
+            }
+        },
 
-    return groups;
+        // Stage 3: Deconstruct the students array to process each one individually.
+        { $unwind: { path: "$enrolledStudents", preserveNullAndEmptyArrays: true } },
+
+        // Stage 4: Look up all assignment submissions for each student.
+        {
+            $lookup: {
+                from: 'subassignments', // The actual collection name for submitted assignments
+                localField: 'enrolledStudents._id',
+                foreignField: 'studentId',
+                as: 'enrolledStudents.submittedassignments'
+            }
+        },
+        
+        // Stage 5: Look up all exam submissions for each student.
+        {
+            $lookup: {
+                from: 'subexams', // The actual collection name for submitted exams
+                localField: 'enrolledStudents._id',
+                foreignField: 'studentId',
+                as: 'enrolledStudents.submittedexams'
+            }
+        },
+
+        // Stage 6: Reconstruct the groups.
+        // This groups the students (who now have their submissions) back into their parent group.
+        {
+            $group: {
+                _id: "$_id",
+                groupname: { $first: "$groupname" },
+                gradeid: { $first: "$gradeid" },
+                createdAt: { $first: "$createdAt" },
+                updatedAt: { $first: "$updatedAt" },
+                // Add students back into an array, but only if they exist
+                enrolledStudents: { 
+                    $push: { 
+                        $cond: [ "$enrolledStudents._id", "$enrolledStudents", "$$REMOVE" ]
+                    } 
+                }
+            }
+        },
+        // Stage 7: Sort the final groups by creation date.
+        { $sort: { createdAt: -1 } }
+    ];
+
+    return await groupModel.aggregate(pipeline);
 };
 
 // --- Refactored & Secured Controller Functions ---
 
 export const getall = asyncHandler(async (req, res, next) => {
     const { user, isteacher } = req;
-    let query = {};
+    let initialMatch = {};
 
-    // Define the query based on user role
     if (isteacher) {
         if (user.role === 'assistant') {
-            const permittedGroupIds = user.permissions.groups?.map(id => id.toString()) || [];
-            query = { _id: { $in: permittedGroupIds } };
+            const permittedGroupIds = user.permissions.groups?.map(id => new mongoose.Types.ObjectId(id)) || [];
+            initialMatch = { _id: { $in: permittedGroupIds } };
         }
-        // For 'main_teacher', query remains {} to find all.
     } else {
-        // For students, find only their specific group.
         if (!user.groupId) {
-             return res.status(200).json({ Message: "Done", groups: [] }); // Student not in a group
+            return res.status(200).json({ Message: "Done", groups: [] });
         }
-        query = { _id: user.groupId };
+        initialMatch = { _id: new mongoose.Types.ObjectId(user.groupId) };
     }
 
-    const groups = await groupModel.find(query).populate({
-        path: "enrolledStudents",
-        select: "_id userName firstName"
-    }).lean();
-
-    const hydratedGroups = await hydrateGroupsWithSubmissions(groups);
-    
+    const hydratedGroups = await getAndHydrateGroupsViaAggregation(initialMatch);
     res.status(200).json({ Message: "Done", groups: hydratedGroups });
 });
 
@@ -87,7 +99,6 @@ export const Bygrade = asyncHandler(async (req, res, next) => {
     const { user, isteacher } = req;
     const { grade } = req.query;
 
-    // RULE: Students cannot use this endpoint.
     if (!isteacher) {
         return next(new Error('Forbidden: You do not have permission to perform this action.', { cause: 403 }));
     }
@@ -97,63 +108,46 @@ export const Bygrade = asyncHandler(async (req, res, next) => {
         return next(new Error(`Grade "${grade}" not found`, { cause: 404 }));
     }
 
-    let query = { gradeid: gradeDoc._id };
+    let initialMatch = { gradeid: gradeDoc._id };
 
-    // RULE: Assistants can only see groups within their permissions.
     if (user.role === 'assistant') {
-        const permittedGroupIds = user.permissions.groups?.map(id => id.toString()) || [];
-        query._id = { $in: permittedGroupIds };
+        const permittedGroupIds = user.permissions.groups?.map(id => new mongoose.Types.ObjectId(id)) || [];
+        // Intersect the grade filter with the assistant's permissions
+        initialMatch._id = { $in: permittedGroupIds };
     }
-     // RULE: Main teachers have no _id restrictions.
 
-    const groups = await groupModel
-        .find(query)
-        .populate({
-            path: "enrolledStudents",
-            select: "_id userName firstName lastName phone email parentPhone"
-        }).lean();
-
-    const hydratedGroups = await hydrateGroupsWithSubmissions(groups);
-
-    res.status(200).json({
-        Message: "Groups fetched successfully",
-        groups: hydratedGroups
-    });
+    const hydratedGroups = await getAndHydrateGroupsViaAggregation(initialMatch);
+    res.status(200).json({ Message: "Groups fetched successfully", groups: hydratedGroups });
 });
-
 export const ById = asyncHandler(async (req, res, next) => {
     const { user, isteacher } = req;
     const { _id } = req.query;
 
-    // Authorization Checks
+    if (!mongoose.Types.ObjectId.isValid(_id)) {
+        return next(new Error(`Invalid Group ID format`, { cause: 400 }));
+    }
+
+    const groupId = new mongoose.Types.ObjectId(_id);
+    let initialMatch = { _id: groupId };
+
     if (isteacher) {
-        // RULE: Assistant must have the group in their permissions.
         if (user.role === 'assistant') {
             const permittedGroupIds = user.permissions.groups?.map(id => id.toString()) || [];
             if (!permittedGroupIds.includes(_id)) {
                 return next(new Error('Forbidden: You do not have permission to view this group.', { cause: 403 }));
             }
         }
-        // RULE: Main teacher has no restrictions.
     } else {
-        // RULE: Student can only view their own group.
         if (!user.groupId || user.groupId.toString() !== _id) {
             return next(new Error('Forbidden: You can only view your own group.', { cause: 403 }));
         }
     }
 
-    // If authorization passes, fetch the data.
-    const group = await groupModel.findById(_id).populate({
-        path: "enrolledStudents",
-        select: "_id userName firstName"
-    }).lean();
+    const hydratedGroups = await getAndHydrateGroupsViaAggregation(initialMatch);
 
-    if (!group) {
+    if (!hydratedGroups || hydratedGroups.length === 0) {
         return next(new Error(`Group with ID "${_id}" not found`, { cause: 404 }));
     }
-
-    // Hydrate a single group (passed as an array)
-    const hydratedGroup = await hydrateGroupsWithSubmissions([group]);
     
-    res.status(200).json({ Message: "Done", group: hydratedGroup[0] }); // Return the single object
+    res.status(200).json({ Message: "Done", group: hydratedGroups[0] });
 });

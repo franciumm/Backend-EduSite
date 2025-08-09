@@ -12,6 +12,7 @@ import fs from 'fs';
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
 import { sectionModel } from "../../../../DB/models/section.model.js";
 const fsPromises = fs.promises;
+import { CONTENT_TYPES } from "../../../utils/constants.js"; // Import constants
 
 const validateExamId = (req, res, next) => {
     const { examId } = req.query;
@@ -28,7 +29,7 @@ const authorizeExamDownload = asyncHandler(async (req, res, next) => {
         user: req.user,
         isTeacher: req.isteacher,
         contentId: examId,
-        contentType: 'exam'
+        contentType: CONTENT_TYPES.EXAM
     });
 
     if (!hasAccess) {
@@ -96,32 +97,11 @@ export const editExam = asyncHandler(async (req, res, next) => {
     }
 
 
- if (user.role === 'main_teacher') {
-        // Rule 1: A main_teacher is always authorized. No further checks needed.
-        // Access is granted by allowing the code to continue.
-    } 
-    else if (user.role === 'assistant') {
-        // Rule 2: An assistant must pass two specific checks.
-        
-        // Check A: Is the assistant the creator of the exam?
-        if (!exam.createdBy.equals(user._id)) {
-            return next(new Error("Forbidden: You are not authorized to edit this exam because you did not create it.", { cause: 403 }));
-        }
+  const isMainTeacher = user.role === 'main_teacher';
+    const isOwner = exam.createdBy.equals(user._id);
 
-        // Check B: Does the assistant have permission for ALL groups this exam is in?
-        // This is a critical security check to prevent editing exams with escalated scope.
-        const permittedGroupIds = new Set(user.permissions.exams?.map(id => id.toString()) || []);
-        const examGroupIds = exam.groupIds.map(id => id.toString());
-        const hasPermissionForAllGroups = examGroupIds.every(id => permittedGroupIds.has(id));
-
-        if (!hasPermissionForAllGroups) {
-            return next(new Error("Forbidden: You cannot edit this exam as it is assigned to groups you do not have permission to manage.", { cause: 403 }));
-        }
-        // If both checks pass, the assistant is authorized.
-    } 
-    else {
-        // Rule 3: All other roles are denied.
-        return next(new Error("Forbidden: You are not authorized to edit exams.", { cause: 403 }));
+    if (!isMainTeacher && !isOwner) {
+        return next(new Error("You are not authorized to edit this exam.", { cause: 403 }));
     }
     if (req.file) {
         if (exam.key) {
@@ -176,10 +156,7 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
 
-    // --- Phase 2: Data Fetching ---
-    // Fetch the submission. No need to populate as the authorization logic is simpler now.
-    // Use .lean() for a fast, read-only query since we don't need a full Mongoose document.
-    const submission = await SubexamModel.findById(submissionId).lean();
+  const submission = await SubexamModel.findById(submissionId);
 
     if (!submission) {
         return next(new Error("Submission not found.", { cause: 404 }));
@@ -188,18 +165,15 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
   let isAuthorized = false;
 
     if (isteacher) {
-        // CRITICAL FIX: The variable 'examId' comes from the submission document.
         const examId = submission.examId; 
 
-        // For teachers (main or assistant), use canAccessContent helper.
         isAuthorized = await canAccessContent({
             user: user,
             isTeacher: true,
             contentId: examId,
-            contentType: 'exam'
+            contentType: CONTENT_TYPES.EXAM
         });
     } else {
-        // For students, they must be the owner of the submission.
         if (submission.studentId.equals(user._id)) {
             isAuthorized = true;
         }
@@ -223,7 +197,7 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
 
   return res.status(200).json({
     message: "Marked PDF Downloaded successfully",
-    submission: submission,
+    submission:  submission.toObject(),
   });
 });
 
@@ -234,7 +208,8 @@ export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {
 export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
   if (!req.isteacher) {
         return next(new Error("Forbidden: This action is only available to teachers.", { cause: 403 }));
-    }  const { submissionId, score, feedback ,annotationData} = req.body;
+    }  
+    const { submissionId, score, feedback ,annotationData} = req.body;
 
   // 1. Validate submissionId
   if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
@@ -250,14 +225,12 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
   }
 
 
-  const examId = subExam.examId;
-
     // Use the content helper to verify if this teacher (main or assistant) has access to this exam.
     const hasAccess = await canAccessContent({
         user: req.user,
         isTeacher: req.isteacher,
-        contentId: examId,
-        contentType: 'exam'
+        contentId: subExam.examId,
+        contentType: CONTENT_TYPES.EXAM
     });
 
     if (!hasAccess) {
@@ -289,7 +262,7 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
 
 export const deleteExam = asyncHandler(async (req, res, next) => {
   const { examId } = req.body;
-  const {user ,isteacher } = req;
+  const {user  } = req;
 
 
 
@@ -309,22 +282,12 @@ export const deleteExam = asyncHandler(async (req, res, next) => {
     return next(new Error("Exam not found", { cause: 404 }));
   }
 
-   if (!isteacher) {
-            return next(new Error("Forbidden: You are not authorized to perform this action.", { cause: 403 }));
+ const isMainTeacher = user.role === 'main_teacher';
+    const isOwner = exam.createdBy.equals(user._id);
 
-    } else if (user.role === 'assistant') {
-       if (!exam.createdBy.equals(user._id)) {
-            return next(new Error("Forbidden: You can only delete exams that you have created.", { cause: 403 }));
-        }
-        // For assistants, we must verify they have permission for ALL groups the exam is in.
-       const permittedGroupIds = new Set(user.permissions.exams?.map(id => id.toString()) || []);
-        const examGroupIds = exam.groupIds.map(id => id.toString());
-        const hasPermissionForAllGroups = examGroupIds.every(id => permittedGroupIds.has(id));
-        if (!hasPermissionForAllGroups) {
-            return next(new Error("Forbidden: Cannot delete exam as it's in groups you don't manage.", { cause: 403 }));
-        }
-    } 
-
+    if (!isMainTeacher && !isOwner) {
+        return next(new Error("You are not authorized to delete this exam.", { cause: 403 }));
+    }
   await exam.deleteOne();
 
   // 5. Send the success response.
@@ -343,9 +306,7 @@ export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
         return next(new Error("A valid Submission ID is required.", { cause: 400 }));
     }
 
-    // --- Phase 2: Fetch the Full Mongoose Document ---
-    // We REMOVE .lean() because we need the document instance with its methods (like .deleteOne()).
-    const submission = await SubexamModel.findById(submissionId);
+  const submission = await SubexamModel.findById(submissionId);
     
     if (!submission) {
         return next(new Error("Submission not found.", { cause: 404 }));

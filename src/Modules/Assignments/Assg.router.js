@@ -5,7 +5,8 @@ import * as Get from "./controller/get.js";
 import { AdminAuth, isAuth } from "../../middelwares/auth.js";
 import {multerCloudFunction}from '../../utils/MulterCloud.js'
 import { allowedExtensions } from "../../utils/allowedExtensions.js";
-
+import { creationValidator } from "../../middelwares/creationValidator.js";
+import { CONTENT_TYPES } from "../../utils/constants.js";
 
 const router = Router();
 
@@ -13,7 +14,10 @@ router.delete("/delete", isAuth, Edit.deleteAssignmentWithSubmissions);
 router.delete("/submission/delete", isAuth, Edit.deleteSubmittedAssignment);
 
 
-router.post ('/create',isAuth,multerCloudFunction(allowedExtensions.Files).single('file'),Start.CreateAssignment);
+router.post ('/create',isAuth,
+    multerCloudFunction(allowedExtensions.Files).single('file'),
+    creationValidator(CONTENT_TYPES.ASSIGNMENT),
+    Start.CreateAssignment);
 router.post( "/submit", isAuth,  multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitAssignment);
 router.put("/edit", isAuth, multerCloudFunction(allowedExtensions.Files).single('file'), Edit.editAssignment);
 
