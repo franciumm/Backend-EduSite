@@ -100,12 +100,12 @@ if (!mongoose.isValidObjectId(groupid)) {
 });
 
 export const isAuth = asyncHandler(async (req, res, next) => {
-    const { Authorization } = req.headers
-    if (!Authorization || !Authorization.startsWith('MonaEdu')) {
+    const { authorization } = req.headers
+    if (!authorization || !authorization.startsWith('MonaEdu')) {
         return next(new Error('Please login first', { cause: 401 }))
     }
 
-    const splitedToken = Authorization.split(' ')[1]
+    const splitedToken = authorization.split(' ')[1]
     if (!splitedToken) {
         return next(new Error('Token is missing', { cause: 401 }));
     }
@@ -150,13 +150,13 @@ export const isAuth = asyncHandler(async (req, res, next) => {
 
 export const AdminAuth = asyncHandler(async (req, res, next) => {
     try {
-        const { Authorization } = req.headers;
+        const { authorization } = req.headers;
 
-        if (!Authorization || !Authorization.startsWith('MonaEdu')) {
+        if (!authorization || !authorization.startsWith('MonaEdu')) {
             return next(new Error('Invalid authorization header.', { cause: 401 }));
         }
 
-        const token = Authorization.split(' ')[1];
+        const token = authorization.split(' ')[1];
         if (!token) {
             return next(new Error('Token is required.', { cause: 401 }));
         }
