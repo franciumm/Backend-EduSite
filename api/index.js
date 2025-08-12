@@ -8,7 +8,6 @@ import morgan from 'morgan';
 import DBConnect from '../DB/DB.Connect.js';
 import bootstrape from '../src/index.router.js';   // keep your original router bootstrap
 import { requestId } from '../src/middelwares/requestId.js';
-import { notFound, errorHandler } from '../src/middelwares/errorHandling.js';
 
 const app = express();
 app.disable('x-powered-by');
