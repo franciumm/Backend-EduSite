@@ -13,7 +13,7 @@ router.post ('/signup',Joivalidation(Joi.signup),UserStart.Signup);
 router.get('/confirmEmail/:email', UserMailConfirm.confirmEmail);
 router.get('/newConfirmEmail/:email',UserMailConfirm.newConfirmEmail);
 router.post('/login',loginLimiter,Joivalidation(Joi.Login),UserStart.Login );
-router.post('/teacher/login',Joivalidation(Joi.Login),UserStart.AdminLogin );
+router.post('/teacher/login',loginLimiter,Joivalidation(Joi.Login),UserStart.AdminLogin );
 router.post ('/forget',PasswordC.forgetPassword);
 router.post ('/reset/:token',PasswordC.ResetPassword);
 router.get("/profile", isAuth , UserStart.getMyProfile);
