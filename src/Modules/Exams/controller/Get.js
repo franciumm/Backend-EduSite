@@ -195,193 +195,291 @@ export const getExams = asyncHandler(async (req, res, next) => {
 
 
 // --- Corrected and Improved Controller ---
-
 export const getSubmittedExams = asyncHandler(async (req, res, next) => {
-    const { groupId, examId, studentId, gradeId, status, page = 1, size = 10 } = req.query;
-    const { user, isteacher } = req;
-    const isTeacher = isteacher ;
-    const uaeTimeZone = 'Asia/Dubai';
-    const currentDate = toZonedTime(new Date(), uaeTimeZone);
+  const { groupId, examId, studentId, gradeId, status, page = 1, size = 10 } = req.query;
+  const { user, isteacher } = req;
+  const isTeacher = isteacher;
+  const uaeTimeZone = 'Asia/Dubai';
+  const currentDate = toZonedTime(new Date(), uaeTimeZone);
 
-    const pageNum = Math.max(1, parseInt(page, 10));
-    const limit = Math.max(1, parseInt(size, 10));
-    const skip = (pageNum - 1) * limit;
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limit = Math.max(1, parseInt(size, 10) || 10);
+  const skip = (pageNum - 1) * limit;
 
-    //================================ Teacher Logic ================================//
-    if (isTeacher) {
-        
-        // --- Path A: Exam-Centric Student Status View ---
-        // This unified path is triggered whenever an examId is provided.
+  const empty = (msg = "Submissions fetched successfully.") =>
+    res.status(200).json({ message: msg, total: 0, totalPages: 0, currentPage: pageNum, data: [] });
 
-        if (examId) {
-            if (!mongoose.Types.ObjectId.isValid(examId)) return next(new Error("Invalid Exam ID format.", { cause: 400 }));
+  // ================================ Teacher Logic ================================ //
+  if (isTeacher) {
+    // ------ Path A: Exam-Centric Student Status View (when examId provided) ------
+    if (examId) {
+      if (!mongoose.Types.ObjectId.isValid(examId)) return next(new Error("Invalid Exam ID format.", { cause: 400 }));
 
-            const exam = await examModel.findById(examId).lean();
-            if (!exam) return next(new Error("Exam not found.", { cause: 404 }));
+      const exam = await examModel.findById(examId).lean();
+      if (!exam) return next(new Error("Exam not found.", { cause: 404 }));
 
-            // Start with the full list of group IDs (as strings) from the exam.
-            let authorizedGroupIds = exam.groupIds.map(id => id.toString());
+      // Authorized groups for this user on this exam
+      let authorizedGroupIds = (exam.groupIds || []).map(id => id.toString());
 
-            // If the user is an assistant, filter this list down to only the groups they have permission for.
-            if (user.role === 'assistant') {
-                const permittedGroupIds = user.permissions.exams?.map(id => id.toString()) || [];
-                authorizedGroupIds = authorizedGroupIds.filter(id => permittedGroupIds.includes(id));
+      if (user.role === 'assistant') {
+        const permittedGroupIds = (user.permissions.exams || []).map(id => id.toString());
+        authorizedGroupIds = authorizedGroupIds.filter(id => permittedGroupIds.includes(id));
+        if (authorizedGroupIds.length === 0) return empty();
+      }
 
-                if (authorizedGroupIds.length === 0) {
-                    return res.status(200).json({ message: "You do not have permission to view any groups for this exam.", total: 0, currentPage: 1, totalPages: 1, data: [] });
+      // If a specific groupId is requested, validate & enforce membership
+      if (groupId) {
+        if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("Invalid Group ID format.", { cause: 400 }));
+        if (!authorizedGroupIds.includes(groupId)) return empty();
+        authorizedGroupIds = [groupId];
+      }
+
+      // Final student query
+      const studentMatch = {
+        groupId: { $in: authorizedGroupIds.map(id => new mongoose.Types.ObjectId(id)) }
+      };
+      if (studentId) {
+        if (!mongoose.Types.ObjectId.isValid(studentId)) return next(new Error("Invalid Student ID format.", { cause: 400 }));
+        studentMatch._id = new mongoose.Types.ObjectId(studentId);
+      }
+
+      // Build aggregation once and reuse for count + data
+      const basePipeline = [
+        { $match: studentMatch },
+        {
+          $lookup: {
+            from: 'subexams',
+            let: { student_id: '$_id' },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$studentId', '$$student_id'] },
+                      { $eq: ['$examId', new mongoose.Types.ObjectId(examId)] }
+                    ]
+                  }
                 }
-            }
-
-            // Now, `authorizedGroupIds` is the definitive list of groups this user can view for this exam.
-            
-            // If the user specified a single `groupId` in the query, we must validate it and use it.
-            if (groupId) {
-                if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("Invalid Group ID format.", { cause: 400 }));
-                // Security Check: The requested group MUST be in the list of authorized groups.
-                if (!authorizedGroupIds.includes(groupId)) {
-                    return res.status(200).json({ message: "The specified group is not part of this exam or you lack permission.", total: 0, currentPage: 1, totalPages: 1, data: [] });
-                }
-                // If it's valid, this single group becomes our target.
-                authorizedGroupIds = [groupId];
-            }
-
-            // --- The Final, Correct Student Query ---
-            // Build the query using the final, validated list of group IDs, converting them back to ObjectIds.
-            const studentQuery = { 
-                groupId: { $in: authorizedGroupIds.map(id => new mongoose.Types.ObjectId(id)) } 
-            };
-            
-            if (studentId) {
-                if (!mongoose.Types.ObjectId.isValid(studentId)) return next(new Error("Invalid Student ID format.", { cause: 400 }));
-                studentQuery._id = new mongoose.Types.ObjectId(studentId);
-            }
-
-            const total = await studentModel.countDocuments(studentQuery);
-            
-            const aggregationPipeline = [
-                { $match: studentQuery },
-                { $sort: { firstName: 1 } },
-                { $skip: skip },
-                { $limit: limit },
-                {
-                    $lookup: {
-                        from: 'subexams',
-                        let: { student_id: "$_id" },
-                        pipeline: [
-                            { $match: { $expr: { $and: [ { $eq: ["$studentId", "$$student_id"] }, { $eq: ["$examId", exam._id] } ] } } },
-                            { $sort: { version: -1 } }
-                        ],
-                        as: 'submissions'
-                    }
-                },
-                {
-                    $project: {
-                        _id: 1, userName: 1, firstName: 1, lastName: 1,
-                        status: { $cond: { if: { $gt: [{ $size: "$submissions" }, 0] }, then: 'submitted', else: 'not submitted' } },
-                        submissionCount: { $size: "$submissions" },
-                        submissions: 1
-                    }
-                }
-            ];
-            
-            let hydratedData = await studentModel.aggregate(aggregationPipeline);
-
-            if (status && ['submitted', 'not submitted'].includes(status)) {
-                hydratedData = hydratedData.filter(s => s.status === status);
-            }
-
-            const group = groupId ? await groupModel.findById(groupId).select('groupname').lean() : null;
-
-            return res.status(200).json({
-                message: "Student submission statuses fetched successfully.",
-                examName: exam.Name,
-                groupName: group?.groupname || "Multiple Groups",
-                total,
-                totalPages: Math.ceil(total / limit),
-                currentPage: pageNum,
-                data: hydratedData
-            });
+              },
+              { $sort: { version: -1 } }
+            ],
+            as: 'submissions'
+          }
+        },
+        {
+          $project: {
+            _id: 1,
+            userName: 1,
+            firstName: 1,
+            lastName: 1,
+            status: {
+              $cond: {
+                if: { $gt: [{ $size: '$submissions' }, 0] },
+                then: 'submitted',
+                else: 'not submitted'
+              }
+            },
+            submissionCount: { $size: '$submissions' },
+            submissions: 1
+          }
         }
-        // --- Path B: General Submission List (no examId provided) ---
-        const matchStage = {};
-        
-        if (user.role === 'assistant') {
-            const permittedGroupIds = user.permissions.exams?.map(id => id.toString()) || [];
-            if (permittedGroupIds.length === 0) {
-                return res.status(200).json({ message: "You have no permissions to view any submissions.", total: 0, totalPages: 1, currentPage: pageNum, data: [] });
-            }
-            // Scope query to all permitted groups
-            matchStage["examData.groupIds"] = { $in: user.permissions.exams };
-        }
+      ];
 
-        if (groupId) matchStage["examData.groupIds"] = new mongoose.Types.ObjectId(groupId);
-        if (gradeId) matchStage["examData.grade"] = new mongoose.Types.ObjectId(gradeId);
-        if (studentId) matchStage.studentId = new mongoose.Types.ObjectId(studentId);
-        
-        if (status === "active") {
-            matchStage["examData.startdate"] = { $lte: currentDate };
-            matchStage["examData.enddate"] = { $gte: currentDate };
-        } else if (status === "upcoming") {
-            matchStage["examData.startdate"] = { $gt: currentDate };
-        } else if (status === "expired") {
-            matchStage["examData.enddate"] = { $lt: currentDate };
-        }
+      // Optional status filter (submitted / not submitted)
+      const statusFilter =
+        status && ['submitted', 'not submitted'].includes(status) ? [{ $match: { status } }] : [];
 
-        const basePipeline = [
-            { $lookup: { from: "exams", localField: "examId", foreignField: "_id", as: "examData" } }, { $unwind: "$examData" }, 
-            { $match: matchStage },
-            { $lookup: { from: 'students', localField: 'studentId', foreignField: '_id', as: 'studentData' } }, { $unwind: '$studentData' },
-        ];
-        const [totalResult] = await SubexamModel.aggregate([...basePipeline, { $count: "total" }]);
-        const totalSubmissions = totalResult ? totalResult.total : 0;
-        const dataPipeline = [
-            ...basePipeline, { $sort: { createdAt: -1 } }, { $skip: skip }, { $limit: limit },
-            {
-                $project: { annotationData: 1, _id: 1, createdAt: 1, updatedAt: 1, score: 1, notes: 1, fileBucket: 1, fileKey: 1, filePath: 1, teacherFeedback: 1,
-                    examId: { _id: '$examData._id', Name: '$examData.Name', startdate: '$examData.startdate', enddate: '$examData.enddate' },
-                    studentId: { _id: '$studentData._id', userName: '$studentData.userName', firstName: '$studentData.firstName', lastName: '$studentData.lastName' }
-                }
-            }
-        ];
-        const submissions = await SubexamModel.aggregate(dataPipeline);
-        return res.status(200).json({
-            message: "Submitted exams fetched successfully.",
-            total: totalSubmissions,
-            totalPages: Math.ceil(totalSubmissions / limit),
-            currentPage: pageNum,
-             submissions
-        });
-    }
+      const [{ total = 0 } = {}] = await studentModel.aggregate([
+        ...basePipeline,
+        ...statusFilter,
+        { $count: 'total' }
+      ]);
 
-    //================================ Student Logic (Unchanged) ================================//
-    const studentPipeline = [
-        { $match: { studentId: user._id } },
-        { $lookup: { from: "exams", localField: "examId", foreignField: "_id", as: "examData" } }, { $unwind: "$examData" },
-        { $addFields: { exceptionEntry: { $arrayElemAt: [{ $filter: { input: "$examData.exceptionStudents", as: "ex", cond: { $eq: ["$$ex.studentId", user._id] } } }, 0] } } },
-        { $addFields: { effectiveStartDate: { $ifNull: ["$exceptionEntry.startdate", "$examData.startdate"] }, effectiveEndDate: { $ifNull: ["$exceptionEntry.enddate", "$examData.enddate"] } } },
-    ];
-    if (status) {
-        const statusMatch = {};
-        if (status === 'active') { statusMatch.effectiveStartDate = { $lte: currentDate }; statusMatch.effectiveEndDate = { $gte: currentDate }; } 
-        else if (status === 'upcoming') { statusMatch.effectiveStartDate = { $gt: currentDate }; } 
-        else if (status === 'expired') { statusMatch.effectiveEndDate = { $lt: currentDate }; }
-        studentPipeline.push({ $match: statusMatch });
-    }
-    const [totalResult] = await SubexamModel.aggregate([...studentPipeline, { $count: "total" }]);
-    const totalSubmissions = totalResult ? totalResult.total : 0;
-    const dataPipeline = [
-        ...studentPipeline, { $sort: { createdAt: -1 } }, { $skip: skip }, { $limit: limit },
-        { $project: { annotationData: 1, _id: 1, createdAt: 1, updatedAt: 1, score: 1, notes: 1, fileBucket: 1, fileKey: 1, filePath: 1, teacherFeedback: 1, examId: { _id: '$examData._id', Name: '$examData.Name', startdate: '$examData.startdate', enddate: '$examData.enddate' } }}
-    ];
-    const submissions = await SubexamModel.aggregate(dataPipeline);
-    res.status(200).json({
-        message: "Your submitted exams fetched successfully",
-        total: totalSubmissions,
-        totalPages: Math.ceil(totalSubmissions / limit),
+      if (total === 0) return empty();
+
+      const data = await studentModel.aggregate([
+        ...basePipeline,
+        ...statusFilter,
+        { $sort: { firstName: 1 } },
+        { $skip: skip },
+        { $limit: limit }
+      ]);
+
+      return res.status(200).json({
+        message: "Submissions fetched successfully.",
+        total,
+        totalPages: Math.ceil(total / limit),
         currentPage: pageNum,
-        data: submissions.map(s => ({ ...s, studentId: user }))
+        data
+      });
+    }
+
+    // ------ Path B: General Submission List (no examId) ------
+    const matchStage = {};
+
+    if (user.role === 'assistant') {
+      const permitted = (user.permissions.exams || []).map(id =>
+        typeof id === 'string' ? new mongoose.Types.ObjectId(id) : id
+      );
+      if (permitted.length === 0) return empty();
+      matchStage['examData.groupIds'] = { $in: permitted };
+    }
+
+    if (groupId) matchStage['examData.groupIds'] = new mongoose.Types.ObjectId(groupId);
+    if (gradeId) matchStage['examData.grade'] = new mongoose.Types.ObjectId(gradeId);
+    if (studentId) matchStage.studentId = new mongoose.Types.ObjectId(studentId);
+
+    if (status === 'active') {
+      matchStage['examData.startdate'] = { $lte: currentDate };
+      matchStage['examData.enddate'] = { $gte: currentDate };
+    } else if (status === 'upcoming') {
+      matchStage['examData.startdate'] = { $gt: currentDate };
+    } else if (status === 'expired') {
+      matchStage['examData.enddate'] = { $lt: currentDate };
+    }
+
+    const basePipeline = [
+      { $lookup: { from: 'exams', localField: 'examId', foreignField: '_id', as: 'examData' } },
+      { $unwind: '$examData' },
+      { $match: matchStage },
+      { $lookup: { from: 'students', localField: 'studentId', foreignField: '_id', as: 'studentData' } },
+      { $unwind: '$studentData' }
+    ];
+
+    const [{ total = 0 } = {}] = await SubexamModel.aggregate([...basePipeline, { $count: 'total' }]);
+    if (total === 0) return empty();
+
+    const data = await SubexamModel.aggregate([
+      ...basePipeline,
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $project: {
+          annotationData: 1,
+          _id: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          score: 1,
+          notes: 1,
+          fileBucket: 1,
+          fileKey: 1,
+          filePath: 1,
+          teacherFeedback: 1,
+          examId: {
+            _id: '$examData._id',
+            Name: '$examData.Name',
+            startdate: '$examData.startdate',
+            enddate: '$examData.enddate'
+          },
+          studentId: {
+            _id: '$studentData._id',
+            userName: '$studentData.userName',
+            firstName: '$studentData.firstName',
+            lastName: '$studentData.lastName'
+          }
+        }
+      }
+    ]);
+
+    return res.status(200).json({
+      message: "Submissions fetched successfully.",
+      total,
+      totalPages: Math.ceil(total / limit),
+      currentPage: pageNum,
+      data
     });
+  }
+
+  // =============================== Student Logic =============================== //
+  const studentPipeline = [
+    { $match: { studentId: user._id } },
+    { $lookup: { from: 'exams', localField: 'examId', foreignField: '_id', as: 'examData' } },
+    { $unwind: '$examData' },
+    {
+      $addFields: {
+        exceptionEntry: {
+          $arrayElemAt: [
+            {
+              $filter: {
+                input: '$examData.exceptionStudents',
+                as: 'ex',
+                cond: { $eq: ['$$ex.studentId', user._id] }
+              }
+            },
+            0
+          ]
+        }
+      }
+    },
+    {
+      $addFields: {
+        effectiveStartDate: { $ifNull: ['$exceptionEntry.startdate', '$examData.startdate'] },
+        effectiveEndDate: { $ifNull: ['$exceptionEntry.enddate', '$examData.enddate'] }
+      }
+    }
+  ];
+
+  if (status) {
+    const statusMatch = {};
+    if (status === 'active') {
+      statusMatch.effectiveStartDate = { $lte: currentDate };
+      statusMatch.effectiveEndDate = { $gte: currentDate };
+    } else if (status === 'upcoming') {
+      statusMatch.effectiveStartDate = { $gt: currentDate };
+    } else if (status === 'expired') {
+      statusMatch.effectiveEndDate = { $lt: currentDate };
+    }
+    if (Object.keys(statusMatch).length) studentPipeline.push({ $match: statusMatch });
+  }
+
+  const [{ total = 0 } = {}] = await SubexamModel.aggregate([...studentPipeline, { $count: 'total' }]);
+  if (total === 0) {
+    return res.status(200).json({
+      message: "Submissions fetched successfully.",
+      total: 0,
+      totalPages: 0,
+      currentPage: pageNum,
+      data: []
+    });
+  }
+
+  const data = await SubexamModel.aggregate([
+    ...studentPipeline,
+    { $sort: { createdAt: -1 } },
+    { $skip: skip },
+    { $limit: limit },
+    {
+      $project: {
+        annotationData: 1,
+        _id: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        score: 1,
+        notes: 1,
+        fileBucket: 1,
+        fileKey: 1,
+        filePath: 1,
+        teacherFeedback: 1,
+        examId: {
+          _id: '$examData._id',
+          Name: '$examData.Name',
+          startdate: '$examData.startdate',
+          enddate: '$examData.enddate'
+        }
+      }
+    }
+  ]);
+
+  return res.status(200).json({
+    message: "Submissions fetched successfully.",
+    total,
+    totalPages: Math.ceil(total / limit),
+    currentPage: pageNum,
+    data: data.map(s => ({ ...s, studentId: user }))
+  });
 });
+
 
 export const  getSubmissionsByGroup = asyncHandler(async (req, res, next) => {
   const { groupId, examId, status, page = 1, size = 10 } = req.query;
