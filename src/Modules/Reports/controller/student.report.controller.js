@@ -29,11 +29,13 @@ function resolveDateRange({ from, to, year, fromMonth, toMonth }) {
 
 /** Build metrics and flattened lists for the report. */
 async function gatherStudentData(studentId, from, to) {
-  const student = await studentModel
-    .findById(studentId)
-    .populate("gradeId", "name")
-    .populate("groupId", "name")
-    .lean();
+  
+    const student = await studentModel
+  .findById(studentId)
+  .populate({ path: "gradeId", select: "grade" })
+  .populate({ path: "groupId", select: "groupname" })
+  .lean();
+
 
   if (!student) throw new Error("Student not found.");
 
@@ -71,16 +73,18 @@ async function gatherStudentData(studentId, from, to) {
     };
   });
 
+
   const exams = examSubs.map(e => {
-    const submittedAt = e.createdAt ? new Date(e.createdAt) : null;
-    return {
-      name: (e.examId && e.examId.Name) || e.examname || "Exam",
-      version: e.version ?? 1,
-      submittedAt: submittedAt ? format(submittedAt, "yyyy-MM-dd HH:mm") : "-",
-      score: e.score ?? null,
-      notes: e.notes || ""
-    };
-  });
+  const submittedAt = e.createdAt ? new Date(e.createdAt) : null;
+  return {
+    name: (e.examId && e.examId.Name) || e.examname || "Exam",
+    version: e.version ?? 1,
+    submittedAt: submittedAt ? format(submittedAt, "yyyy-MM-dd HH:mm") : "-",
+    score: e.score ?? null,
+    notes: e.notes || "",
+    teacherFeedback: e.teacherFeedback || ""
+  };
+});
 
   // Aggregates
   const avg = arr => {
@@ -91,8 +95,10 @@ async function gatherStudentData(studentId, from, to) {
 
   const summary = {
     studentName: `${student.firstName || ""} ${student.lastName || ""}`.trim() || student.userName,
-    grade: student.gradeId?.name || "-",
-    group: student.groupId?.name || "-",
+
+grade: (student.gradeId?.grade ?? "-"),
+group: (student.groupId?.groupname ?? "-"),
+
     from: format(from, "yyyy-MM-dd"),
     to: format(to, "yyyy-MM-dd"),
     assignments: {
@@ -142,19 +148,18 @@ function streamPdf(res, { summary, assignments, exams }) {
   L("Exams:", `total=${summary.exams.total}, avgScore=${summary.exams.avgScore ?? "-"}`);
   line();
 
-  // Tables (simple)
-  const writeTable = (title, headers, rows) => {
-    H(title, 14);
-    doc.moveDown(0.3);
-    doc.fontSize(11).text(headers.join("  |  "));
-    line();
-    rows.forEach(r => {
-      const row = headers.map(h => (r[h] ?? r[h.toLowerCase()] ?? "")).join("  |  ");
-      if (doc.y > 720) { doc.addPage(); }
-      doc.text(row);
-    });
-    doc.moveDown(0.5);
-  };
+ writeTable(
+  "Exams",
+  ["name", "version", "submittedAt", "score", "teacherFeedback", "notes"],
+  exams.map(e => ({
+    name: e.name,
+    version: e.version,
+    submittedAt: e.submittedAt,
+    score: e.score ?? "-",
+    teacherFeedback: e.teacherFeedback?.slice(0, 60) || "-",
+    notes: e.notes?.slice(0, 60) || "-"
+  }))
+);
 
   // Assignments table
   writeTable(
@@ -238,14 +243,19 @@ async function streamExcel(res, { summary, assignments, exams }) {
 
   // Exams
   const e = wb.addWorksheet("Exams");
-  e.columns = [
-    { header: "Name", key: "name", width: 30 },
-    { header: "Version", key: "version", width: 10 },
-    { header: "Submitted At", key: "submittedAt", width: 20 },
-    { header: "Score", key: "score", width: 10 },
-    { header: "Notes", key: "notes", width: 30 }
-  ];
-  e.addRows(exams.map(x => ({ ...x, score: x.score ?? "" })));
+ e.columns = [
+  { header: "Name", key: "name", width: 30 },
+  { header: "Version", key: "version", width: 10 },
+  { header: "Submitted At", key: "submittedAt", width: 20 },
+  { header: "Score", key: "score", width: 10 },
+  { header: "Teacher Feedback", key: "teacherFeedback", width: 40 },
+  { header: "Notes", key: "notes", width: 30 }
+];
+e.addRows(exams.map(x => ({
+  ...x,
+  score: x.score ?? "",
+  teacherFeedback: x.teacherFeedback ?? ""
+})));
 
   await wb.xlsx.write(res);
   res.end();
