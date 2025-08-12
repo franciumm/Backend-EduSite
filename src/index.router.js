@@ -28,9 +28,9 @@ const bootstrape =  async (app,express)=>{
     app.use('/search', search);  
     app.use('/assistant', assistant);
     app.use('/health', healthRouter);
+    app.use("/reports", reportRouter);
     app.use('*', notFound);          
     app.use(globalerrorHandling);
-    app.use("/reports", reportRouter);
 
     
 }
