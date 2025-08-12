@@ -5,7 +5,7 @@ const objectId = Joi.string().hex().length(24);
 
 // A reusable schema for validating headers to ensure the authorization token is present.
 export const headers = Joi.object({
-    authorization: Joi.string().required().pattern(/^MonaEdu [a-zA-Z0-9-_.]+$/)
+    authorization: Joi.string().required()
 }).unknown(true); // Allow other headers
 
 export const createGroup = Joi.object({
