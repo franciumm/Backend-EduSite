@@ -11,33 +11,32 @@ const router = Router();
 
 
 
-router.post('/create', isValid(validators.headers),
-AdminAuth,    isValid(validators.createGroup), 
+router.post('/create', 
+AdminAuth,    
 
  Start.create);
 
 
-router.get('/all', isValid(validators.headers),isAuth, Search.getall);
+router.get('/all',isAuth, Search.getall);
 
 
 
-router.get("/grades",isValid(validators.headers), isAuth,  isValid(validators.getGroupByGrade), Search.Bygrade);
+router.get("/grades",isAuth, Search.Bygrade);
 
 
-router.get("/id",isValid(validators.headers), isAuth,isValid(validators.getGroupById),  Search.ById);
+router.get("/id",isAuth,  Search.ById);
 
 
 
-router.delete("/deletegroup",isValid(validators.headers), AdminAuth
-,    isValid(validators.deleteGroup), 
- Edit.groupDelete);
+router.delete("/deletegroup", AdminAuth
+, Edit.groupDelete);
 
 
-router.delete("/removestudent", isValid(validators.headers),isAuth,isValid(validators.addOrRemoveStudent), 
+router.delete("/removestudent",isAuth, 
 canManageGroupStudents, Edit.removeStudent);
 
 
-router.put("/addstudent",isValid(validators.headers), isAuth,    isValid(validators.addOrRemoveStudent), 
+router.put("/addstudent", isAuth,    
 canManageGroupStudents, Edit.addStudent);
 
 export default router;
