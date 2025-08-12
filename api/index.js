@@ -1,18 +1,30 @@
-import express from "express";
-import mongoose from "mongoose";
-import dotenv from "dotenv";
-import bootstrape from "../src/index.router.js"; // Import the setup function
-import DBConnect from "../DB/DB.Connect.js";
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import morgan from 'morgan';
 
-dotenv.config();
+import DBConnect from '../DB/DB.Connect.js';
+import bootstrape from '../src/index.router.js';   // keep your original router bootstrap
+import { requestId } from '../src/middelwares/requestId.js';
+import { notFound, errorHandler } from '../src/middelwares/errorHandling.js';
+
 const app = express();
+app.disable('x-powered-by');
+app.use(helmet());
+app.use(cors());                // if you need strict origins, we’ll add later
+app.use(compression());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(requestId);
+app.use(morgan(':method :url :status - :response-time ms - reqId=:req[id]'));
+
+await DBConnect(); 
 
 
-
-    bootstrape(app, express);
-
-   
-
-
-// Export the app instance for the serverless environment (e.g., Vercel).
+app.get('/health', (req, res) => {
+  res.json({ success: true, data: { status: 'ok', reqId: req.id } });
+});
+bootstrape(app, express);
 export default app;

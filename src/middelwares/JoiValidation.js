@@ -1,10 +1,13 @@
 // middelwares/JoiValidation.js
 const Joivalidation = (schema) => {
   return (req, res, next) => {
-    // Combine all request inputs into a single object to be validated.
-    const requestData = { ...req.body, ...req.params, ...req.query };
 
-    const { error } = schema.validate(requestData, { abortEarly: true });
+    const requestData = { ...req.body, ...req.params, ...req.query };
+const { error, value } = schema.validate(requestData, {
+      abortEarly: true,      
+      convert: true,         
+    });
+
 
     if (error) {
       // Your error reporting style is preserved.
@@ -14,6 +17,7 @@ const Joivalidation = (schema) => {
       // Provide a clearer error message
       return res.status(400).json({ message: `Validation error in '${errorField}': ${errorMessage}` });
     }
+    req.body = { ...req.body, ...value };
 
     next();
   };

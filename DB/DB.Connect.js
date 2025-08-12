@@ -1,11 +1,10 @@
-import mongoose from "mongoose";
+import mongoose from 'mongoose';
 
-const DBConnect =  async()=>{
-    return  await mongoose.connect( process.env.MONGOCONNECT, { // These options are for older Mongoose versions and should be kept.
-   
-      serverSelectionTimeoutMS: 30000,  }).then(console.log('DB Connected'));
+export default async function DBConnect() {
+  if (mongoose.connection.readyState === 1) return; 
+  const uri = process.env.MONGOCONNECT;
+  if (!uri) throw new Error('MONGOCONNECT is missing');
+
+  await mongoose.connect(uri, { serverSelectionTimeoutMS: 30000 });
+  console.log('✅ DB connected');
 }
-
-
-export default DBConnect;
-

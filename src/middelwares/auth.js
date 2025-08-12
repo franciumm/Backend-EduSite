@@ -1,5 +1,4 @@
 import mongoose from 'mongoose'
-import UserModel  from '../../DB/models/student.model.js'
 import  { teacherModel }  from '../../DB/models/teacher.model.js'
 import { asyncHandler } from '../utils/erroHandling.js'
 import { generateToken, verifyToken } from '../utils/tokenFunctions.js'
@@ -14,6 +13,7 @@ export const canEditSection = asyncHandler(async (req, res, next) => {
     if (!req.isteacher) {
         return next(new Error('Forbidden: This action is only available to teachers.', { cause: 403 }));
     }
+    
 
     // 2. A main_teacher has universal edit access.
     if (req.user.role === 'main_teacher') {
@@ -22,11 +22,14 @@ export const canEditSection = asyncHandler(async (req, res, next) => {
 
     // 3. Logic for assistants.
     if (req.user.role === 'assistant') {
-        // We need the section's ID from the request. It could be in params, body, or query.
+
         const sectionId = req.params.sectionId || req.body.sectionId || req.query.sectionId;
         if (!sectionId) {
             return next(new Error('Bad Request: Section ID is required.', { cause: 400 }));
         }
+if (!mongoose.isValidObjectId(sectionId)) {
+  return next(new Error('Bad Request: Invalid section ID format.', { cause: 400 }));
+}
 
         const section = await sectionModel.findById(sectionId).select('groupIds').lean();
         if (!section) {
@@ -64,7 +67,12 @@ export const canManageGroupStudents = asyncHandler(async (req, res, next) => {
 
     const { role, permissions } = req.user;
     const { groupid } = req.body;
-
+if (!groupid) {
+  return next(new Error('Group ID is required in the request body.', { cause: 400 }));
+}
+if (!mongoose.isValidObjectId(groupid)) {
+  return next(new Error('Bad Request: Invalid group ID format.', { cause: 400 }));
+}
     // 2. If the user is a main_teacher, they have unrestricted access.
     if (role === 'main_teacher') {
         return next();

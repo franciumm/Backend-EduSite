@@ -1,10 +1,13 @@
 import jwt from 'jsonwebtoken'
 
+const DEFAULT_SIG = process.env.SIGN_IN_TOKEN_SECRET;
+const DEFAULT_TTL = process.env.ACCESS_TOKEN_TTL || '30d'; 
+
 // ========================= generation ==============================
 export const generateToken = ({
 payload = {},
-signature = process.env.DEFAULT_SIGNATURE,
-expiresIn = '1d',
+signature = DEFAULT_SIG,
+expiresIn = DEFAULT_TTL,
 } = {}) => {
   // check if the payload is empty object
 if (!Object.keys(payload).length) {
@@ -17,7 +20,7 @@ return token
 // =========================  Verify ==============================
 export const verifyToken = ({
 token = '',
-signature = process.env.DEFAULT_SIGNATURE,
+signature = DEFAULT_SIG,
 } = {}) => {
   // check if the payload is empty object
 if (!token) {

@@ -1,9 +1,5 @@
 // utils/erroHandling.js
 
-/**
- * Wraps an async controller and pipes any thrown error
- * directly to Express’s error middleware.
- */
 export const asyncHandler = (fn) => {
   return (req, res, next) => {
     Promise
@@ -16,10 +12,14 @@ export const asyncHandler = (fn) => {
   };
 };
 
-/**
- * Global error middleware. Must be registered *after* all routes:
- * app.use(globalerrorHandling)
- */
+
+export const notFound = (req, res) => {
+  return res.status(404).json({
+    success: false,
+    error: { message: 'Not Found', path: req.originalUrl, reqId: req.id },
+  });
+};
+
 export const globalerrorHandling = (err, req, res, next) => {
   console.error(err);
   res
