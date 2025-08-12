@@ -14,7 +14,6 @@ import reportRouter from "./Modules/Reports/student.report.router.js";
 
 const bootstrape =  async (app,express)=>{
     app.use(express.json({limit :'10mb'}));
-
     app.use(express.urlencoded({ limit :'10mb', extended: false }));
 
 
