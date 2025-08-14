@@ -13,19 +13,20 @@ const uaeTimeZone = 'Asia/Dubai';
 
 
 export const _internalCreateAssignment = async ({ name, startDate, endDate, gradeId, groupIds, file, teacherId, allowSubmissionsAfterDueDate }) => {
+        const slug = slugify(name, { lower: true, strict: true });
+
     const s3Key = `assignments/${slugify(name, { lower: true, strict: true })}-${Date.now()}${path.extname(file.originalname)}`;
-    
+        const s3AnswerKey = answerFile ? `assignments/answers/${slug}-answer-${Date.now()}${path.extname(answerFile.originalname)}` : null;
+    const session = await mongoose.startSession();
+
     try {
+                session.startTransaction();
+
         const fileContent = await fs.readFile(file.path);
         if (fileContent.length === 0) throw new Error("Cannot create an assignment with an empty file.");
-
-        // 1. Upload to S3 first. If this fails, the DB is not touched.
-        await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, file.mimetype);
-
-        // 2. Create the database record.
-        const newAssignment = await assignmentModel.create({
+   const assignmentData = {
             name,
-            slug: slugify(name, { lower: true, strict: true }),
+            slug,
             startDate,
             endDate,
             gradeId,
@@ -35,38 +36,71 @@ export const _internalCreateAssignment = async ({ name, startDate, endDate, grad
             key: s3Key,
             path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
             createdBy: teacherId,
-        });
+        };
 
+          let answerFileContent = null;
+        if (answerFile && s3AnswerKey) {
+            answerFileContent = await fs.readFile(answerFile.path);
+            if (answerFileContent.length === 0) throw new Error("The answer file cannot be empty.");
+            assignmentData.answerBucketName = process.env.S3_BUCKET_NAME;
+            assignmentData.answerKey = s3AnswerKey;
+            assignmentData.answerPath = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3AnswerKey}`;
+        }
+        
+        const [newAssignment] = await assignmentModel.create([assignmentData], { session });
+
+        // 1. Upload to S3 first. If this fails, the DB is not touched.
+  await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, file.mimetype);
+        if (answerFile && s3AnswerKey && answerFileContent) {
+            await uploadFileToS3(process.env.S3_BUCKET_NAME, s3AnswerKey, answerFileContent, answerFile.mimetype);
+        }
+
+        await session.commitTransaction();
         return newAssignment;
 
+     
+
+
     } catch (err) {
-        console.error("Internal assignment creation failed. Rolling back S3 file...", err);
-        // If any error occurred, attempt to clean up the S3 file.
-        await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key).catch(e => console.error("S3 rollback failed:", e));
+        await session.abortTransaction();
+        console.error("Internal assignment creation failed. Rolling back S3 files...", err);
+        // If any error occurred, attempt to clean up the S3 files.
+        await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key).catch(e => console.error("S3 assignment file rollback failed:", e));
+        if (s3AnswerKey) {
+            await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3AnswerKey).catch(e => console.error("S3 answer file rollback failed:", e));
+        }
         throw err; // Re-throw the error for the calling service (hub or controller) to handle.
     } finally {
-        // Always clean up the local temp file.
+         await session.endSession();
         if (file?.path) {
             await fs.unlink(file.path).catch(e => console.error(`Failed to delete temp file: ${file.path}`, e));
+        }
+        if (answerFile?.path) {
+            await fs.unlink(answerFile.path).catch(e => console.error(`Failed to delete temp file: ${answerFile.path}`, e));
         }
     }
 };
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
-    // All validation is now handled by the creationValidator middleware.
-    // We can safely use the `req.validatedData` object.
+      const assignmentFile = req.files?.file?.[0];
+    const answerFile = req.files?.answerFile?.[0];
+
+    if (!assignmentFile) {
+        if (answerFile?.path) await fs.unlink(answerFile.path);
+        return next(new Error("The main assignment file is required.", { cause: 400 }));
+    }
+
     const newAssignment = await _internalCreateAssignment({
         ...req.validatedData,
-        file: req.file,
-        teacherId: req.user._id,
+        file: assignmentFile,
+        teacherId: req.user._id,       
+         answerFile: answerFile, // Pass the optional answer file
+
     });
     res.status(201).json({ message: "Assignment created successfully", assignment: newAssignment });
 });
 
 
-// =================================================================
-// --- PHASE 2, FIX 2.2: Refactored submitAssignment Controller ---
-// =================================================================
 export const submitAssignment = asyncHandler(async (req, res, next) => {
     const { assignmentId, notes } = req.body;
     const { user,isteacher  } = req;

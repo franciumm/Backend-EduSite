@@ -13,7 +13,10 @@ const examSchema = new Schema(
     bucketName: String,
     key: String,
     path: String,  
-   
+     answerBucketName: String, // ADDED
+    answerKey: String, // ADDED
+    answerPath: String, // ADDED
+
     allowSubmissionsAfterDueDate: {
         type: Boolean,
         default: false, // By default, submissions are closed after the due date.
@@ -50,11 +53,19 @@ examSchema.pre('deleteOne', { document: true, query: false }, async function (ne
         await SubexamModel.deleteMany({ examId: this._id });
     }
     
+
+
     // This part deletes the main exam file.
     if (this.key && this.bucketName) {
         await deleteFileFromS3(this.bucketName, this.key);
     }
-    
+      if (this.answerKey && this.answerBucketName) {
+        await deleteFileFromS3(this.answerBucketName, this.answerKey);
+    }
+     await sectionModel.updateMany(
+            { linkedExams: this._id },
+            { $pull: { linkedExams: this._id } }
+        );
     next();
 });
 

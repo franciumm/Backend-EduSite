@@ -85,7 +85,7 @@ export const downloadExam = [
 
 export const editExam = asyncHandler(async (req, res, next) => {
     const { examId, ...updateData } = req.body;
-    const teacherId = req.user._id;
+    const { user } = req;
 
     if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
         return next(new Error("A valid Exam ID is required.", { cause: 400 }));
@@ -96,53 +96,121 @@ export const editExam = asyncHandler(async (req, res, next) => {
         return next(new Error("Exam not found.", { cause: 404 }));
     }
 
-
-  const isMainTeacher = user.role === 'main_teacher';
+    const isMainTeacher = user.role === 'main_teacher';
     const isOwner = exam.createdBy.equals(user._id);
 
     if (!isMainTeacher && !isOwner) {
         return next(new Error("You are not authorized to edit this exam.", { cause: 403 }));
     }
-    if (req.file) {
-        if (exam.key) {
-            await deleteFileFromS3(exam.bucketName, exam.key)
-                .catch(err => console.error("Non-critical error: Failed to delete old S3 file during edit:", err));
+
+    const examFile = req.files?.file?.[0];
+    const answerFile = req.files?.answerFile?.[0];
+    
+    try {
+        // Handle new main exam file upload
+        if (examFile) {
+            if (exam.key) {
+                await deleteFileFromS3(exam.bucketName, exam.key).catch(err => console.error("Non-critical error: Failed to delete old exam file during edit:", err));
+            }
+            const fileContent = await fsPromises.readFile(examFile.path);
+            const newKey = `exams/${exam.Name.replace(/\s+/g, '_')}-${Date.now()}.pdf`;
+            await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, "application/pdf");
+            
+            exam.key = newKey;
+            exam.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
+            exam.bucketName = process.env.S3_BUCKET_NAME;
+        }
+
+        // Handle new answer file upload
+        if (answerFile) {
+            if (exam.answerKey) {
+                await deleteFileFromS3(exam.answerBucketName, exam.answerKey).catch(err => console.error("Non-critical error: Failed to delete old answer file during edit:", err));
+            }
+            const answerContent = await fsPromises.readFile(answerFile.path);
+            const newAnswerKey = `exams/answers/${exam.Name.replace(/\s+/g, '_')}-answer-${Date.now()}.pdf`;
+            await uploadFileToS3(process.env.S3_BUCKET_NAME, newAnswerKey, answerContent, "application/pdf");
+
+            exam.answerKey = newAnswerKey;
+            exam.answerPath = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newAnswerKey}`;
+            exam.answerBucketName = process.env.S3_BUCKET_NAME;
+        }
+
+        // Sanitize and update name if provided
+        if (updateData.Name) {
+            updateData.Name = updateData.Name.trim();
         }
         
-        // Use the aliased 'fsPromises' for async operations
-        const fileContent = await fsPromises.readFile(req.file.path);
-        const newKey = `exams/${exam.Name.replace(/\s+/g, '_')}-${Date.now()}.pdf`;
-        
-        await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, "application/pdf");
-        
-        exam.key = newKey;
-        exam.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
-        exam.bucketName = process.env.S3_BUCKET_NAME;
+        Object.keys(updateData).forEach(key => {
+            if (updateData[key] !== undefined && updateData[key] !== null) {
+                exam[key] = updateData[key];
+            }
+        });
 
-        // Use the aliased 'fsPromises' for async operations
-        await fsPromises.unlink(req.file.path);
+        const updatedExam = await exam.save();
+
+        res.status(200).json({
+            message: "Exam updated successfully.",
+            exam: updatedExam,
+        });
+    } finally {
+        // Clean up temp files
+        if (examFile?.path) await fsPromises.unlink(examFile.path).catch(e => console.error("Error deleting temp exam file", e));
+        if (answerFile?.path) await fsPromises.unlink(answerFile.path).catch(e => console.error("Error deleting temp answer file", e));
     }
-    
-    // Sanitize and update name if provided
-    if (updateData.Name) {
-        updateData.Name = updateData.Name.trim();
-    }
-    
-    Object.keys(updateData).forEach(key => {
-        if (updateData[key] !== undefined && updateData[key] !== null) {
-            exam[key] = updateData[key];
-        }
-    });
-
-    const updatedExam = await exam.save();
-
-    res.status(200).json({
-        message: "Exam updated successfully.",
-        exam: updatedExam,
-    });
 });
 
 
+export const downloadExamAnswer = asyncHandler(async (req, res, next) => {
+    const { examId } = req.query;
+    const { user, isteacher } = req;
+    const uaeTimeZone = 'Asia/Dubai';
+    const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
+
+    if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
+        return next(new Error("A valid Exam ID is required.", { cause: 400 }));
+    }
+
+    const exam = await examModel.findById(examId).select('enddate allowSubmissionsAfterDueDate answerKey answerBucketName Name').lean();
+    if (!exam) {
+        return next(new Error("Exam not found.", { cause: 404 }));
+    }
+    if (!exam.answerKey || !exam.answerBucketName) {
+        return next(new Error("No answer file exists for this exam.", { cause: 404 }));
+    }
+
+    // Authorization Logic
+    if (!isteacher) {
+        // Rule 1: Deadline must have passed
+        if (nowInUAE < exam.enddate) {
+            return next(new Error("The answer file is not available until the deadline has passed.", { cause: 403 }));
+        }
+
+        // Rule 2: If late submissions are allowed, student must have submitted first
+        if (exam.allowSubmissionsAfterDueDate) {
+            const submission = await SubexamModel.findOne({ examId: exam._id, studentId: user._id }).lean();
+            if (!submission) {
+                return next(new Error("You must submit your work before you can view the answer file.", { cause: 403 }));
+            }
+        }
+    }
+    
+    // If we reach here, user is authorized. Stream the file.
+    const { answerBucketName, answerKey, Name } = exam;
+    try {
+        const command = new GetObjectCommand({ Bucket: answerBucketName, Key: answerKey });
+        const s3Response = await s3.send(command);
+
+        const safeFilename = encodeURIComponent(Name.replace(/[^a-zA-Z0-9.\-_]/g, '_') + '-ANSWER.pdf');
+        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeFilename}`);
+        res.setHeader('Content-Type', s3Response.ContentType || "application/pdf");
+        if (s3Response.ContentLength) res.setHeader('Content-Length', s3Response.ContentLength);
+        
+        s3Response.Body.pipe(res);
+    } catch (error) {
+        console.error(`S3 Answer File Streaming Error for key ${answerKey}:`, error);
+        return next(new Error("Failed to download the answer file from storage.", { cause: 500 }));
+    }
+});
 
 
 export const downloadSubmittedExam = asyncHandler(async (req, res, next) => {

@@ -48,61 +48,125 @@ export const downloadAssignment = asyncHandler(async (req, res, next) => {
 
 export const editAssignment = asyncHandler(async (req, res, next) => {
     const { assignmentId, ...updateData } = req.body;
-    const teacherId = req.user._id;
 
     if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
         return next(new Error("A valid Assignment ID is required.", { cause: 400 }));
     }
 
     const assignment = await assignmentModel.findById(assignmentId);
-
     if (!assignment) {
         return next(new Error("Assignment not found.", { cause: 404 }));
     }
- const isMainTeacher = req.user.role === 'main_teacher';
+
+    const isMainTeacher = req.user.role === 'main_teacher';
     const isOwner = assignment.createdBy.equals(req.user._id);
 
     if (!isMainTeacher && !isOwner) {
         return next(new Error("You are not authorized to edit this assignment.", { cause: 403 }));
     }
     
-    if (!assignment.createdBy.equals(teacherId)) {
-        return next(new Error("You are not authorized to edit this assignment.", { cause: 403 }));
-    }
+    const assignmentFile = req.files?.file?.[0];
+    const answerFile = req.files?.answerFile?.[0];
 
-    if (req.file) {
-        if (assignment.key) {
-            await deleteFileFromS3(assignment.bucketName, assignment.key)
-                .catch(err => console.error("Non-critical error: Failed to delete old S3 file during edit:", err));
+    try {
+        // Handle new main assignment file upload
+        if (assignmentFile) {
+            if (assignment.key) {
+                await deleteFileFromS3(assignment.bucketName, assignment.key).catch(err => console.error("Non-critical error: Failed to delete old assignment file during edit:", err));
+            }
+            const fileContent = await fsPromises.readFile(assignmentFile.path);
+            const newKey = `assignments/${assignment.slug}-${Date.now()}${path.extname(assignmentFile.originalname)}`;
+            await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, assignmentFile.mimetype);
+            
+            assignment.key = newKey;
+            assignment.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
+            assignment.bucketName = process.env.S3_BUCKET_NAME;
         }
 
-        // Use the aliased 'fsPromises' for async file reading
-        const fileContent = await fsPromises.readFile(req.file.path);
-        const newKey = `assignments/${assignment.slug}-${Date.now()}.pdf`;
-        
-        await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, "application/pdf");
-        
-        assignment.key = newKey;
-        assignment.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
-        assignment.bucketName = process.env.S3_BUCKET_NAME;
+        // Handle new answer file upload
+        if (answerFile) {
+            if (assignment.answerKey) {
+                await deleteFileFromS3(assignment.answerBucketName, assignment.answerKey).catch(err => console.error("Non-critical error: Failed to delete old answer file during edit:", err));
+            }
+            const answerContent = await fsPromises.readFile(answerFile.path);
+            const newAnswerKey = `assignments/answers/${assignment.slug}-answer-${Date.now()}${path.extname(answerFile.originalname)}`;
+            await uploadFileToS3(process.env.S3_BUCKET_NAME, newAnswerKey, answerContent, answerFile.mimetype);
 
-        // Use the aliased 'fsPromises' for async file deletion
-        await fsPromises.unlink(req.file.path);
-    }
-
-    Object.keys(updateData).forEach(key => {
-        if (updateData[key] !== undefined && updateData[key] !== null) {
-            assignment[key] = updateData[key];
+            assignment.answerKey = newAnswerKey;
+            assignment.answerPath = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newAnswerKey}`;
+            assignment.answerBucketName = process.env.S3_BUCKET_NAME;
         }
-    });
-    
-    const updatedAssignment = await assignment.save();
 
-    res.status(200).json({
-        message: "Assignment updated successfully.",
-        assignment: updatedAssignment,
-    });
+        Object.keys(updateData).forEach(key => {
+            if (updateData[key] !== undefined && updateData[key] !== null) {
+                assignment[key] = updateData[key];
+            }
+        });
+        
+        const updatedAssignment = await assignment.save();
+
+        res.status(200).json({
+            message: "Assignment updated successfully.",
+            assignment: updatedAssignment,
+        });
+    } finally {
+        if (assignmentFile?.path) await fsPromises.unlink(assignmentFile.path).catch(e => console.error("Error deleting temp assignment file", e));
+        if (answerFile?.path) await fsPromises.unlink(answerFile.path).catch(e => console.error("Error deleting temp answer file", e));
+    }
 });
+
+
+export const downloadAssignmentAnswer = asyncHandler(async (req, res, next) => {
+    const { assignmentId } = req.query;
+    const { user, isteacher } = req;
+    const uaeTimeZone = 'Asia/Dubai';
+    const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
+
+    if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
+        return next(new Error("A valid Assignment ID is required.", { cause: 400 }));
+    }
+
+    const assignment = await assignmentModel.findById(assignmentId).select('endDate allowSubmissionsAfterDueDate answerKey answerBucketName name').lean();
+    if (!assignment) {
+        return next(new Error("Assignment not found.", { cause: 404 }));
+    }
+    if (!assignment.answerKey || !assignment.answerBucketName) {
+        return next(new Error("No answer file exists for this assignment.", { cause: 404 }));
+    }
+
+    // Authorization Logic
+    if (!isteacher) {
+        // Rule 1: Deadline must have passed
+        if (nowInUAE < new Date(assignment.endDate)) {
+            return next(new Error("The answer file is not available until the deadline has passed.", { cause: 403 }));
+        }
+
+        // Rule 2: If late submissions are allowed, student must have submitted first
+        if (assignment.allowSubmissionsAfterDueDate) {
+            const submission = await SubassignmentModel.findOne({ assignmentId: assignment._id, studentId: user._id }).lean();
+            if (!submission) {
+                return next(new Error("You must submit your work before you can view the answer file.", { cause: 403 }));
+            }
+        }
+    }
+    
+    // If we reach here, user is authorized. Stream the file.
+    const { answerBucketName, answerKey, name } = assignment;
+    try {
+        const command = new GetObjectCommand({ Bucket: answerBucketName, Key: answerKey });
+        const s3Response = await s3.send(command);
+        const safeFilename = encodeURIComponent(name.replace(/[^a-zA-Z0-9.\-_]/g, '_') + '-ANSWER' + path.extname(answerKey));
+        res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeFilename}`);
+        res.setHeader('Content-Type', s3Response.ContentType);
+        if (s3Response.ContentLength) res.setHeader('Content-Length', s3Response.ContentLength);
+        
+        s3Response.Body.pipe(res);
+    } catch (error) {
+        console.error(`S3 Answer File Streaming Error for key ${answerKey}:`, error);
+        return next(new Error("Failed to download the answer file from storage.", { cause: 500 }));
+    }
+});
+
 
 export const downloadSubmittedAssignment = asyncHandler(async (req, res, next) => {
     const { submissionId } = req.query;

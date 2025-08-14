@@ -15,11 +15,18 @@ router.delete("/submission/delete", isAuth, Edit.deleteSubmittedAssignment);
 
 
 router.post ('/create',isAuth,
-    multerCloudFunction(allowedExtensions.Files).single('file'),
-    creationValidator(CONTENT_TYPES.ASSIGNMENT),
+ multerCloudFunction(allowedExtensions.Files).fields([
+        { name: 'file', maxCount: 1 },
+        { name: 'answerFile', maxCount: 1 }
+    ]),    creationValidator(CONTENT_TYPES.ASSIGNMENT),
     Start.CreateAssignment);
 router.post( "/submit", isAuth,  multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitAssignment);
-router.put("/edit", isAuth, multerCloudFunction(allowedExtensions.Files).single('file'), Edit.editAssignment);
+router.put("/edit", isAuth, 
+ multerCloudFunction(allowedExtensions.Files).fields([
+        { name: 'file', maxCount: 1 },
+        { name: 'answerFile', maxCount: 1 }
+    ]),      Edit.editAssignment);
+router.get("/download-answer", isAuth, Edit.downloadAssignmentAnswer);
 
 router.put("/mark", isAuth,  Edit.markAssignment);
 

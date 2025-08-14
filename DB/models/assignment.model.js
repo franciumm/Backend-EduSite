@@ -12,6 +12,9 @@ const assignmentSchema = new Schema({
       type: Schema.Types.ObjectId,
       ref: 'grade',
     },
+        answerBucketName: String, // ADDED
+    answerKey: String, // ADDED
+    answerPath: String, // ADDED
     bucketName: String,
     key: String,
     fileContent: String,
@@ -40,6 +43,9 @@ assignmentSchema.index({ gradeId: 1, groupIds: 1 });
     if (this.key && this.bucketName) {
         await deleteFileFromS3(this.bucketName, this.key);
     }
+  if (this.answerKey && this.answerBucketName) {
+        await deleteFileFromS3(this.answerBucketName, this.answerKey);
+    }
 
     // Find all child submissions
     const submissions = await SubassignmentModel.find({ assignmentId: this._id });
@@ -53,6 +59,7 @@ assignmentSchema.index({ gradeId: 1, groupIds: 1 });
         // Delete all the submission database records
         await SubassignmentModel.deleteMany({ assignmentId: this._id });
     }
+
       await sectionModel.updateMany(
         { linkedAssignments: this._id },
         { $pull: { linkedAssignments: this._id } }

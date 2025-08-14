@@ -17,13 +17,17 @@ const router = Router();
 
 router.get("", isAuth, Get.getExams);
 router.get("/student/submissions", isAuth, Get.getSubmissionsByGroup);
+router.get("/download-answer", isAuth, Edit.downloadExamAnswer);
 
 router.get("/submissions", isAuth, Get.getSubmittedExams);
 router.get("/download", isAuth, Edit.downloadExam);
 router.get("/submissions/download", isAuth, Edit.downloadSubmittedExam);
 router.post ('/create',
 isAuth
-,multerCloudFunction(allowedExtensions.Files).single('file'),
+,multerCloudFunction(allowedExtensions.Files).fields([
+        { name: 'file', maxCount: 1 },
+        { name: 'answerFile', maxCount: 1 }
+    ]),
 creationValidator(CONTENT_TYPES.EXAM),
 Start.createExam);
 router.post("/submit",isAuth,multerCloudFunction(allowedExtensions.Files).single("file"), Start.submitExam);
@@ -31,7 +35,10 @@ router.put("/mark", isAuth, Edit.markSubmissionWithPDF);
 router.post("/add-exception",  AdminAuth, Edit.addExceptionStudent);
 router.post("/add-rejected", AdminAuth , Edit.addRejectedStudent);
 router.delete("/delete", isAuth, Edit.deleteExam);
-router.put("/edit", isAuth, multerCloudFunction(allowedExtensions.Files).single('file'), Edit.editExam);
+router.put("/edit", isAuth, multerCloudFunction(allowedExtensions.Files).fields([
+        { name: 'file', maxCount: 1 },
+        { name: 'answerFile', maxCount: 1 }
+    ]),  Edit.editExam);
 router.delete("/deleteSub", isAuth, Edit.deleteSubmittedExam);
 
 

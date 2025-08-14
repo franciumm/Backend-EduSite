@@ -12,15 +12,24 @@ import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
 
 export const createExam = asyncHandler(async (req, res, next) => {
-    // All validation is now handled by the creationValidator middleware.
-    // We use the validated data from `req.validatedData`.
+       const examFile = req.files?.file?.[0];
+    const answerFile = req.files?.answerFile?.[0];
+
+    if (!examFile) {
+        // If other files were uploaded, clean them up
+        if (answerFile?.path) await fs.unlink(answerFile.path);
+        return next(new Error("The main exam file is required.", { cause: 400 }));
+    }
+
     const newExam = await _internalCreateExam({
         ...req.validatedData,
         Name: req.validatedData.name, // Map `name` to `Name` for the internal function
         startdate: req.validatedData.startDate,
         enddate: req.validatedData.endDate,
-        file: req.file,
+        file: examFile, // Pass the main file object
         teacherId: req.user._id,
+                answerFile: answerFile, // Pass the optional answer file object
+
     });
     res.status(201).json({ message: "Exam created successfully", exam: newExam });
 });
@@ -34,8 +43,7 @@ export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, g
         session.startTransaction();
         const fileContent = await fs.readFile(file.path);
         if (fileContent.length === 0) throw new Error("Cannot create an exam with an empty file.");
-
-        const [newExam] = await examModel.create([{
+            const examData = {
             Name: name,
             slug,
             startdate,
@@ -47,22 +55,45 @@ export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, g
             path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
             createdBy: teacherId,
             exceptionStudents,
-            allowSubmissionsAfterDueDate: allowSubmissionsAfterDueDate||false
-        }], { session });
+            allowSubmissionsAfterDueDate: allowSubmissionsAfterDueDate || false,
+        };
+
+         let answerFileContent = null;
+        if (answerFile && s3AnswerKey) {
+            answerFileContent = await fs.readFile(answerFile.path);
+            if (answerFileContent.length === 0) throw new Error("The answer file cannot be empty.");
+            examData.answerBucketName = process.env.S3_BUCKET_NAME;
+            examData.answerKey = s3AnswerKey;
+            examData.answerPath = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3AnswerKey}`;
+        }
+        
+
+
+         const [newExam] = await examModel.create([examData], { session });
 
         await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
-        
+        if (answerFile && s3AnswerKey && answerFileContent) {
+            await uploadFileToS3(process.env.S3_BUCKET_NAME, s3AnswerKey, answerFileContent, "application/pdf");
+        }
         await session.commitTransaction();
         return newExam;
 
     } catch (error) {
-        await session.abortTransaction();
-        await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key).catch(s3Err => console.error("S3 rollback failed:", s3Err));
-        throw error;
+         await session.abortTransaction();
+        // If anything went wrong, attempt to clean up any files that might have been uploaded to S3.
+        await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key).catch(s3Err => console.error("S3 exam file rollback failed:", s3Err));
+        if (s3AnswerKey) {
+            await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3AnswerKey).catch(s3Err => console.error("S3 answer file rollback failed:", s3Err));
+        }
+        throw error; 
     } finally {
-        await session.endSession();
-        if (file && file.path ) {
-            await fs.unlink(file.path);
+      await session.endSession();
+        // Always clean up the local temporary files.
+        if (file?.path) {
+            await fs.unlink(file.path).catch(e => console.error(`Failed to delete temp file: ${file.path}`, e));
+        }
+        if (answerFile?.path) {
+            await fs.unlink(answerFile.path).catch(e => console.error(`Failed to delete temp file: ${answerFile.path}`, e));
         }
     }
 };
