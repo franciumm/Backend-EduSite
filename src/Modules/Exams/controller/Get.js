@@ -81,7 +81,11 @@ export const getExams = asyncHandler(async (req, res, next) => {
         {
             $project: {
                 exception: 0,
-                effectiveStartDate: 0
+                effectiveStartDate: 0,
+                // Exclude the answer file details for students
+                answerKey: 0,
+                answerBucketName: 0,
+                answerPath: 0
             }
         }
     ];

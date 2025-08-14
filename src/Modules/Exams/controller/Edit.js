@@ -187,10 +187,7 @@ export const downloadExamAnswer = asyncHandler(async (req, res, next) => {
 
         // Rule 2: If late submissions are allowed, student must have submitted first
         if (exam.allowSubmissionsAfterDueDate) {
-            const submission = await SubexamModel.findOne({ examId: exam._id, studentId: user._id }).lean();
-            if (!submission) {
-                return next(new Error("You must submit your work before you can view the answer file.", { cause: 403 }));
-            }
+             return next(new Error("The answer file is not available until the teacher disallow the submission.", { cause: 403 }));
         }
     }
     

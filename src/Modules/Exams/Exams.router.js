@@ -18,7 +18,6 @@ const router = Router();
 router.get("", isAuth, Get.getExams);
 router.get("/student/submissions", isAuth, Get.getSubmissionsByGroup);
 router.get("/download-answer", isAuth, Edit.downloadExamAnswer);
-
 router.get("/submissions", isAuth, Get.getSubmittedExams);
 router.get("/download", isAuth, Edit.downloadExam);
 router.get("/submissions/download", isAuth, Edit.downloadSubmittedExam);
