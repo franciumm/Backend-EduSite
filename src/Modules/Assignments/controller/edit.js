@@ -13,7 +13,8 @@ import { assignmentModel } from '../../../../DB/models/assignment.model.js';
 import { s3 } from '../../../utils/S3Client.js';
 import fs from "fs";
 import { promises as fsPromises } from 'fs';
-import { CONTENT_TYPES } from "../../../utils/constants.js"; // Import constants
+import { CONTENT_TYPES } from "../../../utils/constants.js"; 
+import path from "path"; 
 
 
 
