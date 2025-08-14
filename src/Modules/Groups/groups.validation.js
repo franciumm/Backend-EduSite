@@ -14,6 +14,8 @@ export const createGroup = Joi.object({
     groupname: Joi.string().required().min(1).max(100)
 });
 
+
+
 export const getGroupByGrade = Joi.object({
     grade: Joi.number().required()
 });
@@ -29,4 +31,16 @@ export const deleteGroup = Joi.object({
 export const addOrRemoveStudent = Joi.object({
     groupid: objectId.required(),
     studentid: objectId.required()
+});
+
+export const manageInviteLink = Joi.object({
+    groupid: objectId.required()
+});
+
+export const joinWithInviteLink = Joi.object({
+    inviteToken: Joi.string().hex().length(40).required()
+});
+
+export const getInviteLink = Joi.object({
+    groupid: objectId.required()
 });

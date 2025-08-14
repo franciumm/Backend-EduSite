@@ -39,4 +39,33 @@ canManageGroupStudents, Edit.removeStudent);
 router.put("/addstudent", isAuth,    
 canManageGroupStudents, Edit.addStudent);
 
+
+router.post('/invite/create', 
+    AdminAuth,
+    isValid(validators.manageInviteLink),
+    Edit.createInviteLink
+);
+router.get('/invite/link',
+    AdminAuth, // Only main_teacher can view the link
+    isValid(validators.getInviteLink, "query"), // Validate groupid from query params
+    Edit.getInviteLink
+);
+// Main Teacher deletes/disables an invite link for a group
+router.delete('/invite/delete',
+    AdminAuth,
+    isValid(validators.manageInviteLink),
+    Edit.deleteInviteLink
+);
+
+
+
+// Student joins a group using the token from the invite link
+router.post('/join/:inviteToken',
+    isAuth,
+    isValid(validators.joinWithInviteLink),
+    Edit.joinWithInviteLink
+);
+
+
+
 export default router;
