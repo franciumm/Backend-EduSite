@@ -44,7 +44,7 @@ export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, g
         const fileContent = await fs.readFile(file.path);
         if (fileContent.length === 0) throw new Error("Cannot create an exam with an empty file.");
             const examData = {
-            Name: name,
+            Name: Name,
             slug,
             startdate,
             enddate,

@@ -30,9 +30,10 @@ export const creationValidator = (contentType) => {
 return next(new Error(`Only teachers can create ${contentType}s.`, { cause: 403 }));
         }
 
-        const { name, Name, startDate, endDate, gradeId } = req.body;
+        const { name, Name, gradeId } = req.body;
         const finalName = name || Name;
-
+        const startDate = req.body.startDate || req.body.startdate;
+        const endDate = req.body.endDate || req.body.enddate;
         // 2. Field Presence Validation
         if (!finalName || !startDate || !endDate || !gradeId) {
             await cleanupFiles();
