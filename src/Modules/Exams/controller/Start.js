@@ -37,7 +37,7 @@ export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, g
     const name = Name.trim();
     const slug = slugify(name, { lower: true, strict: true });
     const s3Key = `exams/${slug}-${Date.now()}.pdf`;
-
+  const s3AnswerKey = answerFile ? `exams/answers/${slug}-answer-${Date.now()}.pdf` : null;
     const session = await mongoose.startSession();
     try {
         session.startTransaction();
