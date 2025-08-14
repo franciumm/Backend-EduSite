@@ -10,7 +10,19 @@ const uaeTimeZone = 'Asia/Dubai';
 export const creationValidator = (contentType) => {
     return asyncHandler(async (req, res, next) => {
         // 1. File and Teacher Validation
-        if (!req.file) {
+
+          const mainFile = req.files?.file?.[0];
+        const answerFile = req.files?.answerFile?.[0];
+
+          const cleanupFiles = async () => {
+            if (mainFile?.path) await fs.unlink(mainFile.path).catch(e => console.error("Error cleaning up main temp file:", e));
+            if (answerFile?.path) await fs.unlink(answerFile.path).catch(e => console.error("Error cleaning up answer temp file:", e));
+        };
+
+        // 1. File and Teacher Validation
+        // Check for the main file from req.files
+        if (!mainFile) {
+            await cleanupFiles(); // Clean up answer file if it exists
             return next(new Error(`Please upload the ${contentType} file.`, { cause: 400 }));
         }
         if (!req.isteacher) {
