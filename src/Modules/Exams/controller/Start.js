@@ -33,7 +33,7 @@ export const createExam = asyncHandler(async (req, res, next) => {
     });
     res.status(201).json({ message: "Exam created successfully", exam: newExam });
 });
-export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, groupIds, file, teacherId, exceptionStudents, allowSubmissionsAfterDueDate }) => {
+export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, groupIds, file, teacherId, exceptionStudents, allowSubmissionsAfterDueDate,answerFile }) => {
     const name = Name.trim();
     const slug = slugify(name, { lower: true, strict: true });
     const s3Key = `exams/${slug}-${Date.now()}.pdf`;

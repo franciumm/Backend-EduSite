@@ -12,7 +12,7 @@ import { canAccessContent } from '../../../middelwares/contentAuth.js';
 const uaeTimeZone = 'Asia/Dubai';
 
 
-export const _internalCreateAssignment = async ({ name, startDate, endDate, gradeId, groupIds, file, teacherId, allowSubmissionsAfterDueDate }) => {
+export const _internalCreateAssignment = async ({ name, startDate, endDate, gradeId, groupIds, file, teacherId, allowSubmissionsAfterDueDate ,answerFile}) => {
         const slug = slugify(name, { lower: true, strict: true });
 
     const s3Key = `assignments/${slugify(name, { lower: true, strict: true })}-${Date.now()}${path.extname(file.originalname)}`;
