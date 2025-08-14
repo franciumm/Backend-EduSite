@@ -26,8 +26,8 @@ export const creationValidator = (contentType) => {
             return next(new Error(`Please upload the ${contentType} file.`, { cause: 400 }));
         }
         if (!req.isteacher) {
-            await fs.unlink(req.file.path);
-            return next(new Error(`Only teachers can create ${contentType}s.`, { cause: 403 }));
+        await cleanupFiles();
+return next(new Error(`Only teachers can create ${contentType}s.`, { cause: 403 }));
         }
 
         const { name, Name, startDate, endDate, gradeId } = req.body;
@@ -35,7 +35,7 @@ export const creationValidator = (contentType) => {
 
         // 2. Field Presence Validation
         if (!finalName || !startDate || !endDate || !gradeId) {
-            await fs.unlink(req.file.path);
+            await cleanupFiles();
             return next(new Error(`Missing required fields: name, startDate, endDate, and gradeId are required.`, { cause: 400 }));
         }
         
@@ -43,14 +43,14 @@ export const creationValidator = (contentType) => {
         const parsedStartDate = new Date(startDate);
         const parsedEndDate = new Date(endDate);
         if (isNaN(parsedStartDate.getTime()) || isNaN(parsedEndDate.getTime()) || toZonedTime(new Date(), uaeTimeZone) > parsedEndDate || parsedStartDate >= parsedEndDate) {
-            await fs.unlink(req.file.path);
+           await cleanupFiles();
             return next(new Error(`Invalid ${contentType} timeline. Ensure dates are valid, the end date is in the future, and the start date is before the end date.`, { cause: 400 }));
         }
         
         // 4. Group ID Parsing and Validation
         let rawGroupIds = req.body.groupIds ?? req.body["groupIds[]"];
         if (!rawGroupIds) {
-            await fs.unlink(req.file.path);
+           await cleanupFiles();
             return next(new Error("Group IDs are required.", { cause: 400 }));
         }
         if (typeof rawGroupIds === "string" && rawGroupIds.trim().startsWith("[")) {
@@ -58,7 +58,7 @@ export const creationValidator = (contentType) => {
         }
         const groupIds = Array.isArray(rawGroupIds) ? rawGroupIds : [rawGroupIds];
         if (groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
-            await fs.unlink(req.file.path);
+           await cleanupFiles();
             return next(new Error("One or more Group IDs are invalid.", { cause: 400 }));
         }
         
@@ -69,7 +69,7 @@ export const creationValidator = (contentType) => {
             const hasPermissionForAllGroups = groupIds.every(id => permittedGroupIds.has(id.toString()));
 
             if (!hasPermissionForAllGroups) {
-                await fs.unlink(req.file.path);
+           await cleanupFiles();
                 return next(new Error(`You do not have permission to create ${contentType}s for one or more of the selected groups.`, { cause: 403 }));
             }
         }
