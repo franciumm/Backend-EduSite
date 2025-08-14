@@ -147,10 +147,12 @@ export const joinWithInviteLink = asyncHandler(async (req, res, next) => {
     if (student.gradeId.toString() !== group.gradeid.toString()) {
         return next(new Error('You cannot join a group for a different grade level.', { cause: 403 }));
     }
-
-    if (student.groupId && student.groupId.equals(group._id)) {
+if (student.groupId) {
+    if (student.groupId.equals(group._id)) {
         return res.status(200).json({ message: 'You are already a member of this group.' });
     }
+    return next(new Error('You are already a member of another group. Please leave your current group to join a new one.', { cause: 400 }));
+}
     
     // Atomically add the student to the new group and update the student's record
     student.groupId = group._id;
