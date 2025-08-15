@@ -233,17 +233,17 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
     const uaeTimeZone = 'Asia/Dubai';
     const currentDate = toZonedTime(new Date(), uaeTimeZone);
 
-    let query = {};
+    let matchQuery = {};
 
     // --- Time-based Status Filtering ---
     if (status) {
         if (status === "active") {
-            query.startDate = { $lte: currentDate };
-            query.endDate = { $gte: currentDate };
+            matchQuery.startDate = { $lte: currentDate };
+            matchQuery.endDate = { $gte: currentDate };
         } else if (status === "upcoming") {
-            query.startDate = { $gt: currentDate };
+            matchQuery.startDate = { $gt: currentDate };
         } else if (status === "expired") {
-            query.endDate = { $lt: currentDate };
+            matchQuery.endDate = { $lt: currentDate };
         }
     }
 
@@ -254,19 +254,14 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
             if (groupIds.length === 0) {
                 return res.status(200).json({ message: "No assignments found.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
             }
-            // Add assistant's group permissions to the query
-            query.groupIds = { $in: groupIds };
+            matchQuery.groupIds = { $in: groupIds };
         }
-        // For main_teacher, the query remains empty (or just has status), fetching all assignments.
-        
     } else {
         // --- Student Logic ---
         const student = await studentModel.findById(user._id).select('groupId').lean();
         if (!student) {
             return res.status(200).json({ message: "Student not found.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
         }
-        
-        // Base query for student: must be in their group, enrolled, or in a section with the assignment.
         const orConditions = [{ enrolledStudents: user._id }];
         if (student.groupId) {
             orConditions.push({ groupIds: student.groupId });
@@ -278,20 +273,56 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
                 }
             }
         }
-        query.$or = orConditions;
+        matchQuery.$or = orConditions;
     }
 
-    // --- Database Query ---
-    const [assignments, totalAssignments] = await Promise.all([
-        assignmentModel.find(query)
-            .sort({ startDate: -1 })
-            .skip(skip)
-            .limit(limit)
-            .select('-answerBucketName -answerKey -answerPath') // SECURE: Explicitly exclude answer fields
-            .populate('groupIds', 'groupname')
-            .lean(),
-        assignmentModel.countDocuments(query)
+    // --- THE FIX: Use an Aggregation Pipeline to conditionally return the path ---
+    const results = await assignmentModel.aggregate([
+        { $match: matchQuery },
+        {
+            $facet: {
+                metadata: [{ $count: 'total' }],
+                data: [
+                    { $sort: { startDate: -1 } },
+                    { $skip: skip },
+                    { $limit: limit },
+                    {
+                        // SECURE BY DEFAULT: Explicitly define the fields to return.
+                        // Sensitive fields like bucketName, key, and answer* are never exposed.
+                        $project: {
+                            _id: 1,
+                            name: 1,
+                            startDate: 1,
+                            endDate: 1,
+                            groupIds: 1,
+                            gradeId: 1,
+                            createdBy: 1,
+                            allowSubmissionsAfterDueDate: 1,
+                            enrolledStudents: 1,
+                            rejectedStudents: 1,
+                            // Conditionally return the path ONLY if the assignment has started
+                            path: {
+                                $cond: {
+                                    if: { $lte: ['$startDate', currentDate] },
+                                    then: '$path',
+                                    else: null
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        }
     ]);
+
+    const assignments = results[0]?.data || [];
+    const totalAssignments = results[0]?.metadata[0]?.total || 0;
+
+    // We must manually populate after the aggregation
+    await assignmentModel.populate(assignments, {
+        path: 'groupIds',
+        select: 'groupname'
+    });
 
     res.status(200).json({
         message: "Assignments fetched successfully",
@@ -301,7 +332,6 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
         assignments,
     });
 });
-
 export const ViewSub = asyncHandler(async (req, res, next) => {
     const { SubassignmentId } = req.query; 
     if (!SubassignmentId || !mongoose.Types.ObjectId.isValid(SubassignmentId)) {
