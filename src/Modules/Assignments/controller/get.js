@@ -153,7 +153,7 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
     if (Object.keys(filter).length === 0) return next(new Error("At least one query parameter is required.", { cause: 400 }));
 
     const [submissions, total] = await Promise.all([
-        SubassignmentModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit)
+        SubassignmentModel.find(filter).select('+annotationData').sort({ createdAt: -1 }).skip(skip).limit(limit)
             .populate('studentId', 'userName firstName lastName')
             .populate('assignmentId', 'name')
             .populate('groupId', 'groupname').lean(),
