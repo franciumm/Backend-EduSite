@@ -185,9 +185,7 @@ export const getSubmissions = asyncHandler(async (req, res, next) => {
     if (!hasAccess) {
         return next(new Error("You are not authorized to view submissions for this assignment.", { cause: 403 }));
     }
-    // --- END REFACTOR ---
-
-    // Now that we know the user is authorized, we can proceed to fetch the data.
+ 
     let submissions;
     if (submissionId) {
         // Fetch a single submission
