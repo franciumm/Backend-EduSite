@@ -177,7 +177,7 @@ export const getSubmissions = asyncHandler(async (req, res, next) => {
     // --- REFACTOR: Use the new centralized submission authorizer ---
     const hasAccess = await canViewSubmissionsFor({
         user,
-        isTeacher: isteacher.teacher,
+        isTeacher: isteacher,
         contentId: assignmentId,
         contentType: 'assignment'
     });
