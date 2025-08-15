@@ -197,10 +197,10 @@ export const getSubmissions = asyncHandler(async (req, res, next) => {
         submissions = await SubassignmentModel.findOne({
             _id: submissionId,
             assignmentId, // Ensure it belongs to the correct parent assignment
-        }).populate("studentId", "userName firstName lastName email");
+        }).populate("studentId", "userName firstName lastName email ");
 
         // Extra check: if student, they can only view their own submission, even if they have access to the assignment.
-        if (!isteacher.teacher && submissions && !submissions.studentId._id.equals(user._id)) {
+        if (!isteacher && submissions && !submissions.studentId._id.equals(user._id)) {
             return next(new Error("You are not authorized to view this specific submission.", { cause: 403 }));
         }
 
@@ -210,7 +210,7 @@ export const getSubmissions = asyncHandler(async (req, res, next) => {
         const query = { assignmentId };
         
         // If the user is a student, scope the list to only their own submissions.
-        if (!isteacher.teacher) {
+        if (!isteacher) {
             query.studentId = user._id;
         }
 
