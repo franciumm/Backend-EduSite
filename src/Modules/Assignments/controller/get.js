@@ -235,31 +235,38 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
 
     let query = {};
 
-    // --- Teacher Logic (Unchanged) ---
+    // --- Time-based Status Filtering ---
+    if (status) {
+        if (status === "active") {
+            query.startDate = { $lte: currentDate };
+            query.endDate = { $gte: currentDate };
+        } else if (status === "upcoming") {
+            query.startDate = { $gt: currentDate };
+        } else if (status === "expired") {
+            query.endDate = { $lt: currentDate };
+        }
+    }
+
+    // --- Role-based Access Logic ---
     if (isteacher) {
-        if (user.role === 'main_teacher') {
-            query = {};
-        } else if (user.role === 'assistant') {
+        if (user.role === 'assistant') {
             const groupIds = user.permissions.assignments || [];
             if (groupIds.length === 0) {
                 return res.status(200).json({ message: "No assignments found.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
             }
-            query = { groupIds: { $in: groupIds } };
+            // Add assistant's group permissions to the query
+            query.groupIds = { $in: groupIds };
         }
-         if (status) {
-            if (status === "active") { query.startDate = { $lte: currentDate }; query.endDate = { $gte: currentDate }; }
-            else if (status === "upcoming") { query.startDate = { $gt: currentDate }; }
-            else if (status === "expired") { query.endDate = { $lt: currentDate }; }
-        }
-
-    // --- Student Logic (Rewritten to be Correct and Un-buggy) ---
+        // For main_teacher, the query remains empty (or just has status), fetching all assignments.
+        
     } else {
+        // --- Student Logic ---
         const student = await studentModel.findById(user._id).select('groupId').lean();
         if (!student) {
-            return res.status(200).json({ message: "No assignments found for this user.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
+            return res.status(200).json({ message: "Student not found.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
         }
         
-        // Base query for student enrollment
+        // Base query for student: must be in their group, enrolled, or in a section with the assignment.
         const orConditions = [{ enrolledStudents: user._id }];
         if (student.groupId) {
             orConditions.push({ groupIds: student.groupId });
@@ -272,25 +279,17 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
             }
         }
         query.$or = orConditions;
-
-        // **THE FIX**: Apply timeline filters correctly based on status.
-        // We no longer add a contradictory mandatory filter.
-        if (status) {
-            if (status === "active") { query.startDate = { $lte: currentDate }; query.endDate = { $gte: currentDate }; }
-            else if (status === "expired") { query.endDate = { $lt: currentDate }; }
-            else if (status === "upcoming") { query.startDate = { $gt: currentDate }; }
-             // If status is not 'upcoming', we default to showing only started assignments.
-            if (status !== 'upcoming') {
-                query.startDate = { $lte: currentDate };
-            }
-        } else {
-            // Default behavior: show active and expired, but not upcoming.
-            query.startDate = { $lte: currentDate };
-        }
     }
 
+    // --- Database Query ---
     const [assignments, totalAssignments] = await Promise.all([
-        assignmentModel.find(query).sort({ startDate: -1 }).skip(skip).limit(limit).select("name startDate endDate groupIds createdBy").lean(),
+        assignmentModel.find(query)
+            .sort({ startDate: -1 })
+            .skip(skip)
+            .limit(limit)
+            .select('-answerBucketName -answerKey -answerPath') // SECURE: Explicitly exclude answer fields
+            .populate('groupIds', 'groupname')
+            .lean(),
         assignmentModel.countDocuments(query)
     ]);
 
