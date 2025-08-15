@@ -101,7 +101,7 @@ export const createInviteLink = asyncHandler(async (req, res, next) => {
     group.isInviteLinkActive = true;
     await group.save();
 
-    const inviteLink = `${req.protocol}://${req.get('host')}/api/v1/groups/join/${token}`;
+    const inviteLink = `${req.protocol}://${req.get('host')}/group/join/${token}`;
 
     res.status(200).json({ message: 'Invite link created successfully.', inviteLink });
 });
