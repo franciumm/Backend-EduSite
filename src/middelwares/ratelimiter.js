@@ -1,8 +1,16 @@
 import rateLimit from 'express-rate-limit';
 
+
+export const createRequestLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour window
+    max: 5, // Allow a user to make 5 course requests per hour
+    message: 'You have made too many course requests. Please try again later.',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 50,
+  max: 70,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -17,7 +25,8 @@ export const generalLimiter = rateLimit({
 
 export const loginLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 50,                  // your rule
+  max: 60,                  // your rule
+  message: 'You have made too many lOGIN requests. Please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
 });
