@@ -3,6 +3,7 @@
 import { teacherModel } from "../../../../DB/models/teacher.model.js";
 import { asyncHandler } from "../../../utils/erroHandling.js";
 import bcrypt from 'bcrypt';
+import {groupModel}from "../../../../DB/models/groups.model.js";
 
 // Controller for the Main Teacher to create a new assistant account
 export const createAssistant = asyncHandler(async (req, res, next) => {
