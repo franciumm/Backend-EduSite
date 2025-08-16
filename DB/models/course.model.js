@@ -11,7 +11,7 @@ const courseSchema = new Schema(
       },
 
     phone :   {
-        type: Number,
+        type: String,
         required: true,
       },
 
