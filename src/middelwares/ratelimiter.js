@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 
 export const createRequestLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour window
-    max: 2, // Allow a user to make 5 course requests per hour
+    max: 3, // Allow a user to make 5 course requests per hour
     message: 'You have made too many course requests. Please try again later.',
     standardHeaders: true,
     legacyHeaders: false,
