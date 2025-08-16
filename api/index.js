@@ -12,7 +12,6 @@ import { requestId } from '../src/middelwares/requestId.js';
 const app = express();
 app.disable('x-powered-by');
 app.use(helmet());
-app.use(cors());                // if you need strict origins, we’ll add later
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
