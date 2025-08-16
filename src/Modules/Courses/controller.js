@@ -1,5 +1,5 @@
 import { courseModel } from "../../../DB/models/course.model.js";
-import { asyncHandler } from "../../utils/asyncHandler.js"; // Or erroHandling.js if that's the correct name
+import { asyncHandler } from "../../utils/erroHandling.js"; 
 
 export const GetAll = asyncHandler(
     async (req, res, next) => {
