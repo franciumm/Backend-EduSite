@@ -61,12 +61,80 @@ export const updateAssistantPermissions = asyncHandler(async (req, res, next) =>
     res.status(200).json({ message: "Assistant permissions updated successfully.", data: updatedAssistant });
 });
 
-// Controller to get a list of all assistants
 export const getAllAssistants = asyncHandler(async (req, res, next) => {
-    const assistants = await teacherModel.find({ role: 'assistant' }).select('-password');
-    res.status(200).json({ message: "Assistants fetched successfully.", data: assistants });
-});
+    // 1. Fetch all assistants. We use .lean() for performance as we are only reading data.
+    const assistants = await teacherModel.find({ role: 'assistant' }).select('-password').lean();
 
+    if (!assistants.length) {
+        return res.status(200).json({ message: "No assistants found.", data: [] });
+    }
+
+    // 2. Gather all unique Group IDs from all assistants' permissions into a Set.
+    // A Set is used to automatically handle duplicates efficiently.
+    const allGroupIds = new Set();
+    for (const assistant of assistants) {
+        // Check if permissions object and its properties exist and are arrays
+        if (assistant.permissions) {
+            Object.values(assistant.permissions).forEach(permissionArray => {
+                if (Array.isArray(permissionArray)) {
+                    permissionArray.forEach(id => allGroupIds.add(id.toString()));
+                }
+            });
+        }
+    }
+
+    // If there are no groups to populate, we can return the assistants as is.
+    if (allGroupIds.size === 0) {
+        return res.status(200).json({ message: "Assistants fetched successfully.", data: assistants });
+    }
+
+    // 3. Perform ONE efficient query to get all required groups and their associated grades.
+    const groups = await groupModel.find({
+        _id: { $in: Array.from(allGroupIds) }
+    }).populate({
+        path: 'gradeid', // Ensure this path matches your groups.model.js schema
+        select: 'grade', // Select only the 'grade' number
+    }).lean();
+
+    // 4. Create a Map for instant O(1) lookups (ID -> Full Group Object).
+    // This is much faster than repeatedly searching the 'groups' array in a loop.
+    const groupMap = new Map(groups.map(group => [group._id.toString(), group]));
+
+    // 5. Build the new, populated permissions object for each assistant.
+    const populatedAssistants = assistants.map(assistant => {
+        const populatedPermissions = {};
+        
+        if (assistant.permissions) {
+            for (const [permissionType, idArray] of Object.entries(assistant.permissions)) {
+                if (Array.isArray(idArray)) {
+                    populatedPermissions[permissionType] = idArray.map(id => {
+                        const group = groupMap.get(id.toString());
+                        
+                        // Safety check: handle cases where a group or its grade might have been deleted.
+                        if (!group || !group.gradeid) {
+                            return null;
+                        }
+                        
+                        // 6. Shape the data exactly as requested.
+                        return {
+                            groupId: group._id,
+                            groupname: group.groupname,
+                            grade: group.gradeid.grade
+                        };
+                    }).filter(Boolean); // .filter(Boolean) elegantly removes any nulls from the array.
+                }
+            }
+        }
+        
+        // Return a new assistant object with the populated permissions
+        return {
+            ...assistant,
+            permissions: populatedPermissions
+        };
+    });
+
+    res.status(200).json({ message: "Assistants fetched successfully.", data: populatedAssistants });
+});
 // Controller to get a single assistant by ID
 export const getAssistantById = asyncHandler(async (req, res, next) => {
     const { assistantId } = req.params;
