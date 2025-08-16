@@ -147,48 +147,152 @@ export const Signup = asyncHandler(async(req,res,next)=>{
     res.status ( 201). json({Message : 'Done '})
 })
 
-
-
 export const getMyProfile = asyncHandler(async (req, res, next) => {
-    const userId = req.user._id;            
+    const userId = req.user._id;
     const isTeacher = req.isteacher;
 
-    // --- Phase 1: Prepare Queries ---
-    const Model = isTeacher ? teacherModel : studentModel;
-    const projection = { password: 0, __v: 0, token: 0 }; 
+    let account;
 
-    let profileQuery = Model.findById(userId).select(projection).lean();
+    if (isTeacher) {
+        // We will fetch the full teacher profile first.
+        const teacher = await teacherModel.findById(userId).select({ password: 0, __v: 0 }).lean();
+
+        if (!teacher) {
+            return next(new Error("Account not found.", { cause: 404 }));
+        }
+
+        // --- NEW, MORE ROBUST LOGIC FOR ASSISTANTS ---
+        // We only perform this complex operation if the teacher is an assistant AND has permissions.
+        if (teacher.role === 'assistant' && teacher.permissions) {
+            
+            // 1. Gather all unique Group IDs from all permission arrays into a Set.
+            // A Set automatically handles duplicates for us.
+            const groupIdsToFetch = new Set();
+            Object.values(teacher.permissions).forEach(groupArray => {
+                if (Array.isArray(groupArray)) {
+                    groupArray.forEach(id => groupIdsToFetch.add(id.toString()));
+                }
+            });
+
+            if (groupIdsToFetch.size > 0) {
+                // 2. Perform ONE efficient query to get all required groups and their grades.
+                const groups = await groupModel.find({
+                    _id: { $in: Array.from(groupIdsToFetch) }
+                }).populate({
+                    path: 'gradeid',
+                    select: 'grade -_id', // Select only the 'grade' number
+                    model: 'grade'
+                }).lean();
+
+                // 3. Create a Map for instant lookups (ID -> Full Group Object).
+                const groupMap = new Map(groups.map(group => [group._id.toString(), group]));
+
+                // 4. Build the new, populated permissions object.
+                const populatedPermissions = {};
+                for (const [key, idArray] of Object.entries(teacher.permissions)) {
+                    if (Array.isArray(idArray)) {
+                        populatedPermissions[key] = idArray.map(id => {
+                            const group = groupMap.get(id.toString());
+                            // Safety check in case a group or its grade was deleted from the DB
+                            if (!group || !group.gradeid) return null;
+                            
+                            // 5. Shape the data exactly as requested.
+                            return {
+                                groupId: group._id,
+                                groupname: group.groupname,
+                                grade: group.gradeid.grade
+                            };
+                        }).filter(Boolean); // Remove any nulls from deleted records
+                    }
+                }
+                
+                // Replace the old permissions object with our new, rich one.
+                teacher.permissions = populatedPermissions;
+            }
+        }
+        
+        account = teacher;
+
+    } else {
+        // --- Student Logic (Remains the same, it was already correct) ---
+        account = await studentModel.findById(userId)
+            .select({ password: 0, __v: 0 })
+            .populate({ path: "groupId", select: "_id groupname", model: "group" }) 
+            .populate({ path: "gradeId", select: "grade", model: "grade" })
+            .lean();
+    }
+
+    // --- Final Response Assembly (Common for both) ---
+    if (!account) {
+        return next(new Error("Account not found.", { cause: 404 }));
+    }
+
+    let responseData = { ...account };
 
     if (!isTeacher) {
-        profileQuery = profileQuery
-            // THE FIX IS HERE: We now select both the _id and the groupname.
-            .populate({ path: "groupId", select: "_id groupname", model: "group" }) 
-            .populate({ path: "gradeId", select: "grade", model: "grade" });
+        const [assignmentSubmissions, examSubmissions] = await Promise.all([
+            SubassignmentModel.find({ studentId: userId }).lean(),
+            SubexamModel.find({ studentId: userId }).lean()
+        ]);
+        responseData.assignmentSubmissions = assignmentSubmissions;
+        responseData.examSubmissions = examSubmissions;
     }
-
-    // --- Phase 2: Maximum Performance - Parallel Data Fetching ---
-    const [account, assignmentSubmissions, examSubmissions] = await Promise.all([
-        profileQuery,
-        SubassignmentModel.find({ studentId: userId }).lean(),
-        SubexamModel.find({ studentId: userId }).lean()
-    ]);
-
-    // --- Phase 3: Validate & Construct Final Response ---
-    if (!account) {
-        return next(new Error("Account not found. The user may have been deleted.", { cause: 404 }));
-    }
-
-    const responseData = {
-        ...account,
-        assignmentSubmissions,
-        examSubmissions,
-    };
 
     res.status(200).json({
         message: "Profile information fetched successfully.",
         data: responseData,
     });
 });
+
+
+
+
+// export const getMyProfile = asyncHandler(async (req, res, next) => {
+//     const userId = req.user._id;            
+//     const isTeacher = req.isteacher;
+
+//     // --- Phase 1: Prepare Queries ---
+//     const Model = isTeacher ? teacherModel : studentModel;
+//     const projection = { password: 0, __v: 0, token: 0 }; 
+
+//     let profileQuery = Model.findById(userId).select(projection).lean();
+
+//     if (!isTeacher) {
+//         profileQuery = profileQuery
+//             // THE FIX IS HERE: We now select both the _id and the groupname.
+//             .populate({ path: "groupId", select: "_id groupname", model: "group" }) 
+//             .populate({ path: "gradeId", select: "grade", model: "grade" });
+//     }
+
+//     // --- Phase 2: Maximum Performance - Parallel Data Fetching ---
+//     const [account, assignmentSubmissions, examSubmissions] = await Promise.all([
+//         profileQuery,
+//         SubassignmentModel.find({ studentId: userId }).lean(),
+//         SubexamModel.find({ studentId: userId }).lean()
+//     ]);
+
+//     // --- Phase 3: Validate & Construct Final Response ---
+//     if (!account) {
+//         return next(new Error("Account not found. The user may have been deleted.", { cause: 404 }));
+//     }
+
+//     const responseData = {
+//         ...account,
+//         assignmentSubmissions,
+//         examSubmissions,
+//     };
+
+//     res.status(200).json({
+//         message: "Profile information fetched successfully.",
+//         data: responseData,
+//     });
+// });
+
+
+
+
+
+
 export const Login = asyncHandler(async(req,res,next)=>{
     const {email , password}= req.body;
     const user = await UserModel.findOne({email});
