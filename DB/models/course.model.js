@@ -18,8 +18,6 @@ const courseSchema = new Schema(
     email: { type: String, required: true , unique : true},
 
     description: { type: String},
-      
-
     },
     { timestamps: true }
   );
