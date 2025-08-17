@@ -218,6 +218,29 @@ export const viewSectionById = asyncHandler(async (req, res, next) => {
         { $lookup: { from: 'exams', localField: 'linkedExams', foreignField: '_id', as: 'exams' } },
         { $lookup: { from: 'materials', localField: 'linkedMaterials', foreignField: '_id', as: 'materials' } },
         { $lookup: { from: 'sections', localField: 'linkedSections', foreignField: '_id', as: 'nestedSections' } },
+              {
+            $addFields: {
+                materials: {
+                    $cond: {
+                        if: isteacher,
+                        then: "$materials",
+                        else: {
+                            $filter: {
+                                input: "$materials",
+                                as: "item",
+                                cond: {
+                                    $or: [
+                                        { $not: ["$$item.publishDate"] },
+                                        { $eq: ["$$item.publishDate", null] },
+                                        { $lte: ["$$item.publishDate", nowInUAE] }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         {
             $project: {
                 _id: 1, name: 1, description: 1,gradeId: 1,
