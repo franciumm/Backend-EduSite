@@ -7,6 +7,9 @@ import mongoose from 'mongoose';
 import { contentStreamModel } from '../../../../DB/models/contentStream.model.js';
 import { submissionStatusModel } from '../../../../DB/models/submissionStatus.model.js';
 import { assignmentModel } from '../../../../DB/models/assignment.model.js';
+import { examModel } from '../../../../DB/models/exams.model.js';
+import materialModel from '../../../../DB/models/material.model.js';
+import { sectionModel } from '../../../../DB/models/section.model.js';
 
 const fanOutContentToStudent = async ({ studentId, groupId, session }) => {
     // 1. Find all content currently assigned to this group
