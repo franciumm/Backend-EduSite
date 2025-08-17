@@ -37,7 +37,7 @@ canManageGroupStudents, Edit.removeStudent);
 
 
 router.put("/addstudent", isAuth,    
-canManageGroupStudents, Edit.addStudent);
+canManageGroupStudents, Edit.addStudentsToGroup);
 
 
 router.post('/invite/create', 
