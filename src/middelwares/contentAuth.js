@@ -100,6 +100,9 @@ export const canAccessContent = async ({ user, isTeacher, contentId, contentType
             [CONTENT_TYPES.MATERIAL]: materialModel,
         };
         const Model = contentModels[contentType];
+           if (!Model) {
+        return true;
+    }
         const content = await Model.findById(contentId).lean();
         
         // This is a failsafe; content should exist if a stream entry exists.
