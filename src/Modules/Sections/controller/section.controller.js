@@ -12,6 +12,7 @@ import { pagination } from '../../../utils/pagination.js';
 import { CONTENT_TYPES } from '../../../utils/constants.js'; 
 import { contentStreamModel } from '../../../../DB/models/contentStream.model.js';
 import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
+import { canAccessContent } from '../../../middelwares/contentAuth.js';
 
 function capitalize(str) {
     if (!str) return '';
