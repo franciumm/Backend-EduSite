@@ -10,10 +10,11 @@ import { toZonedTime } from 'date-fns-tz';
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
 
 export const getExams = asyncHandler(async (req, res, next) => {
-    const { gradeId, groupId } = req.query;
+  const { gradeId, groupId, page, size } = req.query; // <-- 2. GET PAGE AND SIZE
     const isTeacher = req.isteacher;
     const uaeTimeZone = 'Asia/Dubai';
     const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
+  const { limit, skip } = pagination({ page, size });
 
     // --- Teacher logic remains the same, they don't need complex aggregation ---
     if (isTeacher) {
@@ -27,7 +28,11 @@ export const getExams = asyncHandler(async (req, res, next) => {
             if (groupIds.length === 0) return res.status(200).json({ message: "No exams found.", data: [] });
             query = { groupIds: { $in: groupIds } };
         }
-        const exams = await examModel.find(query).lean();
+        const exams = await examModel
+        .find(query)
+        .skip(skip) // <-- 3. APPLY PAGINATION
+        .limit(limit)
+        .lean();
         return res.status(200).json({ message: "Exams fetched successfully", data: exams });
     }
 
@@ -86,7 +91,10 @@ export const getExams = asyncHandler(async (req, res, next) => {
                 answerKey: 0,
                 answerBucketName: 0,
                 answerPath: 0
-            }
+            },
+                { $skip: skip }, 
+    { $limit: limit },
+            
         }
     ];
 
