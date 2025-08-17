@@ -1,5 +1,4 @@
 // src/Modules/Sections/controller/section.controller.js
-import { contentStreamModel } from '../../../../DB/models/contentStream.model.js';
 import { asyncHandler } from '../../../utils/erroHandling.js';
 import { sectionModel } from '../../../../DB/models/section.model.js';
 import { gradeModel } from "../../../../DB/models/grades.model.js";
