@@ -5,7 +5,7 @@ import { asyncHandler } from "../../../utils/erroHandling.js";
 import bcrypt from 'bcrypt';
 import {groupModel}from "../../../../DB/models/groups.model.js";
 import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
-
+import mongoose from "mongoose";
 
 const rebuildAssistantStream = async ({ assistantId, newPermissions, session }) => {
     // 1. Delete all of the assistant's old stream entries
