@@ -9,7 +9,7 @@ const router = Router();
 
 
 router.get("/all", AdminAuth , GetAll);
-router.post("/create",createRequestLimiter, isValid(createCourseSchema) , create );
+router.post("/create", isValid(createCourseSchema) ,createRequestLimiter, create );
 router.delete("/", AdminAuth, deleteCourse); 
 
 export default router ;
