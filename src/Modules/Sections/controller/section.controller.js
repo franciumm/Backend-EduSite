@@ -198,8 +198,10 @@ const buildContentMap = (inputArray, type) => ({
     }
 });
 export const viewSectionById = asyncHandler(async (req, res, next) => {
-    const { sectionId } = req.params;
+    const { sectionId } = req.params;  
     const {user,isteacher} = req;
+    const uaeTimeZone = 'Asia/Dubai';
+    const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
         const hasAccess = await canAccessContent({
         user,
         isTeacher: isteacher,
