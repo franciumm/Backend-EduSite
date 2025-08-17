@@ -92,10 +92,11 @@ export const getExams = asyncHandler(async (req, res, next) => {
                 answerBucketName: 0,
                 answerPath: 0
             },
-                { $skip: skip }, 
-    { $limit: limit },
+             
             
-        }
+        },
+           { $skip: skip }, 
+    { $limit: limit },
     ];
 
     const exams = await examModel.aggregate(pipeline);
