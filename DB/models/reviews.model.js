@@ -1,34 +1,28 @@
 import { Schema, model } from "mongoose";
 
-const reviewSchema = new Schema(
+// A single, reusable schema for all review types
+const baseReviewSchema = new Schema(
   {
-    // The student who wrote the review. This is the only link we need.
     createdBy: {
       type: Schema.Types.ObjectId,
-      ref: "student", // Reference the student model
+      ref: "student",
       required: true,
-      unique: true, // A student can only create one review
+      unique: true, // Note: This unique constraint is now only per-collection
     },
-    // The rating from 1 to 5
-    rate: {
-      type: Number,
-      required: true,
-      min: 1,
-      max: 5,
-    },
-    // The text content of the review
-    description: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    // The flag that the main teacher will control
-    isPublished: {
-      type: Boolean,
-      default: false,
-    },
+    rate: { type: Number, required: true, min: 1, max: 5 },
+    description: { type: String, required: true, trim: true },
   },
   { timestamps: true }
 );
 
-export const reviewModel = model("review", reviewSchema);
+// Create three distinct models from the same schema
+export const PendingReviewModel = model("PendingReview", baseReviewSchema);
+export const PublishedReviewModel = model("PublishedReview", baseReviewSchema);
+export const UnpublishedReviewModel = model("UnpublishedReview", baseReviewSchema);
+
+// Helper object to easily access models by name
+export const reviewModels = {
+  pending: PendingReviewModel,
+  published: PublishedReviewModel,
+  unpublished: UnpublishedReviewModel,
+};
