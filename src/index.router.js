@@ -12,6 +12,8 @@ import assistant from "./Modules/Assistants/assistant.router.js"
 import healthRouter from './Modules/health/health.router.js';
 import reportRouter from "./Modules/Reports/student.report.router.js";
 import courseRouter from "./Modules/Courses/Courses.router.js"
+import reviewsRouter from "./Modules/reviews/reviews.router.js"
+
 const bootstrape =  async (app,express)=>{
     app.use(express.json({limit :'10mb'}));
     app.use(express.urlencoded({ limit :'10mb', extended: false }));
@@ -29,6 +31,8 @@ const bootstrape =  async (app,express)=>{
     app.use('/health', healthRouter);
     app.use("/reports", reportRouter);
     app.use("/courses", courseRouter)
+    app.use("/reviews", reviewsRouter)
+
     app.use('*', notFound);          
     app.use(globalerrorHandling);
 
