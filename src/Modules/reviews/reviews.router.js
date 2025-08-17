@@ -14,7 +14,7 @@ router.post("/", reviewLimiter, isAuth, reviewController.createReview);
 
 // Admin-only routes (for main_teacher)
 router.get("/all", AdminAuth, reviewController.getAllReviews);
-router.patch("/:reviewId/status", AdminAuth, reviewController.updateReviewStatus);
+router.put("/:reviewId/status", AdminAuth, reviewController.updateReviewStatus);
 router.delete("/:reviewId", AdminAuth, reviewController.deleteReview);
 
 export default router;
