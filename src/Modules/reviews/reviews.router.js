@@ -1,7 +1,7 @@
 import { Router } from "express";
 import * as reviewController from "./controller.js"; // Adjust path if needed
 import { isAuth, AdminAuth } from "../../middelwares/auth.js"; // Adjust path if needed
-import { reviewLimiter, generalLimiter } from "../../middelwares/rateLimit.js"; // <-- 1. IMPORT LIMITERS
+import { reviewLimiter, generalLimiter } from "../../middelwares/ratelimiter.js"; // <-- 1. IMPORT LIMITERS
 
 const router = Router();
 
