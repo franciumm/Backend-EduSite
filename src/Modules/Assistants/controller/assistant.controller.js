@@ -8,6 +8,7 @@ import { contentStreamModel } from "../../../../DB/models/contentStream.model.js
 import mongoose from "mongoose";
 import { assignmentModel } from "../../../../DB/models/assignment.model.js";
 import materialModel from "../../../../DB/models/material.model.js";
+import { examModel } from "../../../../DB/models/exams.model.js";
 
 const rebuildAssistantStream = async ({ assistantId, newPermissions, session }) => {
     // 1. Delete all of the assistant's old stream entries
