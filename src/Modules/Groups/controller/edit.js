@@ -25,44 +25,75 @@ export const removeStudent = asyncHandler(async(req,res,next)=>{
 
 
 
-export const addStudent = asyncHandler(async (req, res, next) => {
-  const { groupid, studentid } = req.body;
 
- 
-  if ( !mongoose.Types.ObjectId.isValid(groupid) ||!mongoose.Types.ObjectId.isValid(studentid) ) {
-    return res.status(400).json({ message: 'Invalid Group ID or Student ID' });
+export const addStudentsToGroup = asyncHandler(async (req, res, next) => {
+  const { groupid, studentIds } = req.body;
+
+  // 1. --- Input Validation ---
+  if (!mongoose.Types.ObjectId.isValid(groupid)) {
+    return res.status(400).json({ message: "Invalid Group ID format" });
+  }
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    return res
+      .status(400)
+      .json({ message: "studentIds must be a non-empty array" });
+  }
+  for (const studentId of studentIds) {
+    if (!mongoose.Types.ObjectId.isValid(studentId)) {
+      return res
+        .status(400)
+        .json({ message: `Invalid Student ID format: ${studentId}` });
+    }
   }
 
-  
-  const student = await studentModel.findById(studentid);
-  if (!student) {
-    return res.status(404).json({ message: 'Student not found' });
+  // 2. --- Data Fetching ---
+  // Find the group and students concurrently for better performance
+  const [group, students] = await Promise.all([
+    groupModel.findById(groupid),
+    studentModel.find({ _id: { $in: studentIds } }),
+  ]);
+
+  if (!group) {
+    return res.status(404).json({ message: "Group not found" });
+  }
+  if (students.length !== studentIds.length) {
+    return res
+      .status(404)
+      .json({ message: "One or more students not found" });
   }
 
-
-const group = await groupModel.findById(groupid);
-
-if(student.gradeId.toString() != group.gradeid.toString()){
-  return res.status(404).json({ message: 'Student not In the groups Grade' });
-}
-  student.groupId = groupid;
-  await student.save();
-  const updatedGroup = await groupModel.findByIdAndUpdate(
-    groupid,
-    { $addToSet: { enrolledStudents: studentid } },
-    { new: true, runValidators: true }
-  ).populate("enrolledStudents", {_id :1 , userName:1,firstName :1});
-
-  if (!updatedGroup) {
-    return res.status(404).json({ message: 'Group not found' });
+  // 3. --- Business Logic Validation ---
+  // Ensure every student is in the correct grade
+  for (const student of students) {
+    if (student.gradeId.toString() !== group.gradeid.toString()) {
+      return res.status(400).json({
+        message: `Student '${student.userName}' is not in the same grade as the group.`,
+      });
+    }
   }
 
+  // 4. --- Database Updates (Bulk Operations) ---
+  // Update all students to set their new groupId
+  await studentModel.updateMany(
+    { _id: { $in: studentIds } },
+    { $set: { groupId: groupid } }
+  );
+
+  // Add all new students to the group's enrolledStudents array
+  const updatedGroup = await groupModel
+    .findByIdAndUpdate(
+      groupid,
+      { $addToSet: { enrolledStudents: { $each: studentIds } } },
+      { new: true, runValidators: true }
+    )
+    .populate("enrolledStudents", "_id userName firstName"); // Populate with selected fields
+
+  // 5. --- Response ---
   res.status(200).json({
-    message: 'Student added successfully',
-    updatedGroup
+    message:'Student added successfully',
+    group: updatedGroup,
   });
 });
-
 
 export const groupDelete = asyncHandler(async (req, res, next) => {
   const { groupid } = req.body;
