@@ -16,58 +16,90 @@ const s3Client = new S3Client({
 });
 
 // View materials for a specific group
+
 export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
-    const { groupId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(groupId)) {
-        return next(new Error("Invalid Group ID.", { cause: 400 }));
+  const { groupId } = req.params;
+  const { page, size } = req.query; // <-- 2. GET PAGE AND SIZE
+
+  if (!mongoose.Types.ObjectId.isValid(groupId)) {
+    return next(new Error("Invalid Group ID.", { cause: 400 }));
+  }
+
+  const { user, isteacher } = req;
+  const uaeTimeZone = "Asia/Dubai";
+  const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
+  const { limit, skip } = pagination({ page, size }); // Calculate pagination
+
+  let queryFilter = { groupIds: groupId };
+  let isAuthorized = false;
+
+  if (isteacher) {
+    const permittedGroupIds = user.permissions.materials?.map((id) =>
+      id.toString()
+    );
+    if (
+      user.role === "main_teacher" ||
+      (user.role === "assistant" && (permittedGroupIds || []).includes(groupId))
+    ) {
+      isAuthorized = true;
+      // For teachers, there's no date filtering at the DB level.
+      // They can see all materials, scheduled or not.
     }
-
-    const { user, isteacher } = req;
-    const uaeTimeZone = 'Asia/Dubai';
-    const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
-    
-    // **FIX**: Initialize queryFilter here to be used later.
-    let queryFilter = { groupIds: groupId };
-    let isAuthorized = false;
-
-    if (isteacher) {
-        if (user.role === 'main_teacher' || (user.role === 'assistant' && (user.permissions.materials?.map(id => id.toString()) || []).includes(groupId))) {
-            isAuthorized = true;
-        }
-    } else {
-        if (user.groupId?.toString() === groupId) {
-            isAuthorized = true;
-            // **FIX**: Apply student-specific filter for scheduled content.
-            queryFilter.$or = [
-                { publishDate: { $exists: false } },
-                { publishDate: null },
-                { publishDate: { $lte: nowInUAE } }
-            ];
-        }
+  } else {
+    // Student authorization and filtering
+    if (user.groupId?.toString() === groupId) {
+      isAuthorized = true;
+      // For students, filter out materials that are not yet published.
+      queryFilter.$or = [
+        { publishDate: { $exists: false } },
+        { publishDate: null },
+        { publishDate: { $lte: nowInUAE } },
+      ];
     }
+  }
 
-    if (!isAuthorized) {
-        return next(new Error("Unauthorized: You do not have access to this group's materials.", { cause: 403 }));
-    }
+  if (!isAuthorized) {
+    return next(
+      new Error("Unauthorized: You do not have access to this group's materials.", {
+        cause: 403,
+      })
+    );
+  }
 
-    // **FIX**: Use the constructed `queryFilter` and add `.lean()` for efficiency.
-    let materials = await materialModel.find(queryFilter).lean();
-    
-    if (isteacher) {
-        materials = materials.map(material => {
-            const isPublished = !material.publishDate || new Date(material.publishDate) <= nowInUAE;
-            return {
-                ...material,
-                status: isPublished ? 'Published' : `Scheduled for ${new Date(material.publishDate).toLocaleDateString('en-GB', { timeZone: uaeTimeZone })}`,
-                publishDate: material.publishDate
-            };
-        });
-    }
+  // 3. APPLY PAGINATION TO THE QUERY
+  let materials = await materialModel
+    .find(queryFilter)
+    .sort({ createdAt: -1 }) // Sort for consistent results across pages
+    .skip(skip)
+    .limit(limit)
+    .lean();
 
-    // **RESPONSE STRUCTURE PRESERVED**
-    res.status(200).json({ message: "Materials fetched successfully for the group.", data: materials });
+  // This post-processing logic for teachers now runs on the paginated data, which is efficient.
+  if (isteacher) {
+    materials = materials.map((material) => {
+      const isPublished =
+        !material.publishDate || new Date(material.publishDate) <= nowInUAE;
+      return {
+        ...material,
+        status: isPublished
+          ? "Published"
+          : `Scheduled for ${new Date(material.publishDate).toLocaleDateString(
+              "en-GB",
+              { timeZone: uaeTimeZone }
+            )}`,
+        publishDate: material.publishDate,
+      };
+    });
+  }
+
+  // **RESPONSE STRUCTURE PRESERVED**
+  res
+    .status(200)
+    .json({
+      message: "Materials fetched successfully for the group.",
+      data: materials,
+    });
 });
-
 // Create material (main_teacher only) - Logic is correct.
 export const createMaterial = asyncHandler(async (req, res, next) => {
     const { name, description, gradeId, groupIds, linksArray, files, publishDate } = req.body;
