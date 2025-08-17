@@ -1,6 +1,6 @@
-import { reviewModel } from "../../DB/models/reviews.model.js"; // Adjust path if needed
-import { asyncHandler } from "../utils/erroHandling.js"; // Adjust path if needed
-import { pagination } from "../utils/pagination.js"; // Adjust path if needed
+import { reviewModel } from "../../../DB/models/reviews.model.js"; // Adjust path if needed
+import { asyncHandler } from "../../utils/erroHandling.js"; // Adjust path if needed
+import { pagination } from "../../utils/pagination.js"; // Adjust path if needed
 
 /**
  * @desc    Student creates a review
