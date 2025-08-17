@@ -9,7 +9,7 @@ import bootstrape from '../src/index.router.js';   // keep your original router 
 import { requestId } from '../src/middelwares/requestId.js';
 const whitelist = [
     'http://localhost:3000',      // Your local development machine
-    'https://adel225.github.io/' // Your specific Vercel frontend URL
+    'https://adel225.github.io/EduSite/' // Your specific Vercel frontend URL
 ].filter(Boolean);
 
 // 2. We create a set of "Rules" for the bouncer
