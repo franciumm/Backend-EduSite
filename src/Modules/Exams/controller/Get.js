@@ -41,7 +41,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
     // --- Student Logic (Rewritten with Aggregation Pipeline) ---
 
        const streamItems = await contentStreamModel.find({
-        userId: user._id,
+        userId: req.user._id,
         contentType: 'exam'
     }).lean();
  const examIds = streamItems.map(item => item.contentId);
@@ -50,7 +50,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
     }
     const allExams = await examModel.find({ _id: { $in: examIds } }).lean();
   const visibleExams = allExams.filter(exam => {
-        const exception = (exam.exceptionStudents || []).find(ex => ex.studentId.equals(user._id));
+        const exception = (exam.exceptionStudents || []).find(ex => ex.studentId.equals(req.user._id));
         const effectiveStartDate = exception ? exception.startdate : exam.startdate;
         return new Date(effectiveStartDate) <= nowInUAE;
     });
