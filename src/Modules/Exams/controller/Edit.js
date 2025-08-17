@@ -13,6 +13,13 @@ import { canAccessContent } from "../../../middelwares/contentAuth.js";
 import { sectionModel } from "../../../../DB/models/section.model.js";
 const fsPromises = fs.promises;
 import { CONTENT_TYPES } from "../../../utils/constants.js"; // Import constants
+import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
+import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
+
+
+
+
+
 
 const validateExamId = (req, res, next) => {
     const { examId } = req.query;
@@ -316,6 +323,12 @@ export const markSubmissionWithPDF = asyncHandler(async (req, res, next) => {
   }
   // 7. Save and return updated submission
   const updatedSubmission = await subExam.save();
+
+   await submissionStatusModel.updateOne(
+        { studentId: subExam.studentId, contentId: subExam.examId, contentType: 'exam' },
+        { status: 'marked', score: updatedSubmission.score }
+    );
+
   return res.status(200).json({
     message: "Marked PDF uploaded successfully",
     submission: updatedSubmission,
@@ -353,6 +366,10 @@ export const deleteExam = asyncHandler(async (req, res, next) => {
     if (!isMainTeacher && !isOwner) {
         return next(new Error("You are not authorized to delete this exam.", { cause: 403 }));
     }
+     await Promise.all([
+        contentStreamModel.deleteMany({ contentId: examId }),
+        submissionStatusModel.deleteMany({ contentId: examId, contentType: 'exam' })
+    ]);
   await exam.deleteOne();
 
   // 5. Send the success response.
@@ -410,6 +427,13 @@ export const deleteSubmittedExam = asyncHandler(async (req, res, next) => {
     // This single line replaces the entire transaction and manual S3 cleanup block.
     // It will trigger your pre('deleteOne') hook, which handles the S3 file deletion
     // before the document is removed from the database.
+     await submissionStatusModel.updateOne(
+        { studentId: submission.studentId, contentId: submission.examId, contentType: 'exam' },
+        { 
+            $set: { status: 'assigned' },
+            $unset: { submissionId: "", score: "", isLate: "", SubmitDate: "" }
+        }
+    );
     await submission.deleteOne();
 
     // --- Phase 5: Send Success Response ---

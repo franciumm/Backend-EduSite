@@ -15,6 +15,9 @@ import fs from "fs";
 import { promises as fsPromises } from 'fs';
 import { CONTENT_TYPES } from "../../../utils/constants.js"; 
 import path from "path"; 
+import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
+import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
+import { synchronizeContentStreams } from '../../../utils/streamHelpers.js';
 
 
 
@@ -48,29 +51,45 @@ export const downloadAssignment = asyncHandler(async (req, res, next) => {
 });
 
 export const editAssignment = asyncHandler(async (req, res, next) => {
-    const { assignmentId, ...updateData } = req.body;
-
+    const { assignmentId, groupIds,...updateData } = req.body;
+    const assignmentFile = req.files?.file?.[0];
+    const answerFile = req.files?.answerFile?.[0];
     if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
         return next(new Error("A valid Assignment ID is required.", { cause: 400 }));
     }
+    const session = await mongoose.startSession();
 
-    const assignment = await assignmentModel.findById(assignmentId);
+  
+    try {
+        // Handle new main assignment file upload
+        session.startTransaction();
+
+        const assignment = await assignmentModel.findById(assignmentId).session(session);
     if (!assignment) {
         return next(new Error("Assignment not found.", { cause: 404 }));
     }
 
-    const isMainTeacher = req.user.role === 'main_teacher';
+
+     const isMainTeacher = req.user.role === 'main_teacher';
     const isOwner = assignment.createdBy.equals(req.user._id);
 
     if (!isMainTeacher && !isOwner) {
         return next(new Error("You are not authorized to edit this assignment.", { cause: 403 }));
     }
-    
-    const assignmentFile = req.files?.file?.[0];
-    const answerFile = req.files?.answerFile?.[0];
+ const oldGroupIds = assignment.groupIds;
+        if (groupIds) { // Only run if groupIds are part of the update
+            await synchronizeContentStreams({
+                content: assignment,
+                oldGroupIds: oldGroupIds,
+                newGroupIds: groupIds,
+                session
+            });
+            assignment.groupIds = groupIds; // Update the document
+        }
+       
 
-    try {
-        // Handle new main assignment file upload
+  
+
         if (assignmentFile) {
             if (assignment.key) {
                 await deleteFileFromS3(assignment.bucketName, assignment.key).catch(err => console.error("Non-critical error: Failed to delete old assignment file during edit:", err));
@@ -98,20 +117,24 @@ export const editAssignment = asyncHandler(async (req, res, next) => {
             assignment.answerBucketName = process.env.S3_BUCKET_NAME;
         }
 
-        Object.keys(updateData).forEach(key => {
-            if (updateData[key] !== undefined && updateData[key] !== null) {
-                assignment[key] = updateData[key];
-            }
-        });
-        
-        const updatedAssignment = await assignment.save();
+              Object.assign(assignment, updateData);
 
+        const updatedAssignment = await assignment.save({ session });
+  await session.commitTransaction();
         res.status(200).json({
             message: "Assignment updated successfully.",
             assignment: updatedAssignment,
         });
-    } finally {
-        if (assignmentFile?.path) await fsPromises.unlink(assignmentFile.path).catch(e => console.error("Error deleting temp assignment file", e));
+    }catch (error) {
+        // 8. If ANY error occurred, abort the entire transaction
+        await session.abortTransaction();
+        // Forward the error to the global error handler
+        return next(error);}
+         finally {
+
+                    await session.endSession();
+
+        if ( req.files?.file?.[0].path) await fsPromises.unlink(req.files?.file?.[0].path).catch(e => console.error("Error deleting temp assignment file", e));
         if (answerFile?.path) await fsPromises.unlink(answerFile.path).catch(e => console.error("Error deleting temp answer file", e));
     }
 });
@@ -239,9 +262,12 @@ if (!req.isteacher) return next(new Error("Forbidden.", { cause: 403 }));
     submission.isMarked = true; 
     submission.teacherFeedback =feedback || submission.teacherFeedback;
     submission.annotationData = annotationData|| submission.annotationData ;
-    await submission.save();
+   await submissionStatusModel.updateOne(
+            { studentId: submission.studentId, contentId: submission.assignmentId, contentType: 'assignment' },
+            { status: 'marked', score: submission.score }
+        );
+      await submission.save();
 
-  
     res.status(200).json({
       message: "Submission marked and replaced successfully",
       updatedSubmission: submission,
@@ -266,7 +292,11 @@ export const deleteAssignmentWithSubmissions = asyncHandler(async (req, res, nex
      if (!isMainTeacher && !isOwner) {
         return next(new Error("You are not authorized to delete this assignment.", { cause: 403 }));
     }
-
+   await Promise.all([
+        contentStreamModel.deleteMany({ contentId: assignmentId }),
+        submissionStatusModel.deleteMany({ contentId: assignmentId, contentType: 'assignment' })
+    ]);
+ 
  await assignment.deleteOne();
     res.status(200).json({
         message: "Assignment and all related data deleted successfully.",
@@ -302,6 +332,15 @@ const submission = await SubassignmentModel.findById(submissionId);
     if (!isAuthorized) {
         return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
     }
+      await submissionStatusModel.updateOne(
+        { studentId: submission.studentId, contentId: submission.assignmentId, contentType: 'assignment' },
+        { 
+            $set: { status: 'assigned' },
+            // Unset fields that are no longer relevant
+            $unset: { submissionId: "", score: "", isLate: "", SubmitDate: "" }
+        }
+    );
+
     
     await submission.deleteOne();
 

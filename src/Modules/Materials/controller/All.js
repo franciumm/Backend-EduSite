@@ -10,10 +10,38 @@ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { nanoid } from 'nanoid';
 import { toZonedTime } from 'date-fns-tz';
+import { contentStreamModel } from '../../../../DB/models/contentStream.model.js';
 
 const s3Client = new S3Client({
     region: process.env.AWS_REGION,
 });
+
+
+
+const propagateMaterialToStreams = async ({ material, session }) => {
+    const students = await studentModel.find({ groupId: { $in: material.groupIds } }).select('_id groupId').session(session);
+
+    const streamEntries = students.map(student => ({
+        userId: student._id,
+        contentId: material._id,
+        contentType: 'material',
+        gradeId: material.gradeId,
+        groupId: student.groupId
+    }));
+
+    // Add access for the teacher who created it
+    streamEntries.push({
+        userId: material.createdBy,
+        contentId: material._id,
+        contentType: 'material',
+        gradeId: material.gradeId,
+    });
+
+    if (streamEntries.length > 0) {
+        await contentStreamModel.insertMany(streamEntries, { session });
+    }
+};
+
 
 // View materials for a specific group
 
@@ -115,22 +143,33 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
         return next(new Error(`A material with the name "${name}" already exists for this grade.`, { cause: 409 }));
     }
 
-    const newMaterial = await materialModel.create({
-        name,
-        slug,
-        description,
-        linksArray,
-        groupIds,
-        gradeId,
-        createdBy: teacherId,
-        bucketName: process.env.S3_BUCKET_NAME,
-        files: files,
-        publishDate: publishDate || null
-    });
+   const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
 
-    // **RESPONSE STRUCTURE PRESERVED**
-    res.status(201).json({ message: "Material created successfully", material: newMaterial });
+        const [newMaterial] = await materialModel.create([{
+            name, slug, description, linksArray, groupIds, gradeId,
+            createdBy: teacherId,
+            bucketName: process.env.S3_BUCKET_NAME,
+            files: files,
+            publishDate: publishDate || null
+        }], { session });
+
+        // *** NEW STEP: Propagate to ContentStream ***
+        await propagateMaterialToStreams({ material: newMaterial, session });
+
+        await session.commitTransaction();
+        res.status(201).json({ message: "Material created successfully", material: newMaterial });
+
+    } catch (error) {
+        await session.abortTransaction();
+        // Re-throw the error to be handled by the global error handler
+        return next(new Error("Failed to create material due to a server error.", { cause: 500 }));
+    } finally {
+        await session.endSession();
+    }
 });
+
 
 // Generate a presigned URL for S3 upload (main_teacher only) - Logic is correct.
 export const generateUploadUrl = asyncHandler(async (req, res, next) => {
@@ -158,41 +197,39 @@ export const getMaterials = asyncHandler(async (req, res, next) => {
     const { user, isteacher } = req;
     const uaeTimeZone = 'Asia/Dubai';
     const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
-    let filter = {};
+const streamItems = await contentStreamModel.find({
+        userId: user._id,
+        contentType: 'material'
+    }).lean();
+    const materialIds = streamItems.map(item => item.contentId);
 
-    if (isteacher) {
-        if (user.role === 'assistant') {
-            const permittedGroupIds = user.permissions.materials || [];
-            if (permittedGroupIds.length === 0) {
-                return res.status(200).json({ message: "No materials found.", materials: [], pagination: { currentPage: 1, totalPages: 0, totalMaterials: 0 } });
-            }
-            filter = { groupIds: { $in: permittedGroupIds } };
-        }
-    } else {
-        const student = await studentModel.findById(user._id).select('groupId').lean();
-        if (!student?.groupId) {
-            return next(new Error("Student is not assigned to any group.", { cause: 400 }));
-        }
-        filter = {
-            groupIds: student.groupId,
-            $or: [
-                { publishDate: { $exists: false } },
-                { publishDate: null },
-                { publishDate: { $lte: nowInUAE } }
-            ]
-        };
+    if (materialIds.length === 0) {
+        return res.status(200).json({ message: "No materials found.", materials: [], pagination: { currentPage: 1, totalPages: 0, totalMaterials: 0 } });
+    }    
+    
+    let filter = { _id: { $in: materialIds } };
+ if (!isteacher) {
+        filter.$or = [
+            { publishDate: { $exists: false } },
+            { publishDate: null },
+            { publishDate: { $lte: nowInUAE } }
+        ];
     }
+        const { limit, skip } = pagination({ page, size });
 
-    const { limit, skip } = pagination({ page, size });
-    let materialsQuery = materialModel.find(filter)
-        .select(isteacher ? "name description createdAt publishDate" : "name description createdAt")
-        .skip(skip)
-        .limit(limit)
-        .lean();
-    let materials = await materialsQuery;
-    const totalMaterials = await materialModel.countDocuments(filter);
+  const [materials, totalMaterials] = await Promise.all([
+        materialModel.find(filter)
+            .select(isteacher ? "name description createdAt publishDate" : "name description createdAt")
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean(),
+        materialModel.countDocuments(filter)
+    ]);
+
+   let processedMaterials = materials;
     if (isteacher) {
-        materials = materials.map(material => {
+        processedMaterials = materials.map(material => {
             const isPublished = !material.publishDate || new Date(material.publishDate) <= nowInUAE;
             return {
                 ...material,
@@ -201,15 +238,14 @@ export const getMaterials = asyncHandler(async (req, res, next) => {
             };
         });
     }
-
-    // **RESPONSE STRUCTURE PRESERVED**
+   
     res.status(200).json({
         message: "Materials retrieved successfully",
         materials,
         pagination: {
             currentPage: Number(page),
             totalPages: Math.ceil(totalMaterials / size),
-            totalMaterials,
+            totalMaterials:totalMaterials,
         },
     });
 });
@@ -329,7 +365,8 @@ export const deleteMaterial = asyncHandler(async (req, res, next) => {
     if (!material) {
         return next(new Error("Material not found.", { cause: 404 }));
     }
-  
+      await contentStreamModel.deleteMany({ contentId: materialId, contentType: 'material' });
+
     await material.deleteOne();
 
     res.status(200).json({ message: "Material deleted successfully" });

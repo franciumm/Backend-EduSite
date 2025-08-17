@@ -8,7 +8,8 @@ import { pagination } from "../../../utils/pagination.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime } from "date-fns-tz";
-
+import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
+import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
 
 export const GetAllByGroup = asyncHandler(async (req, res, next) => {
   // 2. GET PAGE AND SIZE FROM QUERY
@@ -242,47 +243,47 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
     
     // --- Path A: Group Status View (Performant Aggregation) ---
     if (groupId && assignmentId && !studentId) {
-        const assignmentObjectId = new mongoose.Types.ObjectId(assignmentId);
-        const groupObjectId = new mongoose.Types.ObjectId(groupId);
 
-        const [assignment, group] = await Promise.all([
-            assignmentModel.findById(assignmentObjectId).lean(),
-            groupModel.findById(groupObjectId).lean()
+        const [assignment, group, total] = await Promise.all([
+            assignmentModel.findById(assignmentId).lean(),
+            groupModel.findById(groupId).lean(),
+            studentModel.countDocuments({ groupId: groupId })
         ]);
+
+
+        
+       
         if (!assignment) return next(new Error("Assignment not found.", { cause: 404 }));
         if (!group) return next(new Error("Group not found.", { cause: 404 }));
         
-        const studentQuery = { groupId: groupObjectId };
-        const total = await studentModel.countDocuments(studentQuery);
 
-        const pipeline = [
-            { $match: studentQuery }, { $sort: { firstName: 1 } }, { $skip: skip }, { $limit: limit },
-            {
-                $lookup: {
-                    from: 'subassignments',
-                    let: { student_id: "$_id" },
-                    pipeline: [
-                        { $match: { $expr: { $and: [ { $eq: ["$studentId", "$$student_id"] }, { $eq: ["$assignmentId", assignmentObjectId] } ] } } },
-                        { $sort: { version: -1 } }, { $limit: 1 },
-                        { $lookup: { from: 'students', localField: 'studentId', foreignField: '_id', as: 'studentId' } },
-                        { $unwind: '$studentId' },
-                        { $lookup: { from: 'assignments', localField: 'assignmentId', foreignField: '_id', as: 'assignmentId' } },
-                        { $unwind: '$assignmentId' },
-                    ],
-                    as: 'submissionDetails'
-                }
-            },
-            {
-                $project: {
-                    _id: 1, userName: 1, firstName: 1, lastName: 1,
-                    status: { $cond: { if: { $gt: [{ $size: "$submissionDetails" }, 0] }, then: 'submitted', else: 'not submitted' } },
-                    submissionDetails: { $ifNull: [{ $first: "$submissionDetails" }, null] }
-                }
+
+        let statusQuery = { contentId: assignmentId, groupId: groupId, contentType: 'assignment' };
+ if (status) {
+            const statusMap = { 'submitted': 'submitted', 'not submitted': 'assigned', 'marked': 'marked' };
+            if (statusMap[status]) {
+                statusQuery.status = statusMap[status];
             }
-        ];
-        let data = await studentModel.aggregate(pipeline);
+        }
         
-        if (status) data = data.filter(s => s.status === status);
+         const statuses = await submissionStatusModel.find(statusQuery)
+            .populate('studentId', '_id userName firstName lastName')
+            .populate({
+                path: 'submissionId',
+                select: '+annotationData' // Keep fetching annotation data
+            })
+            .sort({ 'studentId.firstName': 1 }) // Sorting can be done here
+            .skip(skip).limit(limit)
+            .lean();
+
+ const data = statuses.map(s => ({
+            _id: s.studentId._id,
+            userName: s.studentId.userName,
+            firstName: s.studentId.firstName,
+            lastName: s.studentId.lastName,
+            status: s.status === 'assigned' ? 'not submitted' : s.status,
+            submissionDetails: s.submissionId // This will be the populated submission or null
+        }));        
 
         // This `return` ensures this is the final action for this code path.
         return res.status(200).json({
@@ -320,8 +321,18 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
     const { limit, skip } = pagination({ page, size });
     const uaeTimeZone = 'Asia/Dubai';
     const currentDate = toZonedTime(new Date(), uaeTimeZone);
+ const streamItems = await contentStreamModel.find({
+        userId: user._id,
+        contentType: 'assignment'
+    }).lean();
 
-    let matchQuery = {};
+    const assignmentIds = streamItems.map(item => item.contentId);
+
+    if (assignmentIds.length === 0) {
+        return res.status(200).json({ message: "No assignments found.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
+    }
+
+    let matchQuery = { _id: { $in: assignmentIds } };
 
     // --- Time-based Status Filtering ---
     if (status) {
@@ -335,88 +346,40 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
         }
     }
 
-    // --- Role-based Access Logic ---
-    if (isteacher) {
-        if (user.role === 'assistant') {
-            const groupIds = user.permissions.assignments || [];
-            if (groupIds.length === 0) {
-                return res.status(200).json({ message: "No assignments found.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
-            }
-            matchQuery.groupIds = { $in: groupIds };
-        }
-    } else {
-        // --- Student Logic ---
-        const student = await studentModel.findById(user._id).select('groupId').lean();
-        if (!student) {
-            return res.status(200).json({ message: "Student not found.", assignments: [], totalAssignments: 0, totalPages: 0, currentPage: 1 });
-        }
-        const orConditions = [{ enrolledStudents: user._id }];
-        if (student.groupId) {
-            orConditions.push({ groupIds: student.groupId });
-            const sections = await sectionModel.find({ groupIds: student.groupId }).select('linkedAssignments').lean();
-            if (sections.length > 0) {
-                const sectionAssignmentIds = sections.flatMap(sec => sec.linkedAssignments);
-                if (sectionAssignmentIds.length > 0) {
-                    orConditions.push({ _id: { $in: sectionAssignmentIds } });
-                }
-            }
-        }
-        matchQuery.$or = orConditions;
-    }
-
-    // --- THE FIX: Use an Aggregation Pipeline to conditionally return the path ---
-    const results = await assignmentModel.aggregate([
-        { $match: matchQuery },
-        {
-            $facet: {
-                metadata: [{ $count: 'total' }],
-                data: [
-                    { $sort: { startDate: -1 } },
-                    { $skip: skip },
-                    { $limit: limit },
-                    {
-                        // SECURE BY DEFAULT: Explicitly define the fields to return.
-                        // Sensitive fields like bucketName, key, and answer* are never exposed.
-                        $project: {
-                            _id: 1,
-                            name: 1,
-                            startDate: 1,
-                            endDate: 1,
-                            groupIds: 1,
-                            gradeId: 1,
-                            createdBy: 1,
-                            allowSubmissionsAfterDueDate: 1,
-                            enrolledStudents: 1,
-                            rejectedStudents: 1,
-                            // Conditionally return the path ONLY if the assignment has started
-                            path: {
-                                $cond: {
-                                    if: { $lte: ['$startDate', currentDate] },
-                                    then: '$path',
-                                    else: null
-                                }
-                            }
-                        }
-                    }
-                ]
-            }
-        }
+ 
+  
+const [assignments, totalAssignments] = await Promise.all([
+        assignmentModel.find(matchQuery)
+            .sort({ startDate: -1 })
+            .skip(skip)
+            .limit(limit)
+            .populate('groupIds', 'groupname')
+            .lean(),
+        assignmentModel.countDocuments(matchQuery)
     ]);
-
-    const assignments = results[0]?.data || [];
-    const totalAssignments = results[0]?.metadata[0]?.total || 0;
-
-    // We must manually populate after the aggregation
-    await assignmentModel.populate(assignments, {
-        path: 'groupIds',
-        select: 'groupname'
+    
+    // 4. Conditionally hide the S3 path for assignments that haven't started yet.
+    // This preserves the original logic without a complex aggregation pipeline.
+    const processedAssignments = assignments.map(assignment => {
+        const showPath = new Date(assignment.startDate) <= currentDate;
+        return {
+            ...assignment,
+            path: showPath ? assignment.path : null,
+            // Explicitly remove sensitive fields to be safe
+            key: undefined,
+            bucketName: undefined,
+            answerKey: undefined,
+            answerBucketName: undefined,
+            answerPath: undefined
+        };
     });
+
 
     res.status(200).json({
         message: "Assignments fetched successfully",
         totalAssignments,
         totalPages: Math.ceil(totalAssignments / limit),
         currentPage: parseInt(page, 10),
-        assignments,
+       assignments: processedAssignments,
     });
 });

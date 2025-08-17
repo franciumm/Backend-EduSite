@@ -1,5 +1,5 @@
 // src/Modules/Sections/controller/section.controller.js
-
+import { contentStreamModel } from '../../../../DB/models/contentStream.model.js';
 import { asyncHandler } from '../../../utils/erroHandling.js';
 import { sectionModel } from '../../../../DB/models/section.model.js';
 import { gradeModel } from "../../../../DB/models/grades.model.js";
@@ -11,11 +11,38 @@ import { createMaterial } from '../../Materials/controller/All.js';
 import { normalizeContentName } from '../../../utils/queryHelpers.js';
 import { pagination } from '../../../utils/pagination.js';
 import { CONTENT_TYPES } from '../../../utils/constants.js'; 
+import { contentStreamModel } from '../../../../DB/models/contentStream.model.js';
+import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
 
 function capitalize(str) {
     if (!str) return '';
     return str.charAt(0).toUpperCase() + str.slice(1);
 }
+
+
+const propagateSectionToStreams = async ({ section, session }) => {
+    const students = await studentModel.find({ groupId: { $in: section.groupIds } }).select('_id groupId').session(session);
+
+    const streamEntries = students.map(student => ({
+        userId: student._id,
+        contentId: section._id,
+        contentType: 'section',
+        gradeId: section.gradeId,
+        groupId: student.groupId
+    }));
+
+    // Add access for the teacher who created it
+    streamEntries.push({
+        userId: section.createdBy,
+        contentId: section._id,
+        contentType: 'section',
+        gradeId: section.gradeId,
+    });
+
+    if (streamEntries.length > 0) {
+        await contentStreamModel.insertMany(streamEntries, { session });
+    }
+};
 
 export const _internalCreateSection = async ({ name, description, gradeId, groupIds, teacherId, itemsToAdd }) => {
     // 1. Validation for core fields remains the same.
@@ -25,12 +52,18 @@ export const _internalCreateSection = async ({ name, description, gradeId, group
     if (!Array.isArray(groupIds) || groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
         throw new Error("At least one valid Group ID is required to create a section.");
     }
-    
+        const session = await mongoose.startSession();
+try{
+
+            session.startTransaction();
+
     // 2. Uniqueness check remains the same.
     const existingSection = await sectionModel.findOne({ name, gradeId });
     if (existingSection) {
         throw new Error("A section with this name already exists for this grade. Please choose a different name.");
     }
+
+
 
     // --- NEW: Logic to handle optional initial linking ---
     const initialLinkedContent = {};
@@ -54,20 +87,30 @@ export const _internalCreateSection = async ({ name, description, gradeId, group
     }
     // --- End of new logic ---
 
-    // 3. Create the section document, now spreading the initial links.
-    // If `initialLinkedContent` is empty, this does nothing. If it has content,
-    // it will add fields like `linkedAssignments: [...]` to the creation object.
-    const section = await sectionModel.create({
-        name,
-        description,
-        gradeId,
-        groupIds,
-        createdBy: teacherId,
-        ...initialLinkedContent
-    });
 
-    return section;
+  const [section] = await sectionModel.create([{
+            name, description, gradeId, groupIds,
+            createdBy: teacherId,
+            ...initialLinkedContent
+        }], { session });
+
+
+            await propagateSectionToStreams({ section, session });
+
+        await session.commitTransaction();
+    return section;}catch (error) {
+        await session.abortTransaction();
+        // Re-throw to be handled by the calling asyncHandler
+        throw error;
+    } finally {
+        await session.endSession();
+    }
+
+   
 };
+
+
+
 export const createSection = asyncHandler(async (req, res, next) => {
           const { user, isteacher } = req;
     const { groupIds } = req.body;
@@ -157,31 +200,18 @@ const buildContentMap = (inputArray, type) => ({
 export const viewSectionById = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
     const {user,isteacher} = req;
-    const sectionForAuth = await sectionModel.findById(sectionId).select('groupIds gradeId').lean();
-    if (!sectionForAuth) {
-        return next(new Error("Section not found", { cause: 404 }));
-    } 
-    if (user.role === 'assistant') {
-        const permittedGroupIds = user.permissions.sections?.map(id => id.toString()) || [];
-        
-        if (permittedGroupIds.length === 0) {
-            return next(new Error("Forbidden: You are not authorized to view any sections.", { cause: 403 }));
-        }
+        const hasAccess = await canAccessContent({
+        user,
+        isTeacher: isteacher,
+        contentId: sectionId,
+        contentType: CONTENT_TYPES.SECTION
+    });
 
-        // Check for overlap between assistant's permissions and the section's groups.
-        const sectionGroupIds = sectionForAuth.groupIds.map(id => id.toString());
-        const hasPermission = sectionGroupIds.some(groupId => permittedGroupIds.includes(groupId));
-
-        if (!hasPermission) {
-            return next(new Error("Forbidden: You do not have permission to view this section.", { cause: 403 }));
-        }
-    } else if (!isteacher) { // Corrected check for students
-        const student = await studentModel.findById(req.user._id).select('groupId').lean();
-        if (!student?.groupId || !sectionForAuth.groupIds.map(id => id.toString()).includes(student.groupId.toString())) {
-            return next(new Error("You are not authorized to view this section.", { cause: 403 }));
-        }
+    if (!hasAccess) {
+        return next(new Error("You are not authorized to view this section.", { cause: 403 }));
     }
-
+ 
+  
     const aggregation = [
         { $match: { _id: new mongoose.Types.ObjectId(sectionId) } },
         { $lookup: { from: 'assignments', localField: 'linkedAssignments', foreignField: '_id', as: 'assignments' } },
@@ -227,6 +257,7 @@ export const deleteSection = asyncHandler(async (req, res, next) => {
         // If the user is neither a main teacher nor the owner, deny access.
         return next(new Error("Forbidden: You are not authorized to delete this section.", { cause: 403 }));
     }
+    await contentStreamModel.deleteMany({ contentId: sectionId, contentType: 'section' });
 
     // 4. If authorization passes, delete the document.
     await sectionModel.findByIdAndDelete(sectionId);
@@ -239,68 +270,40 @@ export const getSections = asyncHandler(async (req, res, next) => {
     const { user, isteacher } = req;
     const isTeacher = isteacher;
     const { limit, skip } = pagination({ page, size });
+  const streamItems = await contentStreamModel.find({
+        userId: user._id,
+        contentType: 'section'
+    }).lean();
 
-    let query = {};
-    let totalSections = 0;
-    let sections = [];
+    
+    const sectionIds = streamItems.map(item => item.contentId);
 
-    // 2. Teacher Logic: Broad filtering capabilities
-    if (isTeacher) {
-    // --- START: NEW ASSISTANT LOGIC ---
-        if (user.role === 'main_teacher') {
-            // Main teacher logic is unchanged
-            if (gradeId) {
-                if (!mongoose.Types.ObjectId.isValid(gradeId)) return next(new Error("A valid Grade ID is required.", { cause: 400 }));
-                query.gradeId = gradeId;
-            }
-            if (groupId) {
-                if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("A valid Group ID is required.", { cause: 400 }));
-                query.groupIds = groupId;
-            }
-        } else if (user.role === 'assistant') {
-            // An assistant sees a section if it's assigned to any group they have *any* permissions for.
-            const { assignments = [], exams = [], materials = [] } = user.permissions;
-            const allPermittedGroups = [...new Set([...assignments, ...exams, ...materials])]; // Get unique group IDs
-
-            if (allPermittedGroups.length === 0) {
-                return res.status(200).json({ message: "No sections found.", data: [], total: 0, totalPages: 0, currentPage: parseInt(page, 10) });
-            }
-            query = { groupIds: { $in: allPermittedGroups } };
-        }
-
-        [sections, totalSections] = await Promise.all([
-            sectionModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-            sectionModel.countDocuments(query)
-        ]);
-    } 
-    else {
-        const student = await studentModel.findById(user._id).select('groupId').lean();
-
-        if (!student || !student.groupId) {
-            return res.status(200).json({
-                message: "No sections found for this student.",
-                data: [],
-                total: 0,
-                totalPages: 0,
-                currentPage: parseInt(page, 10)
-            });
-        }
-        
-        query = { groupIds: student.groupId };
-         if (gradeId) {
-            if (!mongoose.Types.ObjectId.isValid(gradeId)) {
-                return next(new Error("A valid Grade ID is required.", { cause: 400 }));
-            }
-            query.gradeId = gradeId;
-        }
-        
-        [sections, totalSections] = await Promise.all([
-            sectionModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-            sectionModel.countDocuments(query)
-        ]);
+    if (sectionIds.length === 0) {
+        return res.status(200).json({ message: "No sections found.", data: [], total: 0, totalPages: 0, currentPage: parseInt(page, 10) });
     }
 
-    // 4. Final paginated response
+    let query = { _id: { $in: sectionIds } };
+
+ if (gradeId) {
+        if (!mongoose.Types.ObjectId.isValid(gradeId)) return next(new Error("A valid Grade ID is required.", { cause: 400 }));
+        query.gradeId = gradeId;
+    }
+    if (groupId) {
+        if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("A valid Group ID is required.", { cause: 400 }));
+        // This checks if the section is linked to the specified group.
+        query.groupIds = groupId;
+    }
+
+
+
+
+       // 4. Fetch the data with pagination.
+    const [sections, totalSections] = await Promise.all([
+        sectionModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+        sectionModel.countDocuments(query)
+    ]);
+
+    // 5. Return the response, preserving the original structure.
     return res.status(200).json({
         message: "Sections fetched successfully",
         data: sections,
@@ -308,4 +311,5 @@ export const getSections = asyncHandler(async (req, res, next) => {
         totalPages: Math.ceil(totalSections / limit),
         currentPage: parseInt(page, 10),
     });
+  
 });

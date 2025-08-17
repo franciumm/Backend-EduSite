@@ -7,7 +7,10 @@ import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime } from 'date-fns-tz';
-import { canAccessContent } from "../../../middelwares/contentAuth.js";
+import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
+import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
+
+
 
 export const getExams = asyncHandler(async (req, res, next) => {
   const { gradeId, groupId, page, size } = req.query; // <-- 2. GET PAGE AND SIZE
@@ -20,7 +23,6 @@ export const getExams = asyncHandler(async (req, res, next) => {
     if (isTeacher) {
         let query = {};
         if (req.user.role === 'main_teacher') {
-            if (!gradeId && !groupId) return next(new Error("Query failed: A gradeId or groupId is required.", { cause: 400 }));
             if (gradeId) query.grade = gradeId;
             if (groupId) query.groupIds = groupId;
         } else if (req.user.role === 'assistant') {
@@ -37,172 +39,39 @@ export const getExams = asyncHandler(async (req, res, next) => {
     }
 
     // --- Student Logic (Rewritten with Aggregation Pipeline) ---
-    const studentId = req.user._id;
-    const studentGradeId = req.user.gradeId;
-    const studentGroupId = req.user.groupId;
 
-    if (!studentGradeId) {
-        return next(new Error("Unauthorized: You are not associated with any grade.", { cause: 403 }));
+       const streamItems = await contentStreamModel.find({
+        userId: user._id,
+        contentType: 'exam'
+    }).lean();
+ const examIds = streamItems.map(item => item.contentId);
+    if (examIds.length === 0) {
+        return res.status(200).json({ message: "No exams found.", data: [] });
     }
+    const allExams = await examModel.find({ _id: { $in: examIds } }).lean();
+  const visibleExams = allExams.filter(exam => {
+        const exception = (exam.exceptionStudents || []).find(ex => ex.studentId.equals(user._id));
+        const effectiveStartDate = exception ? exception.startdate : exam.startdate;
+        return new Date(effectiveStartDate) <= nowInUAE;
+    });
+        const paginatedExams = visibleExams.slice(skip, skip + limit);
+ const sanitizedExams = paginatedExams.map(exam => ({
+        ...exam,
+        key: undefined,
+        bucketName: undefined,
+        answerKey: undefined,
+        answerBucketName: undefined,
+        answerPath: undefined,
+        exceptionStudents: undefined, // Students don't need to see the exception list
+    }));
 
-    const pipeline = [
-        // Stage 1: Initial match for student's grade and enrollment
-        {
-            $match: {
-                grade: studentGradeId,
-                $or: [
-                    { enrolledStudents: studentId },
-                    { "exceptionStudents.studentId": studentId },
-                    ...(studentGroupId ? [{ groupIds: studentGroupId }, { groupIds: { $size: 0 } }] : [{ groupIds: { $size: 0 } }])
-                ]
-            }
-        },
-        // Stage 2: Create the effectiveStartDate field
-        {
-            $addFields: {
-                "exception": {
-                    $arrayElemAt: [{
-                        $filter: {
-                            input: "$exceptionStudents",
-                            as: "ex",
-                            cond: { $eq: ["$$ex.studentId", studentId] }
-                        }
-                    }, 0]
-                }
-            }
-        },
-        {
-            $addFields: {
-                "effectiveStartDate": { $ifNull: ["$exception.startdate", "$startdate"] }
-            }
-        },
-        // Stage 3: Filter based on the *effective* start date
-        {
-            $match: {
-                "effectiveStartDate": { $lte: nowInUAE }
-            }
-        },
-        // Stage 4: Clean up temporary fields before sending response
-        {
-            $project: {
-                exception: 0,
-                effectiveStartDate: 0,
-                // Exclude the answer file details for students
-                answerKey: 0,
-                answerBucketName: 0,
-                answerPath: 0
-            },
-             
-            
-        },
-           { $skip: skip }, 
-    { $limit: limit },
-    ];
 
-    const exams = await examModel.aggregate(pipeline);
-
+   
     res.status(200).json({
         message: "Exams fetched successfully",
-        data: exams,
+        data: sanitizedExams,
     });
 });
-
-//   // Extract user details and role
-//   const user = req.user;
-//   const isTeacher = req.isteacher.teacher;
-//   const currentDate = new Date();
-
-//   // Pagination helpers
-//   const { limit, skip } = pagination({ page, size });
-
-//   let submissions = [];
-//   let totalSubmissions = 0;
-
-//   // 1. Teacher logic
-//   if (isTeacher) {
-//     // Build a query object
-//     const query = {};
-
-//     // Optional filters
-//     if (groupId && mongoose.Types.ObjectId.isValid(groupId)) {
-//       query.groupId = groupId;
-//     }
-//     if (gradeId && mongoose.Types.ObjectId.isValid(gradeId)) {
-//       query.gradeId = gradeId;
-//     }
-
-//     // Timeline status (main exam timeline)
-//     if (status === "active") {
-//       query.startdate = { $lte: currentDate };
-//       query.enddate = { $gte: currentDate };
-//     } else if (status === "upcoming") {
-//       query.startdate = { $gt: currentDate };
-//     } else if (status === "expired") {
-//       query.enddate = { $lt: currentDate };
-//     }
-
-//     // Fetch submissions based on the query
-//     submissions = await SubexamModel.find(query)
-//       .populate("examId", "Name startdate enddate groupIds grade")
-//       .populate("studentId", "userName firstName lastName groupid")
-//       .sort({ createdAt: -1 }) // Sort by most recent submission
-//       .skip(skip)
-//       .limit(limit);
-
-//     totalSubmissions = await SubexamModel.countDocuments(query);
-//   } else {
-//     // 2. Student logic
-//     // Step A: Find all submissions for the student
-//     const studentQuery = {
-//       studentId: user._id, // Only fetch the submissions by this student
-//     };
-
-//     // Fetch submissions
-//     let allSubmissions = await SubexamModel.find(studentQuery)
-//       .populate("examId", "Name startdate enddate groupIds grade exceptionStudents")
-//       .sort({ createdAt: -1 }); // Most recent submissions first
-
-//     // Step B: Filter out based on timeline or exceptions
-//     const filteredSubmissions = allSubmissions.filter((submission) => {
-//       const exam = submission.examId;
-
-//       // Find custom timeline if the student is an exception
-//       const exceptionEntry = exam.exceptionStudents?.find(
-//         (ex) => ex.studentId.toString() === user._id.toString()
-//       );
-
-//       const examStart = exceptionEntry ? exceptionEntry.startdate : exam.startdate;
-//       const examEnd = exceptionEntry ? exceptionEntry.enddate : exam.enddate;
-
-//       if (!status) return true; // If no status, show all
-
-//       if (status === "active") {
-//         return examStart <= currentDate && examEnd >= currentDate;
-//       } else if (status === "upcoming") {
-//         return examStart > currentDate;
-//       } else if (status === "expired") {
-//         return examEnd < currentDate;
-//       }
-
-//       // If no condition matches, exclude
-//       return false;
-//     });
-
-//     totalSubmissions = filteredSubmissions.length;
-
-//     // Step C: Apply pagination in memory
-//     submissions = filteredSubmissions.slice(skip, skip + limit);
-//   }
-
-//   // 3. Return the response
-//   res.status(200).json({
-//     message: "Submitted exams fetched successfully",
-//     submissions,
-//     totalSubmissions,
-//     totalPages: Math.ceil(totalSubmissions / limit),
-//     currentPage: parseInt(page, 10),
-//   });
-// });
 
 
 
@@ -218,6 +87,8 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
   const limit = Math.max(1, parseInt(size, 10) || 10);
   const skip = (pageNum - 1) * limit;
 
+  
+ 
   const empty = (msg = "Submissions fetched successfully.") =>
     res.status(200).json({ message: msg, total: 0, totalPages: 0, currentPage: pageNum, data: [] });
 
@@ -229,93 +100,41 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
 
       const exam = await examModel.findById(examId).lean();
       if (!exam) return next(new Error("Exam not found.", { cause: 404 }));
+         const hasAccess = await canViewSubmissionsFor({ user, isTeacher: true, contentId: examId, contentType: 'exam' });
+            if (!hasAccess) {
+                return next(new Error("You are not authorized to view submissions for this exam.", { cause: 403 }));
+            }
 
-      // Authorized groups for this user on this exam
-      let authorizedGroupIds = (exam.groupIds || []).map(id => id.toString());
+             const studentCountQuery = {};
+            if (groupId) {
+                 studentCountQuery.groupId = new mongoose.Types.ObjectId(groupId);
+            } else {
+                 studentCountQuery.groupId = { $in: exam.groupIds };
+            }
+            const total = await studentModel.countDocuments(studentCountQuery);
+  let statusQuery = { contentId: examId, contentType: 'exam', ...studentCountQuery };
+            if (status && ['submitted', 'not submitted', 'marked'].includes(status)) {
+                const statusMap = { 'submitted': 'submitted', 'not submitted': 'assigned', 'marked': 'marked' };
+                statusQuery.status = statusMap[status];
+            }
 
-      if (user.role === 'assistant') {
-        const permittedGroupIds = (user.permissions.exams || []).map(id => id.toString());
-        authorizedGroupIds = authorizedGroupIds.filter(id => permittedGroupIds.includes(id));
-        if (authorizedGroupIds.length === 0) return empty();
-      }
+ const statuses = await submissionStatusModel.find(statusQuery)
+                .populate('studentId', '_id userName firstName lastName')
+                .populate({ path: 'submissionId', model: 'subexam' }) // Explicitly model 'subexam'
+                .sort({ 'studentId.firstName': 1 })
+                .skip(skip).limit(limit)
+                .lean();
 
-      // If a specific groupId is requested, validate & enforce membership
-      if (groupId) {
-        if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("Invalid Group ID format.", { cause: 400 }));
-        if (!authorizedGroupIds.includes(groupId)) return empty();
-        authorizedGroupIds = [groupId];
-      }
+const data = statuses.map(s => ({
+                _id: s.studentId._id,
+                userName: s.studentId.userName,
+                firstName: s.studentId.firstName,
+                lastName: s.studentId.lastName,
+                status: s.status === 'assigned' ? 'not submitted' : s.status,
+                submissions: s.submissionId ? [s.submissionId] : [], // Mimic original array structure
+                submissionCount: s.submissionId ? 1 : 0,
+            }));
 
-      // Final student query
-      const studentMatch = {
-        groupId: { $in: authorizedGroupIds.map(id => new mongoose.Types.ObjectId(id)) }
-      };
-      if (studentId) {
-        if (!mongoose.Types.ObjectId.isValid(studentId)) return next(new Error("Invalid Student ID format.", { cause: 400 }));
-        studentMatch._id = new mongoose.Types.ObjectId(studentId);
-      }
-
-      // Build aggregation once and reuse for count + data
-      const basePipeline = [
-        { $match: studentMatch },
-        {
-          $lookup: {
-            from: 'subexams',
-            let: { student_id: '$_id' },
-            pipeline: [
-              {
-                $match: {
-                  $expr: {
-                    $and: [
-                      { $eq: ['$studentId', '$$student_id'] },
-                      { $eq: ['$examId', new mongoose.Types.ObjectId(examId)] }
-                    ]
-                  }
-                }
-              },
-              { $sort: { version: -1 } }
-            ],
-            as: 'submissions'
-          }
-        },
-        {
-          $project: {
-            _id: 1,
-            userName: 1,
-            firstName: 1,
-            lastName: 1,
-            status: {
-              $cond: {
-                if: { $gt: [{ $size: '$submissions' }, 0] },
-                then: 'submitted',
-                else: 'not submitted'
-              }
-            },
-            submissionCount: { $size: '$submissions' },
-            submissions: 1
-          }
-        }
-      ];
-
-      // Optional status filter (submitted / not submitted)
-      const statusFilter =
-        status && ['submitted', 'not submitted'].includes(status) ? [{ $match: { status } }] : [];
-
-      const [{ total = 0 } = {}] = await studentModel.aggregate([
-        ...basePipeline,
-        ...statusFilter,
-        { $count: 'total' }
-      ]);
-
-      if (total === 0) return empty();
-
-      const data = await studentModel.aggregate([
-        ...basePipeline,
-        ...statusFilter,
-        { $sort: { firstName: 1 } },
-        { $skip: skip },
-        { $limit: limit }
-      ]);
 
       return res.status(200).json({
         message: "Submissions fetched successfully.",
@@ -336,7 +155,7 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
       if (permitted.length === 0) return empty();
       matchStage['examData.groupIds'] = { $in: permitted };
     }
-
+    
     if (groupId) matchStage['examData.groupIds'] = new mongoose.Types.ObjectId(groupId);
     if (gradeId) matchStage['examData.grade'] = new mongoose.Types.ObjectId(gradeId);
     if (studentId) matchStage.studentId = new mongoose.Types.ObjectId(studentId);

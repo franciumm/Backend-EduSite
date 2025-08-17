@@ -9,9 +9,60 @@ import mongoose from "mongoose";
 import { promises as fs } from 'fs';
 import { toZonedTime } from 'date-fns-tz';
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
-const uaeTimeZone = 'Asia/Dubai';
+import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
+import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
 
 
+
+const propagateAssignmentToStreams = async ({ assignment, session }) => {
+    // 1. Get students from groups
+    const studentsFromGroups = await studentModel.find({ groupId: { $in: assignment.groupIds } }).select('_id groupId').session(session);
+
+    // 2. Combine with directly enrolled students, ensuring uniqueness
+    const studentMap = new Map();
+    studentsFromGroups.forEach(s => studentMap.set(s._id.toString(), { userId: s._id, groupId: s.groupId }));
+    (assignment.enrolledStudents || []).forEach(studentId => {
+        if (!studentMap.has(studentId.toString())) {
+            // A directly enrolled student might not have a groupId relevant to this assignment
+            studentMap.set(studentId.toString(), { userId: studentId, groupId: null });
+        }
+    });
+
+    const allStudents = Array.from(studentMap.values());
+    if (allStudents.length === 0 && !assignment.createdBy) return;
+
+    // 3. Create Stream Entries for ALL students + the teacher
+    const streamEntries = allStudents.map(s => ({
+        userId: s.userId,
+        contentId: assignment._id,
+        contentType: 'assignment',
+        gradeId: assignment.gradeId,
+        groupId: s.groupId // This can correctly be null for directly enrolled students
+    }));
+    streamEntries.push({
+        userId: assignment.createdBy,
+        contentId: assignment._id,
+        contentType: 'assignment',
+        gradeId: assignment.gradeId
+    });
+
+    // 4. Create Status Entries for ALL students, using the correct 'allStudents' list
+    const statusEntries = allStudents.map(s => ({
+        studentId: s.userId,
+        contentId: assignment._id,
+        contentType: 'assignment',
+        submissionModel: 'subassignment',
+        // The groupId from the map is the correct context for the status entry
+        groupId: s.groupId,
+        status: 'assigned'
+    }));
+
+    // 5. Insert into database
+    await Promise.all([
+        contentStreamModel.insertMany(streamEntries, { session }),
+        statusEntries.length > 0 ? submissionStatusModel.insertMany(statusEntries, { session }) : Promise.resolve()
+    ]);
+};
 export const _internalCreateAssignment = async ({ name, startDate, endDate, gradeId, groupIds, file, teacherId, allowSubmissionsAfterDueDate ,answerFile}) => {
         const slug = slugify(name, { lower: true, strict: true });
 
@@ -48,7 +99,7 @@ export const _internalCreateAssignment = async ({ name, startDate, endDate, grad
         }
         
         const [newAssignment] = await assignmentModel.create([assignmentData], { session });
-
+  await propagateAssignmentToStreams({ assignment: newAssignment, session });
         // 1. Upload to S3 first. If this fails, the DB is not touched.
   await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, file.mimetype);
         if (answerFile && s3AnswerKey && answerFileContent) {
@@ -163,6 +214,16 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
             isLate, bucketName: process.env.S3_BUCKET_NAME, key: s3Key,
             path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
         }], { session });
+  await submissionStatusModel.updateOne(
+            { studentId: user._id, contentId: assignmentId, contentType: 'assignment' },
+            { 
+                status: 'submitted', 
+                submissionId: newSubmission._id,
+                isLate: isLate, // assuming isLate is calculated
+                SubmitDate: submissionTime // assuming submissionTime is calculated
+            },
+            { session }
+        );
 
         await session.commitTransaction();
         res.status(200).json({ message: "Assignment submitted successfully.", submission: newSubmission });

@@ -15,66 +15,104 @@ const contentModels = {
 };
 
 // --- START: CORRECTED canAccessContent ---
-export const canAccessContent = async ({ user, isTeacher, contentId, contentType }) => {
-    // 1. Main teacher has universal access. (No changes, this is correct)
-    if (isTeacher && user.role === 'main_teacher') {
-        return true;
-    }
+// export const canAccessContent = async ({ user, isTeacher, contentId, contentType }) => {
+//     // 1. Main teacher has universal access. (No changes, this is correct)
+//     if (isTeacher && user.role === 'main_teacher') {
+//         return true;
+//     }
 
-    // 2. Assistant access logic. (No changes, this is correct)
-    if (isTeacher && user.role === 'assistant') {
-        const Model = contentModels[contentType];
-        const content = await Model.findById(contentId).select('groupIds').lean();
-        if (!content) return false;
+//     // 2. Assistant access logic. (No changes, this is correct)
+//     if (isTeacher && user.role === 'assistant') {
+//         const Model = contentModels[contentType];
+//         const content = await Model.findById(contentId).select('groupIds').lean();
+//         if (!content) return false;
 
-        const permittedGroupIds = user.permissions[contentType + 's']?.map(id => id.toString()) || [];
-        if (permittedGroupIds.length === 0) return false;
+//         const permittedGroupIds = user.permissions[contentType + 's']?.map(id => id.toString()) || [];
+//         if (permittedGroupIds.length === 0) return false;
 
-        const contentGroupIds = content.groupIds.map(id => id.toString());
-        return contentGroupIds.some(groupId => permittedGroupIds.includes(groupId));
-    }
+//         const contentGroupIds = content.groupIds.map(id => id.toString());
+//         return contentGroupIds.some(groupId => permittedGroupIds.includes(groupId));
+//     }
 
-    // 3. Student access logic (This is where the timeline check is now properly scoped)
-       if (!isTeacher) {
-        const student = await studentModel.findById(user._id).select('groupId').lean();
-        if (!student) return false;
+//     // 3. Student access logic (This is where the timeline check is now properly scoped)
+//        if (!isTeacher) {
+//         const student = await studentModel.findById(user._id).select('groupId').lean();
+//         if (!student) return false;
 
-        const Model = contentModels[contentType];
-        // --- The "Grand Fetch": Get the content document ONCE ---
-        const content = await Model.findById(contentId).lean();
-        if (!content) return false;
+//         const Model = contentModels[contentType];
+//         // --- The "Grand Fetch": Get the content document ONCE ---
+//         const content = await Model.findById(contentId).lean();
+//         if (!content) return false;
 
-        // --- The "Grand Check": Verify enrollment and timeline in one logical flow ---
+//         // --- The "Grand Check": Verify enrollment and timeline in one logical flow ---
 
-        // Path A: Is the student directly enrolled or in an assigned group?
-        const isDirectlyEnrolled = 
-            (content.enrolledStudents && content.enrolledStudents.some(id => id.equals(user._id))) ||
-            (content.groupIds && student.groupId && content.groupIds.some(id => id.equals(student.groupId)));
+//         // Path A: Is the student directly enrolled or in an assigned group?
+//         const isDirectlyEnrolled = 
+//             (content.enrolledStudents && content.enrolledStudents.some(id => id.equals(user._id))) ||
+//             (content.groupIds && student.groupId && content.groupIds.some(id => id.equals(student.groupId)));
 
-        // Path B: If not directly enrolled, is the student enrolled via a linked section?
-        let isSectionEnrolled = false;
-        if (!isDirectlyEnrolled) {
-            const linkField = `linked${contentType.charAt(0).toUpperCase() + contentType.slice(1)}s`;
-            const section = await sectionModel.findOne({
-                groupIds: student.groupId,
-                [linkField]: contentId
-            }).select('_id').lean();
-            isSectionEnrolled = !!section;
-        }
+//         // Path B: If not directly enrolled, is the student enrolled via a linked section?
+//         let isSectionEnrolled = false;
+//         if (!isDirectlyEnrolled) {
+//             const linkField = `linked${contentType.charAt(0).toUpperCase() + contentType.slice(1)}s`;
+//             const section = await sectionModel.findOne({
+//                 groupIds: student.groupId,
+//                 [linkField]: contentId
+//             }).select('_id').lean();
+//             isSectionEnrolled = !!section;
+//         }
         
-        // If the student has no valid enrollment path, deny access immediately.
-        if (!isDirectlyEnrolled && !isSectionEnrolled) {
-            return false;
-        }
+//         // If the student has no valid enrollment path, deny access immediately.
+//         if (!isDirectlyEnrolled && !isSectionEnrolled) {
+//             return false;
+//         }
 
-        // If enrollment is confirmed, the FINAL check is the timeline.
+//         // If enrollment is confirmed, the FINAL check is the timeline.
+//         return isStudentTimelineValid({ user, content });
+//     }
+
+
+//     return false; // Default deny
+// };
+
+export const canAccessContent = async ({ user, isTeacher, contentId, contentType }) => {
+    // The new logic is incredibly simple and fast.
+    // Does a record exist in the stream linking this user to this content?
+    const streamEntry = await contentStreamModel.findOne({
+        userId: user._id,
+        contentId: contentId,
+        contentType: contentType
+    }).lean();
+
+    // If no entry exists, they are not authorized. Period.
+    if (!streamEntry) {
+        return false;
+    }
+
+    // If an entry exists, they are authorized. Now we just check the timeline for students.
+    if (!isTeacher) {
+        // We still need the original content document for its dates.
+        const contentModels = {
+            [CONTENT_TYPES.ASSIGNMENT]: assignmentModel,
+            [CONTENT_TYPES.EXAM]: examModel,
+            [CONTENT_TYPES.MATERIAL]: materialModel,
+        };
+        const Model = contentModels[contentType];
+        const content = await Model.findById(contentId).lean();
+        
+        // This is a failsafe; content should exist if a stream entry exists.
+        if (!content) return false; 
+
+        // The timeline validation logic itself was correct, so we reuse it.
         return isStudentTimelineValid({ user, content });
     }
 
-
-    return false; // Default deny
+    // If the user is a teacher and a stream entry exists, they have access.
+    return true;
 };
 // --- END: CORRECTED canAccessContent ---
+
+
 
 export const canViewSubmissionsFor = async ({ user, isTeacher, contentId, contentType }) => {
     if (isTeacher && user.role === 'main_teacher') {
@@ -84,12 +122,6 @@ export const canViewSubmissionsFor = async ({ user, isTeacher, contentId, conten
 }
 
 
-
-/**
- * A centralized function to check if the current time is valid for a student
- * to access a given piece of content (assignment or exam).
- * THIS HELPER IS ONLY FOR STUDENTS.
- */
 const isStudentTimelineValid = ({ user, content }) => {
     // Check for material (which has no dates) or content with no timeline.
     const mainStartDate = content.startDate || content.startdate;

@@ -4,7 +4,45 @@ import {groupModel}from "../../../../DB/models/groups.model.js";
 import studentModel from '../../../../DB/models/student.model.js';
 import { asyncHandler } from "../../../utils/erroHandling.js";
 import mongoose from 'mongoose';
+import { contentStreamModel } from '../../../../DB/models/contentStream.model.js';
+import { submissionStatusModel } from '../../../../DB/models/submissionStatus.model.js';
 
+const fanOutContentToStudent = async ({ studentId, groupId, session }) => {
+    // 1. Find all content currently assigned to this group
+    const [assignments, exams, materials, sections] = await Promise.all([
+        assignmentModel.find({ groupIds: groupId }).select('_id gradeId').session(session),
+        examModel.find({ groupIds: groupId }).select('_id grade').session(session),
+        materialModel.find({ groupIds: groupId }).select('_id gradeId').session(session),
+        sectionModel.find({ groupIds: groupId }).select('_id gradeId').session(session),
+    ]);
+
+    // 2. Prepare ContentStream entries for all found content
+    const streamEntries = [
+        ...assignments.map(a => ({ userId: studentId, contentId: a._id, contentType: 'assignment', gradeId: a.gradeId, groupId })),
+        ...exams.map(e => ({ userId: studentId, contentId: e._id, contentType: 'exam', gradeId: e.grade, groupId })),
+        ...materials.map(m => ({ userId: studentId, contentId: m._id, contentType: 'material', gradeId: m.gradeId, groupId })),
+        ...sections.map(s => ({ userId: studentId, contentId: s._id, contentType: 'section', gradeId: s.gradeId, groupId })),
+    ];
+    
+    // 3. Prepare SubmissionStatus entries for assignments and exams
+    const statusEntries = [
+        ...assignments.map(a => ({ studentId, contentId: a._id, contentType: 'assignment', submissionModel: 'subassignment', groupId, status: 'assigned' })),
+        ...exams.map(e => ({ studentId, contentId: e._id, contentType: 'exam', submissionModel: 'subexam', groupId, status: 'assigned' })),
+    ];
+    
+    // 4. Insert all new records
+    if (streamEntries.length > 0) await contentStreamModel.insertMany(streamEntries, { session });
+    if (statusEntries.length > 0) await submissionStatusModel.insertMany(statusEntries, { session });
+};
+
+const revokeContentFromStudent = async ({ studentId, groupId, session }) => {
+    // Simply delete all stream and status entries linked to this user AND this specific group.
+    // This is safe because a student can only be in one group at a time.
+    await Promise.all([
+        contentStreamModel.deleteMany({ userId: studentId, groupId: groupId }, { session }),
+        submissionStatusModel.deleteMany({ studentId: studentId, groupId: groupId }, { session }),
+    ]);
+};
 
 
 
@@ -25,97 +63,101 @@ export const removeStudent = asyncHandler(async(req,res,next)=>{
 
 
 
-
 export const addStudentsToGroup = asyncHandler(async (req, res, next) => {
-  const { groupid, studentIds } = req.body;
+    const { groupid, studentIds } = req.body;
 
-  // 1. --- Input Validation ---
-  if (!mongoose.Types.ObjectId.isValid(groupid)) {
-    return res.status(400).json({ message: "Invalid Group ID format" });
-  }
-  if (!Array.isArray(studentIds) || studentIds.length === 0) {
-    return res
-      .status(400)
-      .json({ message: "studentIds must be a non-empty array" });
-  }
-  for (const studentId of studentIds) {
-    if (!mongoose.Types.ObjectId.isValid(studentId)) {
-      return res
-        .status(400)
-        .json({ message: `Invalid Student ID format: ${studentId}` });
+    // 1. --- Input Validation (from original) ---
+    if (!mongoose.Types.ObjectId.isValid(groupid)) {
+        return res.status(400).json({ message: "Invalid Group ID format" });
     }
-  }
-
-  // 2. --- Data Fetching ---
-  // Find the group and students concurrently for better performance
-  const [group, students] = await Promise.all([
-    groupModel.findById(groupid),
-    studentModel.find({ _id: { $in: studentIds } }),
-  ]);
-
-  if (!group) {
-    return res.status(404).json({ message: "Group not found" });
-  }
-  if (students.length !== studentIds.length) {
-    return res
-      .status(404)
-      .json({ message: "One or more students not found" });
-  }
-
-  // 3. --- Business Logic Validation ---
-  // Ensure every student is in the correct grade
-  for (const student of students) {
-    if (student.gradeId.toString() !== group.gradeid.toString()) {
-      return res.status(400).json({
-        message: `Student '${student.userName}' is not in the same grade as the group.`,
-      });
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+        return res.status(400).json({ message: "studentIds must be a non-empty array" });
     }
-  }
+    const uniqueStudentIds = [...new Set(studentIds)]; // Ensure no duplicate student IDs are processed
+    for (const studentId of uniqueStudentIds) {
+        if (!mongoose.Types.ObjectId.isValid(studentId)) {
+            return res.status(400).json({ message: `Invalid Student ID format: ${studentId}` });
+        }
+    }
 
-  // 4. --- Database Updates (Bulk Operations) ---
-  // Update all students to set their new groupId
-  await studentModel.updateMany(
-    { _id: { $in: studentIds } },
-    { $set: { groupId: groupid } }
-  );
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
 
-  // Add all new students to the group's enrolledStudents array
-  const updatedGroup = await groupModel
-    .findByIdAndUpdate(
-      groupid,
-      { $addToSet: { enrolledStudents: { $each: studentIds } } },
-      { new: true, runValidators: true }
-    )
-    .populate("enrolledStudents", "_id userName firstName"); // Populate with selected fields
+        // 2. --- Data Fetching & Validation (from original, but inside the transaction) ---
+        const [group, students] = await Promise.all([
+            groupModel.findById(groupid).session(session),
+            studentModel.find({ _id: { $in: uniqueStudentIds } }).session(session),
+        ]);
 
-  // 5. --- Response ---
-  res.status(200).json({
-    message:'Student added successfully',
-    group: updatedGroup,
-  });
+        if (!group) {
+            throw new Error("Group not found", { cause: 404 });
+        }
+        if (students.length !== uniqueStudentIds.length) {
+            throw new Error("One or more students not found", { cause: 404 });
+        }
+
+        // 3. --- Business Logic Validation (from original) ---
+        for (const student of students) {
+            if (student.gradeId.toString() !== group.gradeid.toString()) {
+                throw new Error(`Student '${student.userName}' is not in the same grade as the group.`, { cause: 400 });
+            }
+             if (student.groupId) {
+                throw new Error(`Student '${student.userName}' is already in another group.`, { cause: 409 });
+            }
+        }
+
+        // 4. --- Database Updates (Bulk Operations, from refactor) ---
+        await studentModel.updateMany({ _id: { $in: uniqueStudentIds } }, { $set: { groupId: groupid } }, { session });
+        const updatedGroup = await groupModel.findByIdAndUpdate(groupid, { $addToSet: { enrolledStudents: { $each: uniqueStudentIds } } }, { new: true, session }).populate("enrolledStudents", "_id userName firstName");
+
+        // 5. --- NEW STEP: Fan out content to all newly added students (from refactor) ---
+        for (const studentId of uniqueStudentIds) {
+            await fanOutContentToStudent({ studentId, groupId: groupid, session });
+        }
+
+        await session.commitTransaction();
+        res.status(200).json({ message: 'Students added successfully', group: updatedGroup });
+
+    } catch (error) {
+        await session.abortTransaction();
+        // Forward the error with its original cause (400, 404, 409) to the global error handler
+        return next(error);
+    } finally {
+        await session.endSession();
+    }
 });
-
 export const groupDelete = asyncHandler(async (req, res, next) => {
   const { groupid } = req.body;
 
   if (!mongoose.Types.ObjectId.isValid(groupid)) {
       return next(new Error('Invalid Group ID', { cause: 400 }));
   }
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
+        
+        const deletedGroup = await groupModel.findByIdAndDelete(groupid, { session });
+        if (!deletedGroup) throw new Error('Group not found', { cause: 404 });
 
-  const deletedGroup = await groupModel.findByIdAndDelete(groupid);
+        // Unassign students
+        await studentModel.updateMany({ groupId: groupid }, { $unset: { groupId: "" } }, { session });
 
-  if (!deletedGroup) {
-      return next(new Error('Group not found', { cause: 404 }));
-  }
-
-  await studentModel.updateMany(
-      { groupid: groupid },
-      { $unset: { groupid: "" } }
-  );
-
-  res.status(200).json({ message: 'Group deleted successfully', deletedGroup });
+        // *** NEW STEP: Clean up all stream/status entries for this group ***
+        await Promise.all([
+            contentStreamModel.deleteMany({ groupId: groupid }, { session }),
+            submissionStatusModel.deleteMany({ groupId: groupid }, { session })
+        ]);
+        
+        await session.commitTransaction();
+        res.status(200).json({ message: 'Group deleted successfully',deletedGroup});
+    } catch (error) {
+        await session.abortTransaction();
+        return next(error);
+    } finally {
+        await session.endSession();
+    }
 });
-
 export const createInviteLink = asyncHandler(async (req, res, next) => {
     const { groupid } = req.body;
 

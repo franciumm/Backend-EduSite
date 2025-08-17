@@ -10,6 +10,48 @@ import { promises as fs } from 'fs';
 import slugify from "slugify";
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
+import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
+import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
+
+
+const propagateExamToStreams = async ({ exam, session }) => {
+    // 1. Find all students in the targeted groups
+    const students = await studentModel.find({ groupId: { $in: exam.groupIds } }).select('_id groupId').session(session);
+    if (students.length === 0) return;
+
+    // 2. Prepare the ContentStream entries
+    const streamEntries = students.map(student => ({
+        userId: student._id,
+        contentId: exam._id,
+        contentType: 'exam',
+        gradeId: exam.grade, // Note: field is 'grade' in exam model
+        groupId: student.groupId
+    }));
+
+    // 3. Prepare the SubmissionStatus entries
+    const statusEntries = students.map(student => ({
+        studentId: student._id,
+        contentId: exam._id,
+        contentType: 'exam',
+        submissionModel: 'subexam',
+        groupId: student.groupId,
+        status: 'assigned'
+    }));
+
+    // 4. Give the creator access
+    streamEntries.push({
+        userId: exam.createdBy,
+        contentId: exam._id,
+        contentType: 'exam',
+        gradeId: exam.grade
+    });
+
+    // 5. Insert all records
+    await Promise.all([
+        contentStreamModel.insertMany(streamEntries, { session }),
+        submissionStatusModel.insertMany(statusEntries, { session })
+    ]);
+};
 
 export const createExam = asyncHandler(async (req, res, next) => {
        const examFile = req.files?.file?.[0];
@@ -70,7 +112,7 @@ export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, g
 
 
          const [newExam] = await examModel.create([examData], { session });
-
+await propagateExamToStreams({ exam: newExam, session });
         await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
         if (answerFile && s3AnswerKey && answerFileContent) {
             await uploadFileToS3(process.env.S3_BUCKET_NAME, s3AnswerKey, answerFileContent, "application/pdf");
@@ -160,6 +202,18 @@ export const submitExam = asyncHandler(async (req, res, next) => {
         
         const currentVersionCount = await SubexamModel.countDocuments({ examId, studentId: user._id }).session(session);
         const newVersion = currentVersionCount + 1;
+
+
+        await submissionStatusModel.updateOne(
+            { studentId: user._id, contentId: examId, contentType: 'exam' },
+            { 
+                status: 'submitted', 
+                submissionId: newSubmission._id,
+                isLate: isLate,
+                SubmitDate: submissionTime
+            },
+            { session }
+        );
 
         await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
 

@@ -4,7 +4,44 @@ import { teacherModel } from "../../../../DB/models/teacher.model.js";
 import { asyncHandler } from "../../../utils/erroHandling.js";
 import bcrypt from 'bcrypt';
 import {groupModel}from "../../../../DB/models/groups.model.js";
+import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
 
+
+const rebuildAssistantStream = async ({ assistantId, newPermissions, session }) => {
+    // 1. Delete all of the assistant's old stream entries
+    await contentStreamModel.deleteMany({ userId: assistantId }, { session });
+
+    // 2. Get a unique list of all group IDs the assistant now has access to
+    const allGroupIds = new Set();
+    Object.values(newPermissions).forEach(idArray => {
+        if (Array.isArray(idArray)) {
+            idArray.forEach(id => allGroupIds.add(id.toString()));
+        }
+    });
+    if (allGroupIds.size === 0) return; // Nothing more to do
+
+    const groupIds = Array.from(allGroupIds).map(id => new mongoose.Types.ObjectId(id));
+    
+    // 3. Find all content linked to those groups
+    const [assignments, exams, materials, sections] = await Promise.all([
+        assignmentModel.find({ groupIds: { $in: groupIds } }).select('_id gradeId').session(session),
+        examModel.find({ groupIds: { $in: groupIds } }).select('_id grade').session(session),
+        materialModel.find({ groupIds: { $in: groupIds } }).select('_id gradeId').session(session),
+        sectionModel.find({ groupIds: { $in: groupIds } }).select('_id gradeId').session(session),
+    ]);
+
+    // 4. Create the new stream entries
+    const streamEntries = [
+        ...assignments.map(a => ({ userId: assistantId, contentId: a._id, contentType: 'assignment', gradeId: a.gradeId })),
+        ...exams.map(e => ({ userId: assistantId, contentId: e._id, contentType: 'exam', gradeId: e.grade })),
+        ...materials.map(m => ({ userId: assistantId, contentId: m._id, contentType: 'material', gradeId: m.gradeId })),
+        ...sections.map(s => ({ userId: assistantId, contentId: s._id, contentType: 'section', gradeId: s.gradeId })),
+    ];
+    
+    if (streamEntries.length > 0) {
+        await contentStreamModel.insertMany(streamEntries, { session });
+    }
+};
 // Controller for the Main Teacher to create a new assistant account
 export const createAssistant = asyncHandler(async (req, res, next) => {
     const { name, email, password } = req.body;
@@ -46,20 +83,32 @@ export const updateAssistantPermissions = asyncHandler(async (req, res, next) =>
       if (!permissions || typeof permissions !== 'object') {
         return next(new Error("A valid permissions object is required.", { cause: 400 }));
     }
+    const session = await mongoose.startSession();
+  try {
+        session.startTransaction();
 
-    const updatedAssistant = await teacherModel.findOneAndUpdate(
-        { _id: assistantId, role: 'assistant' }, // Prevents updating other main_teachers
-        { $set: { permissions: permissions } },
-        { new: true, runValidators: true }
-    ).select('-password');
-    // ADDED: Robust validation
-  
-  
-    if (!updatedAssistant) {
-        return next(new Error("Assistant not found.", { cause: 404 }));
+        const updatedAssistant = await teacherModel.findOneAndUpdate(
+            { _id: assistantId, role: 'assistant' },
+            { $set: { permissions: permissions } },
+            { new: true, runValidators: true, session }
+        ).select('-password');
+        
+        if (!updatedAssistant) {
+            throw new Error("Assistant not found.", { cause: 404 });
+        }
+
+        // *** NEW STEP: Rebuild the content stream based on the new permissions ***
+        await rebuildAssistantStream({ assistantId, newPermissions: updatedAssistant.permissions, session });
+
+        await session.commitTransaction();
+        res.status(200).json({ message: "Assistant permissions updated successfully.", data: updatedAssistant });
+
+    } catch (error) {
+        await session.abortTransaction();
+        return next(error);
+    } finally {
+        await session.endSession();
     }
-
-    res.status(200).json({ message: "Assistant permissions updated successfully.", data: updatedAssistant });
 });
 
 export const getAllAssistants = asyncHandler(async (req, res, next) => {
@@ -147,14 +196,27 @@ export const getAssistantById = asyncHandler(async (req, res, next) => {
 });
 
 
-// Controller to delete an assistant
 export const deleteAssistant = asyncHandler(async (req, res, next) => {
     const { assistantId } = req.params;
-    const deletedAssistant = await teacherModel.findOneAndDelete({ _id: assistantId, role: 'assistant' });
 
-    if (!deletedAssistant) {
-        return next(new Error("Assistant not found.", { cause: 404 }));
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
+
+        const deletedAssistant = await teacherModel.findOneAndDelete({ _id: assistantId, role: 'assistant' }, { session });
+        if (!deletedAssistant) {
+            throw new Error("Assistant not found.", { cause: 404 });
+        }
+        
+        // *** NEW STEP: Clean up the assistant's content stream ***
+        await contentStreamModel.deleteMany({ userId: assistantId }, { session });
+        
+        await session.commitTransaction();
+        res.status(200).json({ message: "Assistant deleted successfully." });
+    } catch (error) {
+        await session.abortTransaction();
+        return next(error);
+    } finally {
+        await session.endSession();
     }
-
-    res.status(200).json({ message: "Assistant deleted successfully." });
 });
