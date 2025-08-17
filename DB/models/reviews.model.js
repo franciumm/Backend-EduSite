@@ -1,28 +1,35 @@
 import { Schema, model } from "mongoose";
 
-// A single, reusable schema for all review types
-const baseReviewSchema = new Schema(
+const reviewSchema = new Schema(
   {
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "student",
       required: true,
-      unique: true, // Note: This unique constraint is now only per-collection
+      unique: true, // Guarantees a student can only submit one review
     },
-    rate: { type: Number, required: true, min: 1, max: 5 },
-    description: { type: String, required: true, trim: true },
+    rate: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 5,
+    },
+    description: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'published', 'unpublished'], // Enforces data integrity
+      default: 'pending', // New reviews are always pending
+      index: true, // Creates a high-performance index for status-based queries
+    },
   },
   { timestamps: true }
 );
 
-// Create three distinct models from the same schema
-export const PendingReviewModel = model("PendingReview", baseReviewSchema);
-export const PublishedReviewModel = model("PublishedReview", baseReviewSchema);
-export const UnpublishedReviewModel = model("UnpublishedReview", baseReviewSchema);
+// Compound index for the public-facing query to make it extremely fast
+reviewSchema.index({ status: 1, createdAt: -1 });
 
-// Helper object to easily access models by name
-export const reviewModels = {
-  pending: PendingReviewModel,
-  published: PublishedReviewModel,
-  unpublished: UnpublishedReviewModel,
-};
+export const reviewModel = model("review", reviewSchema);
