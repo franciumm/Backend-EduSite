@@ -62,9 +62,8 @@ export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
   let isAuthorized = false;
 
   if (isteacher) {
-    const permittedGroupIds = user.permissions.materials?.map((id) =>
-      id.toString()
-    );
+           const permittedGroupIds = (user.permissions?.materials ?? []).map((id) => id.toString());
+
     if (
       user.role === "main_teacher" ||
       (user.role === "assistant" && (permittedGroupIds || []).includes(groupId))
