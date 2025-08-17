@@ -7,12 +7,14 @@ import materialModel from '../../DB/models/material.model.js';
 import studentModel from '../../DB/models/student.model.js';
 import { toZonedTime } from 'date-fns-tz'; // Import for timezone handling
 import { CONTENT_TYPES } from '../utils/constants.js';
+import { contentStreamModel } from '../../DB/models/contentStream.model.js';
 const contentModels = {
     
     [CONTENT_TYPES.ASSIGNMENT]: assignmentModel,
     [CONTENT_TYPES.EXAM]: examModel,
     [CONTENT_TYPES.MATERIAL]: materialModel,
 };
+
 
 // --- START: CORRECTED canAccessContent ---
 // export const canAccessContent = async ({ user, isTeacher, contentId, contentType }) => {
