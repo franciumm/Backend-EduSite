@@ -9,55 +9,204 @@ import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime } from "date-fns-tz";
 
+
 export const GetAllByGroup = asyncHandler(async (req, res, next) => {
-    const { gradeId, groupId } = req.query;
-    const query = {};
+  // 2. GET PAGE AND SIZE FROM QUERY
+  const { gradeId, groupId, page, size } = req.query;
+  const query = {};
 
-    
-   if (req.isteacher) { // Teacher Logic
-        const { user } = req;
-        if (user.role === 'main_teacher') {
-            // Main teacher has unrestricted access, build query from params.
-            if (!gradeId && !groupId) return next(new Error("Query failed: A gradeId or groupId is required.", { cause: 400 }));
-            if (gradeId) query.gradeId = gradeId;
-            if (groupId) query.groupIds = groupId;
-        } else if (user.role === 'assistant') {
-            // Assistant MUST query by a group they have permission for.
-            if (!groupId) return next(new Error("Assistants must query by a specific groupId.", { cause: 400 }));
+  // Get skip and limit values from the pagination helper
+  const { limit, skip } = pagination({ page, size });
 
-            const permittedGroupIds = new Set(user.permissions.assignments.map(id => id.toString()));
-            if (!permittedGroupIds.has(groupId)) {
-                return next(new Error("Forbidden: You do not have permission to view assignments for this group.", { cause: 403 }));
-            }
-            // If permitted, proceed with the query.
-            query.groupIds = groupId;
-            if (gradeId) query.gradeId = gradeId;
-        }
-    }  else {
-         const studentGradeId = req.user.gradeId?.toString();
-        const studentGroupId = req.user.groupId?.toString();
+  if (req.isteacher) {
+    // Teacher Logic
+    const { user } = req;
+    if (user.role === "main_teacher") {
+      if (!gradeId && !groupId)
+        return next(
+          new Error("Query failed: A gradeId or groupId is required.", {
+            cause: 400,
+          })
+        );
+      if (gradeId) query.gradeId = gradeId;
+      if (groupId) query.groupIds = groupId;
+    } else if (user.role === "assistant") {
+      if (!groupId)
+        return next(
+          new Error("Assistants must query by a specific groupId.", {
+            cause: 400,
+          })
+        );
 
-        if (!studentGradeId) {
-            return next(new Error("Unauthorized: You are not associated with any grade.", { cause: 403 }));
-        }
-        // Enforce student's own grade
-        query.gradeId = studentGradeId;
+      const permittedGroupIds = new Set(
+        user.permissions.assignments.map((id) => id.toString())
+      );
+      if (!permittedGroupIds.has(groupId)) {
+        return next(
+          new Error(
+            "Forbidden: You do not have permission to view assignments for this group.",
+            { cause: 403 }
+          )
+        );
+      }
+      query.groupIds = groupId;
+      if (gradeId) query.gradeId = gradeId;
+    }
+  } else {
+    // Student Logic
+    const studentGradeId = req.user.gradeId?.toString();
+    const studentGroupId = req.user.groupId?.toString();
 
-        // If a groupId is passed in query, it MUST match the student's own group.
-        if (groupId && groupId !== studentGroupId) {
-            return next(new Error("Unauthorized: You can only view assignments for your own group.", { cause: 403 }));
-        }
-        
-        // If no groupId is passed, or if it matches, filter by the student's group.
-        if (studentGroupId) {
-            query.groupIds = studentGroupId;
-        }
+    if (!studentGradeId) {
+      return next(
+        new Error("Unauthorized: You are not associated with any grade.", {
+          cause: 403,
+        })
+      );
+    }
+    query.gradeId = studentGradeId;
+
+    if (groupId && groupId !== studentGroupId) {
+      return next(
+        new Error("Unauthorized: You can only view assignments for your own group.", {
+          cause: 403,
+        })
+      );
     }
 
-    // Execute the constructed query
-    const assignments = await assignmentModel.find(query);
-    res.status(200).json({ message: "Assignments fetched successfully", data: assignments });
+    if (studentGroupId) {
+      query.groupIds = studentGroupId;
+    }
+  }
+
+  // 3. EXECUTE THE CONSTRUCTED QUERY WITH PAGINATION
+  const assignments = await assignmentModel
+    .find(query)
+    .sort({ createdAt: -1 }) // Optional: Good to sort results for consistent pagination
+    .skip(skip)
+    .limit(limit);
+
+  res
+    .status(200)
+    .json({ message: "Assignments fetched successfully", data: assignments });
 });
+
+
+export const getSubmissions = asyncHandler(async (req, res, next) => {
+  const { assignmentId, submissionId } = req.query;
+  const { user, isteacher } = req;
+
+  if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
+    return next(
+      new Error("Assignment ID is required and must be a valid ID.", {
+        cause: 400,
+      })
+    );
+  }
+
+  // Use the centralized submission authorizer
+  const hasAccess = await canViewSubmissionsFor({
+    user,
+    isTeacher: isteacher,
+    contentId: assignmentId,
+    contentType: "assignment",
+  });
+
+  if (!hasAccess) {
+    return next(
+      new Error("You are not authorized to view submissions for this assignment.", {
+        cause: 403,
+      })
+    );
+  }
+
+  // --- Logic for fetching a SINGLE submission ---
+  if (submissionId) {
+    if (!mongoose.Types.ObjectId.isValid(submissionId)) {
+      return next(new Error("Invalid Submission ID format.", { cause: 400 }));
+    }
+
+    const submission = await SubassignmentModel.findOne({
+      _id: submissionId,
+      assignmentId, // Ensure it belongs to the correct parent assignment
+    })
+      .populate("studentId", "userName firstName lastName email")
+      .select("+annotationData"); // <-- FEATURE: Also retrieve hidden annotationData
+
+    if (!submission) {
+      return res.status(404).json({ message: "Submission not found." });
+    }
+
+    // Extra check: if student, they can only view their own submission.
+    if (!isteacher && !submission.studentId._id.equals(user._id)) {
+      return next(
+        new Error("You are not authorized to view this specific submission.", {
+          cause: 403,
+        })
+      );
+    }
+
+    return res
+      .status(200)
+      .json({ message: "Submission retrieved successfully", submissions: submission });
+  }
+  // --- Logic for fetching a LIST of submissions ---
+  else {
+    const { limit, skip } = pagination(req.query);
+    const query = { assignmentId };
+
+    // If the user is a student, scope the list to only their own submissions.
+    if (!isteacher) {
+      query.studentId = user._id;
+    }
+
+    const submissionList = await SubassignmentModel.find(query)
+      .populate("studentId", "userName firstName lastName email")
+      .sort({ isMarked: 1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return res.status(200).json({
+      message: "Submissions retrieved successfully",
+      submissions: submissionList,
+    });
+  }
+});
+
+export const ViewSub = asyncHandler(async (req, res, next) => {
+    const { SubassignmentId } = req.query; 
+    if (!SubassignmentId || !mongoose.Types.ObjectId.isValid(SubassignmentId)) {
+        return next(new Error("A valid Submission ID is required.", { cause: 400 }));
+    }
+
+    const submission = await SubassignmentModel.findById(SubassignmentId).lean();
+    if (!submission) {
+        return next(new Error("Submission not found", { cause: 404 }));
+    }
+
+    let isAuthorized = false;
+    if (!req.isteacher && req.user._id.equals(submission.studentId)) {
+        isAuthorized = true; // Student owns this submission.
+    } else if (req.isteacher) {
+        // Use the centralized helper for teachers.
+        isAuthorized = await canViewSubmissionsFor({
+            user: req.user,
+            isTeacher: true,
+            contentId: submission.assignmentId,
+            contentType: 'assignment'
+        });
+    }
+
+    if (!isAuthorized) {
+        return next(new Error("You are not authorized to view this submission.", { cause: 403 }));
+    }
+   
+    res.status(200).json({
+        message: "Submission is ready for viewing",
+        submission,
+    });
+});
+
 
 
 
@@ -165,67 +314,6 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
     });
 });
 
-
-export const getSubmissions = asyncHandler(async (req, res, next) => {
-    const { assignmentId, submissionId } = req.query;
-    const { user, isteacher } = req;
-
-    if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
-        return next(new Error("Assignment ID is required and must be a valid ID.", { cause: 400 }));
-    }
-
-    // --- REFACTOR: Use the new centralized submission authorizer ---
-    const hasAccess = await canViewSubmissionsFor({
-        user,
-        isTeacher: isteacher,
-        contentId: assignmentId,
-        contentType: 'assignment'
-    });
-
-    if (!hasAccess) {
-        return next(new Error("You are not authorized to view submissions for this assignment.", { cause: 403 }));
-    }
- 
-    let submissions;
-    if (submissionId) {
-        // Fetch a single submission
-        if (!mongoose.Types.ObjectId.isValid(submissionId)) {
-            return next(new Error("Invalid Submission ID format.", { cause: 400 }));
-        }
-        submissions = await SubassignmentModel.findOne({
-            _id: submissionId,
-            assignmentId, // Ensure it belongs to the correct parent assignment
-        }).populate("studentId", "userName firstName lastName email ");
-
-        // Extra check: if student, they can only view their own submission, even if they have access to the assignment.
-        if (!isteacher && submissions && !submissions.studentId._id.equals(user._id)) {
-            return next(new Error("You are not authorized to view this specific submission.", { cause: 403 }));
-        }
-
-    } else {
-        // Fetch a list of submissions
-        const { limit, skip } = pagination(req.query);
-        const query = { assignmentId };
-        
-        // If the user is a student, scope the list to only their own submissions.
-        if (!isteacher) {
-            query.studentId = user._id;
-        }
-
-        submissions = await SubassignmentModel.find(query)
-            .populate("studentId", "userName firstName lastName email")
-            .skip(skip)
-            .limit(limit)
-            .sort({ isMarked: 1, createdAt: -1 });
-    }
-    
-    if (!submissions) {
-        return res.status(404).json({ message: "No submissions found." });
-    }
-
-    res.status(200).json({ message: "Submissions retrieved successfully", submissions });
-});
-
 export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
     const { page = 1, size = 10, status } = req.query;
     const { user, isteacher } = req;
@@ -330,38 +418,5 @@ export const getAssignmentsForUser = asyncHandler(async (req, res, next) => {
         totalPages: Math.ceil(totalAssignments / limit),
         currentPage: parseInt(page, 10),
         assignments,
-    });
-});
-export const ViewSub = asyncHandler(async (req, res, next) => {
-    const { SubassignmentId } = req.query; 
-    if (!SubassignmentId || !mongoose.Types.ObjectId.isValid(SubassignmentId)) {
-        return next(new Error("A valid Submission ID is required.", { cause: 400 }));
-    }
-
-    const submission = await SubassignmentModel.findById(SubassignmentId).lean();
-    if (!submission) {
-        return next(new Error("Submission not found", { cause: 404 }));
-    }
-
-    let isAuthorized = false;
-    if (!req.isteacher && req.user._id.equals(submission.studentId)) {
-        isAuthorized = true; // Student owns this submission.
-    } else if (req.isteacher) {
-        // Use the centralized helper for teachers.
-        isAuthorized = await canViewSubmissionsFor({
-            user: req.user,
-            isTeacher: true,
-            contentId: submission.assignmentId,
-            contentType: 'assignment'
-        });
-    }
-
-    if (!isAuthorized) {
-        return next(new Error("You are not authorized to view this submission.", { cause: 403 }));
-    }
-   
-    res.status(200).json({
-        message: "Submission is ready for viewing",
-        submission,
     });
 });
