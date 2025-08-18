@@ -240,40 +240,56 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
         // For students, the filter is always scoped to their own ID.
          filter.studentId = req.user._id;
     }
-        const isStudentStatusView = groupId && assignmentId && !studentId && !['marked', 'unmarked'].includes(status);
+
 
     // --- Path A: Group Status View (Now correctly scoped) ---
-    if (isStudentStatusView) {
-        const [assignment, group, total] = await Promise.all([
+
+   // --- Path A: Group Status View (This is the primary logic path now) ---
+    // We simplify the condition. If a groupId and assignmentId are provided without a studentId,
+    // the user's intent is to view the status of the whole class.
+    if (groupId && assignmentId && !studentId) {
+
+        // --- Data fetching for context remains the same ---
+        const [assignment, group] = await Promise.all([
             assignmentModel.findById(assignmentId).lean(),
-            groupModel.findById(groupId).lean(),
-            studentModel.countDocuments({ groupId: groupId })
+            groupModel.findById(groupId).lean()
         ]);
-        
         if (!assignment) return next(new Error("Assignment not found.", { cause: 404 }));
         if (!group) return next(new Error("Group not found.", { cause: 404 }));
         
+        // *** THE DEFINITIVE FIX IS HERE ***
+        // Build the query for the submissionStatusModel.
         let statusQuery = { contentId: assignmentId, groupId: groupId, contentType: 'assignment' };
-        if (status) { // This will now only handle 'submitted', 'not submitted', etc.
-            const statusMap = { 'submitted': 'submitted', 'not submitted': 'assigned', 'marked': 'marked' };
-            if (statusMap[status]) {
-                statusQuery.status = statusMap[status];
-            }
+        
+        // The statusMap is now more comprehensive.
+        const statusMap = {
+            'submitted': 'submitted',
+            'not submitted': 'assigned',
+            'marked': 'marked',
+            'unmarked': 'submitted' // This is the key that fixes the bug.
+        };
+
+        if (status && statusMap[status]) {
+            statusQuery.status = statusMap[status];
         }
         
-        const statuses = await submissionStatusModel.find(statusQuery)
-            .populate('studentId', '_id userName firstName lastName')
-            .populate({ path: 'submissionId', select: '+annotationData' })
-            .sort({ 'studentId.firstName': 1 })
-            .skip(skip).limit(limit)
-            .lean();
+        // We now use this single, correct query for both counting and finding.
+        const [total, statuses] = await Promise.all([
+            submissionStatusModel.countDocuments(statusQuery),
+            submissionStatusModel.find(statusQuery)
+                .populate('studentId', '_id userName firstName lastName')
+                .populate({ path: 'submissionId', select: '+annotationData' })
+                .sort({ 'studentId.firstName': 1 })
+                .skip(skip).limit(limit)
+                .lean()
+        ]);
 
         const data = statuses.map(s => ({
             _id: s.studentId._id,
             userName: s.studentId.userName,
             firstName: s.studentId.firstName,
             lastName: s.studentId.lastName,
-            status: s.status === 'assigned' ? 'not submitted' : s.status,
+            status: s.status === 'assigned' ? 'not submitted' : s.status, // Keep user-friendly status name
             submissionDetails: s.submissionId
         }));        
 
@@ -283,20 +299,18 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
         });
     }
 
-    // --- Path B: All Other Queries (Now correctly structured) ---
-    // This code only runs if the 'if' block above is false.
-    
-    // We now build upon the `filter` object that was created during authorization.
-    
-    if (groupId) filter.groupId = new mongoose.Types.ObjectId(groupId);
-    if (assignmentId) filter.assignmentId = new mongoose.Types.ObjectId(assignmentId);
+ // --- Path B: All Other Queries (Fallback for specific student or non-group queries) ---
+    const filter = {}; // Build filter from scratch for clarity
     if (studentId) filter.studentId = new mongoose.Types.ObjectId(studentId);
-    if (status && ['marked', 'unmarked'].includes(status)) filter.isMarked = (status === 'marked');
-     if (status && ['marked', 'unmarked'].includes(status)) {
+    if (assignmentId) filter.assignmentId = new mongoose.Types.ObjectId(assignmentId);
+    if (groupId) filter.groupId = new mongoose.Types.ObjectId(groupId);
+    
+    // This logic is still needed for when a teacher wants a flat list of all "marked" subs, for example.
+    if (status && ['marked', 'unmarked'].includes(status)) {
         filter.isMarked = (status === 'marked');
-    } 
-    if (Object.keys(filter).length === 0) return next(new Error("At least one query parameter is required.", { cause: 400 }));
+    }
 
+    if (Object.keys(filter).length === 0) return next(new Error("At least one query parameter is required.", { cause: 400 }));
 
     const [submissions, total] = await Promise.all([
         SubassignmentModel.find(filter).select('+annotationData').sort({ createdAt: -1 }).skip(skip).limit(limit)
@@ -305,6 +319,7 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
             .populate('groupId', 'groupname').lean(),
         SubassignmentModel.countDocuments(filter)
     ]);
+    
     
     return res.status(200).json({
         message: "Submissions fetched successfully.", total, totalPages: Math.ceil(total / limit), currentPage: pageNum, data: submissions
