@@ -223,15 +223,20 @@ export const submitExam = asyncHandler(async (req, res, next) => {
 
 
 
-       await submissionStatusModel.updateOne(
+           await submissionStatusModel.updateOne(
             { studentId: user._id, contentId: examId, contentType: 'exam' },
             { 
-                status: 'submitted', 
-                submissionId: newSubmission._id, // This is now a valid ObjectId
-                isLate: isLate,
-                SubmitDate: submissionTime
+                $set: {
+                    status: 'submitted', 
+                    submissionId: newSubmission._id,
+                    isLate: isLate,
+                    SubmitDate: submissionTime,
+                    // Find the student's groupId to set it
+                    groupId: (await studentModel.findById(user._id).select('groupId').lean()).groupId,
+                    submissionModel: 'subexam'
+                }
             },
-            { session }
+            { session, upsert: true } // The same upsert fix
         );
         await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
 

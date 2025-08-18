@@ -214,15 +214,20 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
             isLate, bucketName: process.env.S3_BUCKET_NAME, key: s3Key,
             path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
         }], { session });
-  await submissionStatusModel.updateOne(
+ await submissionStatusModel.updateOne(
             { studentId: user._id, contentId: assignmentId, contentType: 'assignment' },
             { 
-                status: 'submitted', 
-                submissionId: newSubmission._id,
-                isLate: isLate, // assuming isLate is calculated
-                SubmitDate: submissionTime // assuming submissionTime is calculated
+                $set: {
+                    status: 'submitted', 
+                    submissionId: newSubmission._id,
+                    isLate: isLate,
+                    SubmitDate: submissionTime,
+                    // Ensure the groupId is set, especially if this is a new document
+                    groupId: newSubmission.groupId, 
+                    submissionModel: 'subassignment'
+                }
             },
-            { session }
+            { session, upsert: true } // The magic is here: upsert: true
         );
 
         await session.commitTransaction();
