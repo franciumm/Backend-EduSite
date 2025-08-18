@@ -279,6 +279,11 @@ signature:process.env.SIGN_IN_TOKEN_SECRET,
 
 export const getUnassignedByGrade = asyncHandler(async (req, res, next) => {
   const gradeNum = parseInt(req.params.grade, 10);
+  const {isteacher}= req;
+if(!isteacher){
+        return next(new Error("You must be a Teacher or Assistant", { cause: 400 }));
+
+}
   if (isNaN(gradeNum)) {
     return next(new Error("Grade must be a number", { cause: 400 }));
   }
