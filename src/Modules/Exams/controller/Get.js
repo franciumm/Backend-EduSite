@@ -35,7 +35,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
         .skip(skip) // <-- 3. APPLY PAGINATION
         .limit(limit)
         .lean();
-        return res.status(200).json({ message: "Exams fetched successfully", data: exams });
+        return res.status(200).json({ message: "Exams fetched successfully", exams: exams });
     }
 
     // --- Student Logic (Rewritten with Aggregation Pipeline) ---
@@ -69,7 +69,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
    
     res.status(200).json({
         message: "Exams fetched successfully",
-        exams: sanitizedExams,
+        data: sanitizedExams,
     });
 });
 
