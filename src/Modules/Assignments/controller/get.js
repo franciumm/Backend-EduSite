@@ -240,52 +240,43 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
         // For students, the filter is always scoped to their own ID.
          filter.studentId = req.user._id;
     }
-    
-    // --- Path A: Group Status View (Performant Aggregation) ---
-    if (groupId && assignmentId && !studentId) {
+        const isStudentStatusView = groupId && assignmentId && !studentId && !['marked', 'unmarked'].includes(status);
 
+    // --- Path A: Group Status View (Now correctly scoped) ---
+    if (isStudentStatusView) {
         const [assignment, group, total] = await Promise.all([
             assignmentModel.findById(assignmentId).lean(),
             groupModel.findById(groupId).lean(),
             studentModel.countDocuments({ groupId: groupId })
         ]);
-
-
         
-       
         if (!assignment) return next(new Error("Assignment not found.", { cause: 404 }));
         if (!group) return next(new Error("Group not found.", { cause: 404 }));
         
-
-
         let statusQuery = { contentId: assignmentId, groupId: groupId, contentType: 'assignment' };
- if (status) {
+        if (status) { // This will now only handle 'submitted', 'not submitted', etc.
             const statusMap = { 'submitted': 'submitted', 'not submitted': 'assigned', 'marked': 'marked' };
             if (statusMap[status]) {
                 statusQuery.status = statusMap[status];
             }
         }
         
-         const statuses = await submissionStatusModel.find(statusQuery)
+        const statuses = await submissionStatusModel.find(statusQuery)
             .populate('studentId', '_id userName firstName lastName')
-            .populate({
-                path: 'submissionId',
-                select: '+annotationData' // Keep fetching annotation data
-            })
-            .sort({ 'studentId.firstName': 1 }) // Sorting can be done here
+            .populate({ path: 'submissionId', select: '+annotationData' })
+            .sort({ 'studentId.firstName': 1 })
             .skip(skip).limit(limit)
             .lean();
 
- const data = statuses.map(s => ({
+        const data = statuses.map(s => ({
             _id: s.studentId._id,
             userName: s.studentId.userName,
             firstName: s.studentId.firstName,
             lastName: s.studentId.lastName,
             status: s.status === 'assigned' ? 'not submitted' : s.status,
-            submissionDetails: s.submissionId // This will be the populated submission or null
+            submissionDetails: s.submissionId
         }));        
 
-        // This `return` ensures this is the final action for this code path.
         return res.status(200).json({
             message: "Submission status for group fetched successfully.",
             assignmentName: assignment.name, total, totalPages: Math.ceil(total / limit), currentPage: pageNum, data
@@ -296,11 +287,16 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
     // This code only runs if the 'if' block above is false.
     
     // We now build upon the `filter` object that was created during authorization.
+    
     if (groupId) filter.groupId = new mongoose.Types.ObjectId(groupId);
     if (assignmentId) filter.assignmentId = new mongoose.Types.ObjectId(assignmentId);
     if (studentId) filter.studentId = new mongoose.Types.ObjectId(studentId);
     if (status && ['marked', 'unmarked'].includes(status)) filter.isMarked = (status === 'marked');
+     if (status && ['marked', 'unmarked'].includes(status)) {
+        filter.isMarked = (status === 'marked');
+    } 
     if (Object.keys(filter).length === 0) return next(new Error("At least one query parameter is required.", { cause: 400 }));
+
 
     const [submissions, total] = await Promise.all([
         SubassignmentModel.find(filter).select('+annotationData').sort({ createdAt: -1 }).skip(skip).limit(limit)
