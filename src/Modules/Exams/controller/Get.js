@@ -107,25 +107,34 @@ export const getSubmittedExams = asyncHandler(async (req, res, next) => {
             }
 
              const studentCountQuery = {};
-            if (groupId) {
-                 studentCountQuery.groupId = new mongoose.Types.ObjectId(groupId);
+            
+              let statusQuery = {      contentId: new mongoose.Types.ObjectId(examId),
+                contentType: 'exam'};
+ if (groupId) {
+                statusQuery.groupId = new mongoose.Types.ObjectId(groupId);
             } else {
-                 studentCountQuery.groupId = { $in: exam.groupIds };
+                statusQuery.groupId = { $in: exam.groupIds };
             }
-            const total = await studentModel.countDocuments(studentCountQuery);
-  let statusQuery = { contentId: examId, contentType: 'exam', ...studentCountQuery };
+ 
+        if (studentId) {
+            if (!mongoose.Types.ObjectId.isValid(studentId)) return next(new Error("Invalid Student ID format.", { cause: 400 }));
+            statusQuery.studentId = new mongoose.Types.ObjectId(studentId);
+        }
             if (status && ['submitted', 'not submitted', 'marked'].includes(status)) {
                 const statusMap = { 'submitted': 'submitted', 'not submitted': 'assigned', 'marked': 'marked' };
                 statusQuery.status = statusMap[status];
             }
 
- const statuses = await submissionStatusModel.find(statusQuery)
+           const [total, statuses] = await Promise.all([
+            submissionStatusModel.countDocuments(statusQuery),
+            submissionStatusModel.find(statusQuery)
                 .populate('studentId', '_id userName firstName lastName')
-                .populate({ path: 'submissionId', model: 'subexam' }) // Explicitly model 'subexam'
+                .populate({ path: 'submissionId', model: 'subexam' })
                 .sort({ 'studentId.firstName': 1 })
-                .skip(skip).limit(limit)
-                .lean();
-
+                .skip(skip)
+                .limit(limit)
+                .lean()
+        ]);
 const data = statuses.map(s => ({
                 _id: s.studentId._id,
                 userName: s.studentId.userName,
