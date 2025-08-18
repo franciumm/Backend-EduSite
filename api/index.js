@@ -28,10 +28,11 @@ const corsOptions = {
   // Rule #2: Allow Credentials
   credentials: true, 
 };
+
 const app = express();
+app.use(cors(corsOptions));
 app.disable('x-powered-by');
 app.use(helmet());
-app.use(cors(corsOptions));
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
