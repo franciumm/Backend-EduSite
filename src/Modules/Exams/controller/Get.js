@@ -9,6 +9,7 @@ import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime } from 'date-fns-tz';
 import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
 import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
+import { canViewSubmissionsFor } from "../../../middelwares/contentAuth.js";
 
 
 
