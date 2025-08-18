@@ -300,7 +300,6 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
     }
 
  // --- Path B: All Other Queries (Fallback for specific student or non-group queries) ---
-    const filter = {}; // Build filter from scratch for clarity
     if (studentId) filter.studentId = new mongoose.Types.ObjectId(studentId);
     if (assignmentId) filter.assignmentId = new mongoose.Types.ObjectId(assignmentId);
     if (groupId) filter.groupId = new mongoose.Types.ObjectId(groupId);
