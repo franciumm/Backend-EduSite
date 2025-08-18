@@ -18,6 +18,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
     const uaeTimeZone = 'Asia/Dubai';
     const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
   const { limit, skip } = pagination({ page, size });
+    res.setHeader('Cache-Control', 'no-store');
 
     // --- Teacher logic remains the same, they don't need complex aggregation ---
     if (isTeacher) {
