@@ -171,6 +171,11 @@ export const submitExam = asyncHandler(async (req, res, next) => {
     });
     // --- END REFACTOR ---
 
+    if(!hasAccess){
+                return next(new Error("You are unauthrized.", { cause: 400 }));
+
+    }
+
     // 2. Fetch necessary data (exam and file content)
     const [exam, fileContent] = await Promise.all([
         examModel.findById(examId),
@@ -202,28 +207,33 @@ export const submitExam = asyncHandler(async (req, res, next) => {
         
         const currentVersionCount = await SubexamModel.countDocuments({ examId, studentId: user._id }).session(session);
         const newVersion = currentVersionCount + 1;
+    const [newSubmission] = await SubexamModel.create([{
+            examId,
+            studentId: user._id,
+            version: newVersion,
+            examname: exam.Name,
+            SubmitDate: submissionTime,
+            notes: notes?.trim() || "",
+            fileBucket: process.env.S3_BUCKET_NAME,
+            fileKey: s3Key,
+            filePath: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
+            isLate: isLate
+        }], { session });
 
 
-        await submissionStatusModel.updateOne(
+
+
+       await submissionStatusModel.updateOne(
             { studentId: user._id, contentId: examId, contentType: 'exam' },
             { 
                 status: 'submitted', 
-                submissionId: newSubmission._id,
+                submissionId: newSubmission._id, // This is now a valid ObjectId
                 isLate: isLate,
                 SubmitDate: submissionTime
             },
             { session }
         );
-
         await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, "application/pdf");
-
-        const [newSubmission] = await SubexamModel.create([{
-            examId, studentId: user._id, version: newVersion, examname: exam.Name,
-            SubmitDate: submissionTime, notes: notes?.trim() || "",
-            fileBucket: process.env.S3_BUCKET_NAME, fileKey: s3Key,
-            filePath: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
-            isLate: isLate
-        }], { session });
 
         await session.commitTransaction();
         res.status(200).json({ message: "Exam submitted successfully.", submission: newSubmission });
