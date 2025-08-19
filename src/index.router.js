@@ -13,6 +13,7 @@ import healthRouter from './Modules/health/health.router.js';
 import reportRouter from "./Modules/Reports/student.report.router.js";
 import courseRouter from "./Modules/Courses/Courses.router.js"
 import reviewsRouter from "./Modules/reviews/reviews.router.js"
+import contactRouter from './Modules/Contact/contact.router.js';
 
 const bootstrape =  async (app,express)=>{
     app.use(express.json({limit :'10mb'}));
@@ -30,9 +31,9 @@ const bootstrape =  async (app,express)=>{
     app.use('/assistant', assistant);
     app.use('/health', healthRouter);
     app.use("/reports", reportRouter);
-    app.use("/courses", courseRouter)
-    app.use("/reviews", reviewsRouter)
-
+    app.use("/courses", courseRouter);
+    app.use("/reviews", reviewsRouter);
+    app.use('/contact', contactRouter); 
     app.use('*', notFound);          
     app.use(globalerrorHandling);
 
