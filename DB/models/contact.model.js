@@ -11,11 +11,14 @@ const contactSchema = new Schema(
       type: String,
       required: [true, 'Email is required.'],
       trim: true,
-      lowercase: true
+      lowercase: true,
+      unique : true
     },
     phone: {
       type: String,
-      trim: true
+      trim: true,
+            unique : true
+
     },
     subject: {
       type: String,
