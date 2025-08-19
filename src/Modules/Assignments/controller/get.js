@@ -250,48 +250,101 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
     if (groupId && assignmentId && !studentId) {
 
         // --- Data fetching for context remains the same ---
-        const [assignment, group] = await Promise.all([
+          const [assignment, group] = await Promise.all([
             assignmentModel.findById(assignmentId).lean(),
             groupModel.findById(groupId).lean()
         ]);
         if (!assignment) return next(new Error("Assignment not found.", { cause: 404 }));
         if (!group) return next(new Error("Group not found.", { cause: 404 }));
         
+const basePipeline = [
+            // Stage 1: Find all students that belong to the specified group.
+            { $match: { groupId: new mongoose.Types.ObjectId(groupId) } },
+            // Stage 2: Perform a "left outer join" to the submissionstatuses collection.
+            {
+                $lookup: {
+                    from: 'submissionstatuses', // The actual collection name in MongoDB
+                    let: { student_id: '$_id' },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $and: [
+                                        { $eq: ['$studentId', '$$student_id'] },
+                                        { $eq: ['$contentId', new mongoose.Types.ObjectId(assignmentId)] }
+                                    ]
+                                }
+                            }
+                        }
+                    ],
+                    as: 'submissionStatus'
+                }
+            },
+            // Stage 3: Deconstruct the array and project the fields we need.
+            { $unwind: { path: '$submissionStatus', preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 1,
+                    userName: 1,
+                    firstName: 1,
+                    lastName: 1,
+                    // Determine the status string based on the lookup result.
+                    status: { $ifNull: ['$submissionStatus.status', 'assigned'] },
+                    // Carry over the submissionId for later population.
+                    submissionId: '$submissionStatus.submissionId'
+                }
+            }
+        ];
+
+        let filterPipeline = [];
+
         // *** THE DEFINITIVE FIX IS HERE ***
         // Build the query for the submissionStatusModel.
-        let statusQuery = { contentId: assignmentId, groupId: groupId, contentType: 'assignment' };
-        
-        // The statusMap is now more comprehensive.
-        const statusMap = {
-            'submitted': 'submitted',
-            'not submitted': 'assigned',
-            'marked': 'marked',
-            'unmarked': 'submitted' // This is the key that fixes the bug.
-        };
-
-        if (status && statusMap[status]) {
-            statusQuery.status = statusMap[status];
+        if (status) {
+            const statusMap = {
+                'submitted': 'submitted',
+                'not submitted': 'assigned',
+                'marked': 'marked',
+                'unmarked': 'submitted' // Unmarked are those that are submitted but not yet marked.
+            };
+            if (statusMap[status]) {
+                // If the user asks for 'unmarked', we must find those with status 'submitted'.
+                filterPipeline.push({ $match: { status: statusMap[status] } });
+            }
         }
+
         
+        const finalPipeline = [...basePipeline, ...filterPipeline];
         // We now use this single, correct query for both counting and finding.
-        const [total, statuses] = await Promise.all([
-            submissionStatusModel.countDocuments(statusQuery),
-            submissionStatusModel.find(statusQuery)
-                .populate('studentId', '_id userName firstName lastName')
-                .populate({ path: 'submissionId', select: '+annotationData' })
-                .sort({ 'studentId.firstName': 1 })
-                .skip(skip).limit(limit)
-                .lean()
+         const [totalResult, dataResult] = await Promise.all([
+            studentModel.aggregate([...finalPipeline, { $count: 'total' }]),
+            studentModel.aggregate([
+                ...finalPipeline,
+                { $sort: { firstName: 1 } },
+                { $skip: skip },
+                { $limit: limit },
+                // Final lookup to populate the submission details if they exist.
+                {
+                    $lookup: {
+                        from: 'subassignments',
+                        localField: 'submissionId',
+                        foreignField: '_id',
+                        as: 'submissionDetails'
+                    }
+                },
+                { $unwind: { path: '$submissionDetails', preserveNullAndEmptyArrays: true } }
+            ])
         ]);
 
-        const data = statuses.map(s => ({
-            _id: s.studentId._id,
-            userName: s.studentId.userName,
-            firstName: s.studentId.firstName,
-            lastName: s.studentId.lastName,
-            status: s.status === 'assigned' ? 'not submitted' : s.status, // Keep user-friendly status name
-            submissionDetails: s.submissionId
-        }));        
+        const total = totalResult[0]?.total || 0;
+          const data = dataResult.map(s => ({
+            _id: s._id,
+            userName: s.userName,
+            firstName: s.firstName,
+            lastName: s.lastName,
+            status: s.status === 'assigned' ? 'not submitted' : s.status,
+            submissionDetails: s.submissionDetails || null
+        }));    
 
         return res.status(200).json({
             message: "Submission status for group fetched successfully.",
