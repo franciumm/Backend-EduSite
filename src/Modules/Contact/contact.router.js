@@ -1,6 +1,6 @@
 import { Router } from "express";
 import * as contactController from "./contact.controller.js";
-import { isAuth } from "../../middelwares/auth.js";
+import { AdminAuth, isAuth } from "../../middelwares/auth.js";
 import isValid from "../../middelwares/JoiValidation.js";
 import * as validators from "./contact.validation.js";
 import { generalLimiter } from "../../middelwares/ratelimiter.js";
@@ -34,7 +34,7 @@ router.patch(
 // Endpoint for TEACHERS and ASSISTANTS to delete a message
 router.delete(
     '/:contactId',
-    isAuth,
+    AdminAuth,
     isValid(validators.deleteMessageSchema),
     contactController.deleteMessage
 );
