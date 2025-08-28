@@ -3,7 +3,6 @@ import SendMail from "../../utils/Mailer.js";
 import { asyncHandler } from "../../utils/erroHandling.js";
 import jwt  from "jsonwebtoken";
 import bycrypt from 'bcrypt'
-import { gradeModel } from "../../../DB/models/grades.model.js";
 
 
 export const confirmEmail = asyncHandler(async (req,res,next)=>{
@@ -13,13 +12,10 @@ if(userif && userif.confirmEmail == true ){return res.redirect(`${req.protocol}:
 tokenDec.user.password = bycrypt.hashSync(tokenDec.user.password, parseInt(process.env.HASH_ROUNDS));
 
 const usercreated =await  UserModel.create(tokenDec.user);
-const gradee = await gradeModel.findById(tokenDec.user.gradeId);
-gradee.enrolledStudents.push(usercreated._id);
-await gradee.save();
 usercreated.save();
 
 return usercreated ? res.redirect(`https://adel225.github.io/EduSite/#/login`) : res.send(`<a href="https://adel225.github.io/EduSite/#/signup">Ops looks like u don't have account yet follow me to signup now. </a>`)
-})
+}) 
 
 
 export const newConfirmEmail = asyncHandler(async (req,res,next)=>{
