@@ -16,11 +16,7 @@ const contentStreamSchema = new Schema({
         required: true,
         enum: ['assignment', 'exam', 'material', 'section']
     },
-    gradeId: {
-        type: Schema.Types.ObjectId,
-        ref: 'grade',
-        required: true,
-    },
+ 
     groupId: { 
         type: Schema.Types.ObjectId, 
         ref: 'group',

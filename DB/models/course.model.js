@@ -5,10 +5,7 @@ const courseSchema = new Schema(
 
     name: { type: String, required: true },
 
-     grade: {
-        type: Number,
-        required: true,
-      },
+   
 
     phone :   {
         type: String,

@@ -14,7 +14,7 @@ import { canViewSubmissionsFor } from "../../../middelwares/contentAuth.js";
 
 
 export const getExams = asyncHandler(async (req, res, next) => {
-  const { gradeId, groupId, page, size } = req.query; // <-- 2. GET PAGE AND SIZE
+  const {groupId, page, size } = req.query; // <-- 2. GET PAGE AND SIZE
     const isTeacher = req.isteacher;
     const uaeTimeZone = 'Asia/Dubai';
     const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
@@ -24,7 +24,6 @@ export const getExams = asyncHandler(async (req, res, next) => {
     if (isTeacher) {
         let query = {};
         if (req.user.role === 'main_teacher') {
-            if (gradeId) query.grade = gradeId;
             if (groupId) query.groupIds = groupId;
         } else if (req.user.role === 'assistant') {
             const groupIds = req.user.permissions.exams || [];
@@ -78,7 +77,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
 
 // --- Corrected and Improved Controller ---
 export const getSubmittedExams = asyncHandler(async (req, res, next) => {
-  const { groupId, examId, studentId, gradeId, status, page = 1, size = 10 } = req.query;
+  const { groupId, examId, studentId, status, page = 1, size = 10 } = req.query;
   const { user, isteacher } = req;
   const isTeacher = isteacher;
   const uaeTimeZone = 'Asia/Dubai';
@@ -167,7 +166,6 @@ const data = statuses.map(s => ({
     }
     
     if (groupId) matchStage['examData.groupIds'] = new mongoose.Types.ObjectId(groupId);
-    if (gradeId) matchStage['examData.grade'] = new mongoose.Types.ObjectId(gradeId);
     if (studentId) matchStage.studentId = new mongoose.Types.ObjectId(studentId);
 
     if (status === 'active') {

@@ -25,17 +25,14 @@ const propagateMaterialToStreams = async ({ material, session }) => {
         userId: student._id,
         contentId: material._id,
         contentType: 'material',
-        gradeId: material.gradeId,
-        groupId: student.groupId
+         groupId: student.groupId
     }));
 
     // Add access for the teacher who created it
     streamEntries.push({
         userId: material.createdBy,
         contentId: material._id,
-        contentType: 'material',
-        gradeId: material.gradeId,
-    });
+        contentType: 'material'    });
 
     if (streamEntries.length > 0) {
         await contentStreamModel.insertMany(streamEntries, { session });
@@ -129,17 +126,17 @@ export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
 });
 // Create material (main_teacher only) - Logic is correct.
 export const createMaterial = asyncHandler(async (req, res, next) => {
-    const { name, description, gradeId, groupIds, linksArray, files, publishDate } = req.body;
+    const { name, description, groupIds, linksArray, files, publishDate } = req.body;
     const teacherId = req.user._id;
 
-    if (!files || files.length === 0 || !name || !gradeId) {
-        return next(new Error("Name, gradeId, and at least one file are required.", { cause: 400 }));
+    if (!files || files.length === 0 || !name ) {
+        return next(new Error("Name, and at least one file are required.", { cause: 400 }));
     }
 
     const slug = slugify(name, { lower: true, strict: true });
-    const existingMaterial = await materialModel.findOne({ slug, gradeId });
+    const existingMaterial = await materialModel.findOne({ slug });
     if (existingMaterial) {
-        return next(new Error(`A material with the name "${name}" already exists for this grade.`, { cause: 409 }));
+        return next(new Error(`A material with the name "${name}" already exists for this.`, { cause: 409 }));
     }
 
    const session = await mongoose.startSession();
@@ -147,7 +144,7 @@ export const createMaterial = asyncHandler(async (req, res, next) => {
         session.startTransaction();
 
         const [newMaterial] = await materialModel.create([{
-            name, slug, description, linksArray, groupIds, gradeId,
+            name, slug, description, linksArray, groupIds,
             createdBy: teacherId,
             bucketName: process.env.S3_BUCKET_NAME,
             files: files,
@@ -314,7 +311,7 @@ export const viewMaterial = asyncHandler(async (req, res, next) => {
 // Edit material details
 export const editMaterial = asyncHandler(async (req, res, next) => {
     const { materialId } = req.params;
-    const { name, description, gradeId, groupIds, linksArray, files, publishDate } = req.body;
+    const { name, description, groupIds, linksArray, files, publishDate } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(materialId)) {
         return next(new Error("Invalid Material ID.", { cause: 400 }));
@@ -332,7 +329,6 @@ export const editMaterial = asyncHandler(async (req, res, next) => {
     }
     // **FIX**: Allow updating description to an empty string.
     if (description !== undefined) updateData.description = description;
-    if (gradeId) updateData.gradeId = gradeId;
     if (groupIds) updateData.groupIds = groupIds;
     if (linksArray) updateData.linksArray = linksArray;
     if (files) updateData.files = files;

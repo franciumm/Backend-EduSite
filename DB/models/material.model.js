@@ -7,7 +7,6 @@ const materialSchema = new Schema(
     name: { type: String, required: true },
     description: { type: String },
     groupIds: [{ type: Schema.Types.ObjectId, ref: "group", required: true }],
-    gradeId: { type: Schema.Types.ObjectId, ref: "grade" },
     bucketName: { type: String, required: true },
     linksArray :  [{ 
       type: String
@@ -34,7 +33,7 @@ const materialSchema = new Schema(
   { timestamps: true }
 );
 
-materialSchema.index({ gradeId: 1, groupIds: 1 });
+materialSchema.index({  groupIds: 1 });
 
 materialSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
   

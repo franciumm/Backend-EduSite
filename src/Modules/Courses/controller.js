@@ -37,11 +37,11 @@ export const GetAll = asyncHandler(
 );
 export const create = asyncHandler(
     async (req, res, next) => {
-        const { courseName, name, email, phone, grade, description } = req.body;
+        const { courseName, name, email, phone, description } = req.body;
 
      
       
-        const course = await courseModel.create({ courseName, name, email, phone, grade, description });
+        const course = await courseModel.create({ courseName, name, email, phone, description });
 
         res.status(201).json({ message: "Course request created successfully.", data: course });
     }

@@ -8,10 +8,7 @@ const assignmentSchema = new Schema({
     startDate: Date,
     endDate: Date,
     groupIds: [{ type: Schema.Types.ObjectId, ref: "group" }],
-    gradeId: {
-      type: Schema.Types.ObjectId,
-      ref: 'grade',
-    },
+  
         answerBucketName: String, // ADDED
     answerKey: String, // ADDED
     answerPath: String, // ADDED

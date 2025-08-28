@@ -28,18 +28,18 @@ const rebuildAssistantStream = async ({ assistantId, newPermissions, session }) 
     
     // 3. Find all content linked to those groups
     const [assignments, exams, materials, sections] = await Promise.all([
-        assignmentModel.find({ groupIds: { $in: groupIds } }).select('_id gradeId').session(session),
-        examModel.find({ groupIds: { $in: groupIds } }).select('_id grade').session(session),
-        materialModel.find({ groupIds: { $in: groupIds } }).select('_id gradeId').session(session),
-        sectionModel.find({ groupIds: { $in: groupIds } }).select('_id gradeId').session(session),
+        assignmentModel.find({ groupIds: { $in: groupIds } }).select('_id ').session(session),
+        examModel.find({ groupIds: { $in: groupIds } }).select('_id').session(session),
+        materialModel.find({ groupIds: { $in: groupIds } }).select('_id').session(session),
+        sectionModel.find({ groupIds: { $in: groupIds } }).select('_id').session(session),
     ]);
 
     // 4. Create the new stream entries
     const streamEntries = [
-        ...assignments.map(a => ({ userId: assistantId, contentId: a._id, contentType: 'assignment', gradeId: a.gradeId })),
-        ...exams.map(e => ({ userId: assistantId, contentId: e._id, contentType: 'exam', gradeId: e.grade })),
-        ...materials.map(m => ({ userId: assistantId, contentId: m._id, contentType: 'material', gradeId: m.gradeId })),
-        ...sections.map(s => ({ userId: assistantId, contentId: s._id, contentType: 'section', gradeId: s.gradeId })),
+        ...assignments.map(a => ({ userId: assistantId, contentId: a._id, contentType: 'assignment' })),
+        ...exams.map(e => ({ userId: assistantId, contentId: e._id, contentType: 'exam' })),
+        ...materials.map(m => ({ userId: assistantId, contentId: m._id, contentType: 'material'})),
+        ...sections.map(s => ({ userId: assistantId, contentId: s._id, contentType: 'section' })),
     ];
     
     if (streamEntries.length > 0) {
@@ -142,12 +142,8 @@ export const getAllAssistants = asyncHandler(async (req, res, next) => {
         return res.status(200).json({ message: "Assistants fetched successfully.", data: assistants });
     }
 
-    // 3. Perform ONE efficient query to get all required groups and their associated grades.
     const groups = await groupModel.find({
         _id: { $in: Array.from(allGroupIds) }
-    }).populate({
-        path: 'gradeid', // Ensure this path matches your groups.model.js schema
-        select: 'grade', // Select only the 'grade' number
     }).lean();
 
     // 4. Create a Map for instant O(1) lookups (ID -> Full Group Object).
@@ -164,8 +160,7 @@ export const getAllAssistants = asyncHandler(async (req, res, next) => {
                     populatedPermissions[permissionType] = idArray.map(id => {
                         const group = groupMap.get(id.toString());
                         
-                        // Safety check: handle cases where a group or its grade might have been deleted.
-                        if (!group || !group.gradeid) {
+                        if (!group ) {
                             return null;
                         }
                         
@@ -173,7 +168,6 @@ export const getAllAssistants = asyncHandler(async (req, res, next) => {
                         return {
                             groupId: group._id,
                             groupname: group.groupname,
-                            grade: group.gradeid.grade
                         };
                     }).filter(Boolean); // .filter(Boolean) elegantly removes any nulls from the array.
                 }

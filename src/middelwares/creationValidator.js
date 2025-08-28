@@ -30,14 +30,14 @@ export const creationValidator = (contentType) => {
 return next(new Error(`Only teachers can create ${contentType}s.`, { cause: 403 }));
         }
 
-        const { name, Name, gradeId } = req.body;
+        const { name, Name } = req.body;
         const finalName = name || Name;
         const startDate = req.body.startDate || req.body.startdate;
         const endDate = req.body.endDate || req.body.enddate;
         // 2. Field Presence Validation
-        if (!finalName || !startDate || !endDate || !gradeId) {
+        if (!finalName || !startDate || !endDate) {
             await cleanupFiles();
-            return next(new Error(`Missing required fields: name, startDate, endDate, and gradeId are required.`, { cause: 400 }));
+            return next(new Error(`Missing required fields: name, startDate and endDate are required.`, { cause: 400 }));
         }
         
         // 3. Timeline Validation

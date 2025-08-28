@@ -9,7 +9,6 @@ const examSchema = new Schema(
     Name: { type: String, required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "teacher", required: true },
     groupIds: [{ type: Schema.Types.ObjectId, ref: "group" }], // Multiple groups
-    grade: { type: Schema.Types.ObjectId, ref: "grade" },
     bucketName: String,
     key: String,
     path: String,  
@@ -39,7 +38,7 @@ const examSchema = new Schema(
   },
   { timestamps: true }
 );
-examSchema.index({ grade: 1, groupIds: 1 });
+examSchema.index({ groupIds: 1 });
 
 examSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
     const submissions = await SubexamModel.find({ examId: this._id });

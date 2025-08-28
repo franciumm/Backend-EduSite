@@ -12,10 +12,7 @@ const studentSchema = new Schema(
     },
     firstName: String,
     lastName: String,
-    gradeId: {
-      type: Schema.Types.ObjectId,
-      ref: "grade",
-    },
+    
     groupId: {
       type: Schema.Types.ObjectId,
       ref: "group", index: true

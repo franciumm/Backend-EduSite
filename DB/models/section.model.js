@@ -7,7 +7,8 @@ const sectionSchema = new Schema(
     name: { 
       type: String, 
       required: true,
-      trim: true 
+      trim: true ,
+       unique : true
     },
     description: { 
       type: String,
@@ -18,11 +19,7 @@ const sectionSchema = new Schema(
       ref: "group", 
       required: true 
     }],
-    gradeId: { 
-      type: Schema.Types.ObjectId, 
-      ref: "grade", 
-      required: true 
-    },
+    
     // --- Linked Content ---
     linkedAssignments: [{ 
       type: Schema.Types.ObjectId, 
@@ -46,6 +43,6 @@ const sectionSchema = new Schema(
   { timestamps: true }
 );
 
-sectionSchema.index({ name: 1, gradeId: 1 }, { unique: true });
+sectionSchema.index({ name: 1 }, { unique: true });
 
 export const sectionModel = model("section", sectionSchema);

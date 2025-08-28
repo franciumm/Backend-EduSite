@@ -1,7 +1,6 @@
 import { asyncHandler } from "../../../utils/erroHandling.js";
 import { s3, uploadFileToS3, deleteFileFromS3 } from "../../../utils/S3Client.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
-import { gradeModel} from "../../../../DB/models/grades.model.js";
 import {examModel} from "../../../../DB/models/exams.model.js";
 import { SubexamModel } from "../../../../DB/models/submitted_exams.model.js";
 import mongoose from "mongoose";
@@ -24,7 +23,6 @@ const propagateExamToStreams = async ({ exam, session }) => {
         userId: student._id,
         contentId: exam._id,
         contentType: 'exam',
-        gradeId: exam.grade, // Note: field is 'grade' in exam model
         groupId: student.groupId
     }));
 
@@ -42,9 +40,7 @@ const propagateExamToStreams = async ({ exam, session }) => {
     streamEntries.push({
         userId: exam.createdBy,
         contentId: exam._id,
-        contentType: 'exam',
-        gradeId: exam.grade
-    });
+        contentType: 'exam'    });
 
     // 5. Insert all records
     await Promise.all([
@@ -75,7 +71,7 @@ export const createExam = asyncHandler(async (req, res, next) => {
     });
     res.status(201).json({ message: "Exam created successfully", exam: newExam });
 });
-export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, groupIds, file, teacherId, exceptionStudents, allowSubmissionsAfterDueDate,answerFile }) => {
+export const _internalCreateExam = async ({ Name, startdate, enddate, groupIds, file, teacherId, exceptionStudents, allowSubmissionsAfterDueDate,answerFile }) => {
     const name = Name.trim();
     const slug = slugify(name, { lower: true, strict: true });
     const s3Key = `exams/${slug}-${Date.now()}.pdf`;
@@ -90,7 +86,6 @@ export const _internalCreateExam = async ({ Name, startdate, enddate, gradeId, g
             slug,
             startdate,
             enddate,
-            grade: gradeId,
             groupIds,
             bucketName: process.env.S3_BUCKET_NAME,
             key: s3Key,

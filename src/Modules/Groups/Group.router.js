@@ -21,7 +21,6 @@ router.get('/all',isAuth, Search.getall);
 
 
 
-router.get("/grades",isAuth, Search.Bygrade);
 
 
 router.get("/id",isAuth,  Search.ById);

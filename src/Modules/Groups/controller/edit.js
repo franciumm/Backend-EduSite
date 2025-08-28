@@ -1,4 +1,3 @@
-import {gradeModel} from '../../../../DB/models/grades.model.js';
 import crypto from 'crypto'; 
 import {groupModel}from "../../../../DB/models/groups.model.js";
 import studentModel from '../../../../DB/models/student.model.js';
@@ -14,18 +13,18 @@ import { sectionModel } from '../../../../DB/models/section.model.js';
 const fanOutContentToStudent = async ({ studentId, groupId, session }) => {
     // 1. Find all content currently assigned to this group
     const [assignments, exams, materials, sections] = await Promise.all([
-        assignmentModel.find({ groupIds: groupId }).select('_id gradeId').session(session),
-        examModel.find({ groupIds: groupId }).select('_id grade').session(session),
-        materialModel.find({ groupIds: groupId }).select('_id gradeId').session(session),
-        sectionModel.find({ groupIds: groupId }).select('_id gradeId').session(session),
+        assignmentModel.find({ groupIds: groupId }).select('_id').session(session),
+        examModel.find({ groupIds: groupId }).select('_id').session(session),
+        materialModel.find({ groupIds: groupId }).select('_id').session(session),
+        sectionModel.find({ groupIds: groupId }).select('_id').session(session),
     ]);
 
     // 2. Prepare ContentStream entries for all found content
     const streamEntries = [
-        ...assignments.map(a => ({ userId: studentId, contentId: a._id, contentType: 'assignment', gradeId: a.gradeId, groupId })),
-        ...exams.map(e => ({ userId: studentId, contentId: e._id, contentType: 'exam', gradeId: e.grade, groupId })),
-        ...materials.map(m => ({ userId: studentId, contentId: m._id, contentType: 'material', gradeId: m.gradeId, groupId })),
-        ...sections.map(s => ({ userId: studentId, contentId: s._id, contentType: 'section', gradeId: s.gradeId, groupId })),
+        ...assignments.map(a => ({ userId: studentId, contentId: a._id, contentType: 'assignment', groupId })),
+        ...exams.map(e => ({ userId: studentId, contentId: e._id, contentType: 'exam', groupId })),
+        ...materials.map(m => ({ userId: studentId, contentId: m._id, contentType: 'material', groupId })),
+        ...sections.map(s => ({ userId: studentId, contentId: s._id, contentType: 'section', groupId })),
     ];
     
     // 3. Prepare SubmissionStatus entries for assignments and exams
@@ -103,9 +102,7 @@ export const addStudentsToGroup = asyncHandler(async (req, res, next) => {
 
         // 3. --- Business Logic Validation (from original) ---
         for (const student of students) {
-            if (student.gradeId.toString() !== group.gradeid.toString()) {
-                throw new Error(`Student '${student.userName}' is not in the same grade as the group.`, { cause: 400 });
-            }
+          
              if (student.groupId) {
                 throw new Error(`Student '${student.userName}' is already in another group.`, { cause: 409 });
             }
@@ -221,9 +218,6 @@ export const joinWithInviteLink = asyncHandler(async (req, res, next) => {
         return next(new Error('Student profile not found.', { cause: 404 }));
     }
 
-    if (student.gradeId.toString() !== group.gradeid.toString()) {
-        return next(new Error('You cannot join a group for a different grade level.', { cause: 403 }));
-    }
 if (student.groupId) {
     if (student.groupId.equals(group._id)) {
         return res.status(200).json({ message: 'You are already a member of this group.' });

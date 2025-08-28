@@ -31,7 +31,6 @@ function resolveDateRange({ from, to, year, fromMonth, toMonth }) {
 async function gatherStudentData(studentId, from, to) {
   const student = await studentModel
     .findById(studentId)
-    .populate({ path: "gradeId", select: "grade" })
     .populate({ path: "groupId", select: "groupname" })
     .lean();
 
@@ -94,7 +93,6 @@ async function gatherStudentData(studentId, from, to) {
 
   const summary = {
     studentName: `${student.firstName || ""} ${student.lastName || ""}`.trim() || student.userName,
-    grade: student.gradeId?.grade ?? "-",
     group: student.groupId?.groupname ?? "-",
     from: format(from, "yyyy-MM-dd"),
     to: format(to, "yyyy-MM-dd"),
@@ -158,7 +156,7 @@ function streamPdf(res, { summary, assignments, exams }) {
   H("Student Performance Report", 22);
   doc.moveDown(0.3);
   L("Student:", summary.studentName);
-  L("Grade / Group:", `${summary.grade} / ${summary.group}`);
+  L("Group:", ` ${summary.group}`);
   L("Period:", `${summary.from} → ${summary.to}`);
   line();
 
@@ -221,7 +219,6 @@ async function streamExcel(res, { summary, assignments, exams }) {
   const s = wb.addWorksheet("Summary");
   s.addRows([
     ["Student", summary.studentName],
-    ["Grade", summary.grade],
     ["Group", summary.group],
     ["Period", `${summary.from} → ${summary.to}`],
     [],

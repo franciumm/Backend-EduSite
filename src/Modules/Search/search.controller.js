@@ -18,23 +18,20 @@ const modelMap = {
 };
 
 export const findContent = asyncHandler(async (req, res, next) => {
-    const { type, q, gradeId } = req.query;
+    const { type, q } = req.query;
     const searchQuery = q ? q.trim() : '';
 
     if (!type) {
         return next(new Error("A 'type' query parameter (e.g., 'assignment', 'exam') is required.", { cause: 400 }));
     }
-    if (!gradeId || !mongoose.Types.ObjectId.isValid(gradeId)) {
-        return next(new Error("A valid 'gradeId' is required to scope the search.", { cause: 400 }));
-    }
-   
+ 
 
       const Model = modelMap[type];
     if (!Model) {
         return next(new Error("Invalid content 'type'.", { cause: 400 }));
     }
     // --- REFACTOR: All complex if/else logic is replaced by one call to our smart filter builder. ---
-    const filter = createContentSearchFilter(type, searchQuery, gradeId);
+    const filter = createContentSearchFilter(type, searchQuery);
 
     const results = await Model.find(filter)
         // Select both possible name fields. Mongoose is smart enough to only return the one that exists on the document.

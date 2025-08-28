@@ -36,14 +36,12 @@ const propagateAssignmentToStreams = async ({ assignment, session }) => {
         userId: s.userId,
         contentId: assignment._id,
         contentType: 'assignment',
-        gradeId: assignment.gradeId,
         groupId: s.groupId // This can correctly be null for directly enrolled students
     }));
     streamEntries.push({
         userId: assignment.createdBy,
         contentId: assignment._id,
         contentType: 'assignment',
-        gradeId: assignment.gradeId
     });
 
     // 4. Create Status Entries for ALL students, using the correct 'allStudents' list
@@ -63,7 +61,7 @@ const propagateAssignmentToStreams = async ({ assignment, session }) => {
         statusEntries.length > 0 ? submissionStatusModel.insertMany(statusEntries, { session }) : Promise.resolve()
     ]);
 };
-export const _internalCreateAssignment = async ({ name, startDate, endDate, gradeId, groupIds, file, teacherId, allowSubmissionsAfterDueDate ,answerFile}) => {
+export const _internalCreateAssignment = async ({ name, startDate, endDate, groupIds, file, teacherId, allowSubmissionsAfterDueDate ,answerFile}) => {
         const slug = slugify(name, { lower: true, strict: true });
 
     const s3Key = `assignments/${slugify(name, { lower: true, strict: true })}-${Date.now()}${path.extname(file.originalname)}`;
@@ -80,7 +78,6 @@ export const _internalCreateAssignment = async ({ name, startDate, endDate, grad
             slug,
             startDate,
             endDate,
-            gradeId,
             groupIds,
             allowSubmissionsAfterDueDate: allowSubmissionsAfterDueDate || false,
             bucketName: process.env.S3_BUCKET_NAME,

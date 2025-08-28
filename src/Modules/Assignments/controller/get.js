@@ -13,7 +13,7 @@ import { submissionStatusModel } from "../../../../DB/models/submissionStatus.mo
 
 export const GetAllByGroup = asyncHandler(async (req, res, next) => {
   // 2. GET PAGE AND SIZE FROM QUERY
-  const { gradeId, groupId, page, size } = req.query;
+  const { groupId, page, size } = req.query;
   const query = {};
 
   // Get skip and limit values from the pagination helper
@@ -23,13 +23,12 @@ export const GetAllByGroup = asyncHandler(async (req, res, next) => {
     // Teacher Logic
     const { user } = req;
     if (user.role === "main_teacher") {
-      if (!gradeId && !groupId)
+      if (  !groupId)
         return next(
-          new Error("Query failed: A gradeId or groupId is required.", {
+          new Error("Query failed: groupId is required.", {
             cause: 400,
           })
         );
-      if (gradeId) query.gradeId = gradeId;
       if (groupId) query.groupIds = groupId;
     } else if (user.role === "assistant") {
       if (!groupId)
@@ -51,21 +50,12 @@ export const GetAllByGroup = asyncHandler(async (req, res, next) => {
         );
       }
       query.groupIds = groupId;
-      if (gradeId) query.gradeId = gradeId;
     }
   } else {
     // Student Logic
-    const studentGradeId = req.user.gradeId?.toString();
     const studentGroupId = req.user.groupId?.toString();
 
-    if (!studentGradeId) {
-      return next(
-        new Error("Unauthorized: You are not associated with any grade.", {
-          cause: 403,
-        })
-      );
-    }
-    query.gradeId = studentGradeId;
+  
 
     if (groupId && groupId !== studentGroupId) {
       return next(

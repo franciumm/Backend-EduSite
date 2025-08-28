@@ -140,7 +140,7 @@ export const isAuth = asyncHandler(async (req, res, next) => {
 
     // Try student first
     let user = await studentModel
-      .findById(decoded._id, 'email userName gradeId groupId')
+      .findById(decoded._id, 'email userName groupId')
       .lean();
 
     req.isteacher = false;

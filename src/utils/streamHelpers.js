@@ -17,7 +17,7 @@ export const synchronizeContentStreams = async ({ content, oldGroupIds, newGroup
         if (studentsToAdd.length > 0) {
             const streamEntries = studentsToAdd.map(student => ({
                 userId: student._id, contentId: content._id, contentType: content.constructor.modelName.toLowerCase(),
-                gradeId: content.gradeId || content.grade, groupId: student.groupId
+                 groupId: student.groupId
             }));
             const statusEntries = studentsToAdd.map(student => ({
                 studentId: student._id, contentId: content._id, contentType: content.constructor.modelName.toLowerCase(),

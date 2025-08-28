@@ -1,4 +1,3 @@
-import { gradeModel } from '../../../../DB/models/grades.model.js';
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { SubassignmentModel } from '../../../../DB/models/submitted_assignment.model.js';
 import { SubexamModel } from '../../../../DB/models/submitted_exams.model.js';
@@ -56,7 +55,6 @@ const getAndHydrateGroupsViaAggregation = async (initialMatch) => {
             $group: {
                 _id: "$_id",
                 groupname: { $first: "$groupname" },
-                gradeid: { $first: "$gradeid" },
                 createdAt: { $first: "$createdAt" },
                 updatedAt: { $first: "$updatedAt" },
                 // Add students back into an array, but only if they exist
@@ -96,30 +94,7 @@ export const getall = asyncHandler(async (req, res, next) => {
     res.status(200).json({ Message: "Done", groups: hydratedGroups });
 });
 
-export const Bygrade = asyncHandler(async (req, res, next) => {
-    const { user, isteacher } = req;
-    const { grade } = req.query;
 
-    if (!isteacher) {
-        return next(new Error('Forbidden: You do not have permission to perform this action.', { cause: 403 }));
-    }
-
-    const gradeDoc = await gradeModel.findOne({ grade }).lean();
-    if (!gradeDoc) {
-        return next(new Error(`Grade "${grade}" not found`, { cause: 404 }));
-    }
-
-    let initialMatch = { gradeid: gradeDoc._id };
-
-    if (user.role === 'assistant') {
-        const permittedGroupIds = user.permissions.groups?.map(id => new mongoose.Types.ObjectId(id)) || [];
-        // Intersect the grade filter with the assistant's permissions
-        initialMatch._id = { $in: permittedGroupIds };
-    }
-
-    const hydratedGroups = await getAndHydrateGroupsViaAggregation(initialMatch);
-    res.status(200).json({ Message: "Groups fetched successfully", groups: hydratedGroups });
-});
 export const ById = asyncHandler(async (req, res, next) => {
     const { user, isteacher } = req;
     const { _id } = req.query;
