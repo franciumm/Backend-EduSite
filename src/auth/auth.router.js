@@ -17,7 +17,7 @@ router.post('/teacher/login',loginLimiter,Joivalidation(Joi.Login),UserStart.Adm
 router.post ('/forget',PasswordC.forgetPassword);
 router.post ('/reset/:token',PasswordC.ResetPassword);
 router.get("/profile", isAuth , UserStart.getMyProfile);
-router.get("/grade/:grade/unassigned",isAuth,UserStart.getUnassignedByGrade);
+router.get("/unassigned",isAuth,UserStart.getUnassignedByGrade);
 
 
 export default router;

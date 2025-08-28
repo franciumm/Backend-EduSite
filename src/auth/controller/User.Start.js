@@ -278,22 +278,13 @@ signature:process.env.SIGN_IN_TOKEN_SECRET,
 
 
 export const getUnassignedByGrade = asyncHandler(async (req, res, next) => {
-  const gradeNum = parseInt(req.params.grade, 10);
   const {isteacher}= req;
 if(!isteacher){
         return next(new Error("You must be a Teacher or Assistant", { cause: 400 }));
 
 }
-  if (isNaN(gradeNum)) {
-    return next(new Error("Grade must be a number", { cause: 400 }));
-  }
 
-  // 1️⃣ Find the Grade doc
-  const gradeDoc = await gradeModel.findOne({ grade: gradeNum });
-  if (!gradeDoc) {
-    return next(new Error(`Grade ${gradeNum} not found`, { cause: 404 }));
-  }
-
+  
   // 2️⃣ Pagination params
   const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
   const limit = Math.max(1, parseInt(req.query.limit, 10) || 10);
@@ -301,7 +292,6 @@ if(!isteacher){
 
   // 3️⃣ Query students in this grade *and* NOT in any group
   const filter = {
-    gradeId: gradeDoc._id,         // only this grade :contentReference[oaicite:0]{index=0}
     groupId: null                  // unassigned to any group
   };
 
@@ -315,7 +305,6 @@ if(!isteacher){
       .lean()
   ]);
 
-  // 4️⃣ If no students at all in this grade
   if (total === 0) {
     return res.status(200).json({ Message: "No Student Attached to it" });
   }
