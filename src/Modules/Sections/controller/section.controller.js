@@ -263,32 +263,74 @@ export const viewSectionById = asyncHandler(async (req, res, next) => {
     }
     res.status(200).json({ message: "Section content fetched successfully.", data: results[0] });
 });
+
+
 export const deleteSection = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
 
-    // 1. Fetch the section from the database first, selecting only the 'createdBy' field for the check.
-    const section = await sectionModel.findById(sectionId).select('createdBy');
+    // A transaction is crucial here to ensure all-or-nothing deletion.
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    // 2. Check if the section even exists.
-    if (!section) {
-        return next(new Error("Section not found.", { cause: 404 }));
+    try {
+        // Step 1: Fetch the complete section document within the transaction.
+        const section = await sectionModel.findById(sectionId).session(session);
+
+        // Step 2: Check if the section exists.
+        if (!section) {
+            await session.abortTransaction();
+            return next(new Error("Section not found.", { cause: 404 }));
+        }
+
+        // Step 3: Perform authorization checks.
+        const isMainTeacher = req.user.role === 'main_teacher';
+        const isOwner = section.createdBy.equals(req.user._id);
+
+        if (!isMainTeacher && !isOwner) {
+            await session.abortTransaction();
+            return next(new Error("Forbidden: You are not authorized to delete this section.", { cause: 403 }));
+        }
+
+        // Step 4: Fetch all linked documents that need to be deleted.
+        const [assignmentsToDelete, examsToDelete, materialsToDelete] = await Promise.all([
+            assignmentModel.find({ '_id': { $in: section.linkedAssignments } }).session(session),
+            examModel.find({ '_id': { $in: section.linkedExams } }).session(session),
+            materialModel.find({ '_id': { $in: section.linkedMaterials } }).session(session)
+        ]);
+
+        // Step 5: Create an array of deletion promises. 
+        // Calling .deleteOne() on each document instance triggers the S3 cleanup hooks.
+        const deletionPromises = [
+            ...assignmentsToDelete.map(doc => doc.deleteOne({ session })),
+            ...examsToDelete.map(doc => doc.deleteOne({ session })),
+            ...materialsToDelete.map(doc => doc.deleteOne({ session }))
+        ];
+
+        // Also, delete the content stream entry for the section itself.
+        deletionPromises.push(
+            contentStreamModel.deleteMany({ contentId: sectionId, contentType: 'section' }, { session })
+        );
+
+        // Step 6: Execute all deletions in parallel.
+        await Promise.all(deletionPromises);
+
+        // Step 7: Finally, delete the section document itself.
+        await section.deleteOne({ session });
+
+        // Step 8: If all operations succeed, commit the transaction.
+        await session.commitTransaction();
+
+        res.status(200).json({ message: "Section deleted successfully." });
+
+    } catch (error) {
+        // If any error occurred, abort the entire transaction.
+        await session.abortTransaction();
+        console.error("Section deletion failed:", error); // Log the actual error
+        return next(new Error("Failed to delete section and its content. The operation was rolled back.", { cause: 500 }));
+    } finally {
+        // Always end the session.
+        await session.endSession();
     }
-
-    // 3. Perform authorization checks.
-    const isMainTeacher = req.user.role === 'main_teacher';
-    // Now it's safe to check the 'createdBy' field on the fetched document.
-    const isOwner = section.createdBy.equals(req.user._id); 
-
-    if (!isMainTeacher && !isOwner) {
-        // If the user is neither a main teacher nor the owner, deny access.
-        return next(new Error("Forbidden: You are not authorized to delete this section.", { cause: 403 }));
-    }
-    await contentStreamModel.deleteMany({ contentId: sectionId, contentType: 'section' });
-
-    // 4. If authorization passes, delete the document.
-    await sectionModel.findByIdAndDelete(sectionId);
-
-    res.status(200).json({ message: "Section deleted successfully." });
 });
 export const getSections = asyncHandler(async (req, res, next) => {
     // 1. Initial setup from request
