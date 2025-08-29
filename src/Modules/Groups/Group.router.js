@@ -16,15 +16,19 @@ AdminAuth,
 
  Start.create);
 
+router.patch("/archive", AdminAuth, Edit.archiveOrRestore);
+
+router.put("/addstudent", isAuth,    
+canManageGroupStudents, Edit.addStudentsToGroup);
+
+//  gets 
 
 router.get('/all',isAuth, Search.getall);
 
 
-
-
-
 router.get("/id",isAuth,  Search.ById);
 
+//  Deletes
 
 
 router.delete("/deletegroup", AdminAuth
@@ -35,9 +39,9 @@ router.delete("/removestudent",isAuth,
 canManageGroupStudents, Edit.removeStudent);
 
 
-router.put("/addstudent", isAuth,    
-canManageGroupStudents, Edit.addStudentsToGroup);
 
+
+//   Invite endpoints
 
 router.post('/invite/create', 
     AdminAuth,
@@ -45,11 +49,11 @@ router.post('/invite/create',
     Edit.createInviteLink
 );
 router.get('/invite/link',
-    AdminAuth, // Only main_teacher can view the link
-    isValid(validators.getInviteLink, "query"), // Validate groupid from query params
+    AdminAuth,  
+    isValid(validators.getInviteLink, "query"), 
     Edit.getInviteLink
 );
-// Main Teacher deletes/disables an invite link for a group
+
 router.delete('/invite/delete',
     AdminAuth,
     isValid(validators.manageInviteLink),
@@ -58,7 +62,6 @@ router.delete('/invite/delete',
 
 
 
-// Student joins a group using the token from the invite link
 router.post('/join/:inviteToken',
     isAuth,
     isValid(validators.joinWithInviteLink),

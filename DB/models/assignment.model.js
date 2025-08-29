@@ -6,12 +6,12 @@ import { sectionModel } from "./section.model.js";
 const assignmentSchema = new Schema({
     name: { type: String, required: true },
     startDate: Date,
+    teacherNotes: { type: String },
     endDate: Date,
     groupIds: [{ type: Schema.Types.ObjectId, ref: "group" }],
-  
-        answerBucketName: String, // ADDED
-    answerKey: String, // ADDED
-    answerPath: String, // ADDED
+    answerBucketName: String, 
+    answerKey: String, 
+    answerPath: String, 
     bucketName: String,
     key: String,
     fileContent: String,

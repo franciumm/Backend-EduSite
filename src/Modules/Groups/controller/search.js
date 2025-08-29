@@ -5,9 +5,10 @@ import { asyncHandler } from "../../../utils/erroHandling.js";
 import mongoose from 'mongoose';
 import { contentStreamModel } from '../../../../DB/models/contentStream.model.js';
 import { submissionStatusModel } from '../../../../DB/models/submissionStatus.model.js';
+import { pagination } from "../../../utils/pagination.js";
 
 
-const getAndHydrateGroupsViaAggregation = async (initialMatch) => {
+const getAndHydrateGroupsViaAggregation = async (initialMatch, skip, limit) => {
     const pipeline = [
         // Stage 1: Initial Filter - Find only the groups the user is allowed to see.
         { $match: initialMatch },
@@ -66,7 +67,13 @@ const getAndHydrateGroupsViaAggregation = async (initialMatch) => {
             }
         },
         // Stage 7: Sort the final groups by creation date.
-        { $sort: { createdAt: -1 } }
+         { $sort: { createdAt: -1 } },
+
+        // Stage 8: PAGINATION - Skip documents
+        { $skip: skip },
+
+        // Stage 9: PAGINATION - Limit documents
+        { $limit: limit }
     ];
 
     return await groupModel.aggregate(pipeline);
@@ -75,22 +82,32 @@ const getAndHydrateGroupsViaAggregation = async (initialMatch) => {
 // --- Refactored & Secured Controller Functions ---
 
 export const getall = asyncHandler(async (req, res, next) => {
-    const { user, isteacher } = req;
-    let initialMatch = {};
 
+    const { user, isteacher } = req;
+    const { page, size,isArchived } = req.query;
+    const isArchivedBool = req.query.isArchived === 'true';
+    const initialMatch = { isArchived: isArchivedBool };
+    const { limit, skip } = pagination({ page, size });
+
+
+//-----------------------------Permissions Check Logic----------------------------------------------
     if (isteacher) {
         if (user.role === 'assistant') {
             const permittedGroupIds = user.permissions.groups?.map(id => new mongoose.Types.ObjectId(id)) || [];
-            initialMatch = { _id: { $in: permittedGroupIds } };
+            initialMatch._id = { $in: permittedGroupIds }; 
         }
     } else {
         if (!user.groupId) {
             return res.status(200).json({ Message: "Done", groups: [] });
         }
-        initialMatch = { _id: new mongoose.Types.ObjectId(user.groupId) };
+        initialMatch._id = user.groupId;
     }
 
-    const hydratedGroups = await getAndHydrateGroupsViaAggregation(initialMatch);
+
+//------------------------------------------Get Groups ----------------------------------------------------------
+
+
+    const hydratedGroups = await getAndHydrateGroupsViaAggregation(initialMatch, skip, limit);
     res.status(200).json({ Message: "Done", groups: hydratedGroups });
 });
 

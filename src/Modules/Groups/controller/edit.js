@@ -47,7 +47,22 @@ const revokeContentFromStudent = async ({ studentId, groupId, session }) => {
     ]);
 };
 
+export const archiveOrRestore= asyncHandler(async(req,res,next)=>{
+    const {_id,archivedOrRestore} =req.body;
+    if (!mongoose.Types.ObjectId.isValid(_id)) {
+            return next(new Error(`Invalid Group ID format`, { cause: 400 }));
+        }
+    const groupId = new mongoose.Types.ObjectId(_id);
 
+
+
+    const group = await groupModel.findById(groupId);
+    if(!group)return res.status(404).json ({Message : 'Group not found'});
+    
+    group.isArchived = archivedOrRestore;
+    await group.save();
+    res.status(201).json ({Message : 'Group Edited successfully'});
+});
 
 export const removeStudent = asyncHandler(async(req,res,next)=>{
     const {groupid , studentid }=req.body;
@@ -63,7 +78,6 @@ export const removeStudent = asyncHandler(async(req,res,next)=>{
       res.status(201).json({Message : "Done" ,updatedGroup });
 
 })
-
 
 
 export const addStudentsToGroup = asyncHandler(async (req, res, next) => {
@@ -128,6 +142,8 @@ export const addStudentsToGroup = asyncHandler(async (req, res, next) => {
         await session.endSession();
     }
 });
+
+
 export const groupDelete = asyncHandler(async (req, res, next) => {
   const { groupid } = req.body;
 
@@ -159,6 +175,9 @@ export const groupDelete = asyncHandler(async (req, res, next) => {
         await session.endSession();
     }
 });
+
+
+
 export const createInviteLink = asyncHandler(async (req, res, next) => {
     const { groupid } = req.body;
 

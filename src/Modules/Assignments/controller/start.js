@@ -61,10 +61,10 @@ const propagateAssignmentToStreams = async ({ assignment, session }) => {
         statusEntries.length > 0 ? submissionStatusModel.insertMany(statusEntries, { session }) : Promise.resolve()
     ]);
 };
-export const _internalCreateAssignment = async ({ name, startDate, endDate, groupIds, file, teacherId, allowSubmissionsAfterDueDate ,answerFile}) => {
-        const slug = slugify(name, { lower: true, strict: true });
+export const _internalCreateAssignment = async ({ name, startDate, endDate, groupIds, file, teacherId, allowSubmissionsAfterDueDate ,answerFile,teacherNotes}) => {
+        const slug =file? slugify(name, { lower: true, strict: true }):null;
 
-    const s3Key = `assignments/${slugify(name, { lower: true, strict: true })}-${Date.now()}${path.extname(file.originalname)}`;
+    const s3Key = file? `assignments/${slugify(name, { lower: true, strict: true })}-${Date.now()}${path.extname(file.originalname)}`:null;
         const s3AnswerKey = answerFile ? `assignments/answers/${slug}-answer-${Date.now()}${path.extname(answerFile.originalname)}` : null;
     const session = await mongoose.startSession();
 
@@ -89,7 +89,7 @@ export const _internalCreateAssignment = async ({ name, startDate, endDate, grou
           let answerFileContent = null;
         if (answerFile && s3AnswerKey) {
             answerFileContent = await fs.readFile(answerFile.path);
-            if (answerFileContent.length === 0) throw new Error("The answer file cannot be empty.");
+            if (answerFileContent.length === 0) throw new Error("The file cannot be empty and uploaded answer.");
             assignmentData.answerBucketName = process.env.S3_BUCKET_NAME;
             assignmentData.answerKey = s3AnswerKey;
             assignmentData.answerPath = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3AnswerKey}`;
@@ -132,18 +132,16 @@ export const _internalCreateAssignment = async ({ name, startDate, endDate, grou
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
       const assignmentFile = req.files?.file?.[0];
     const answerFile = req.files?.answerFile?.[0];
+    const {teacherNotes} = req.body;
+    if(!assignmentFile&& !teacherNotes )    return next(new Error("The assignment file or notes is required.", { cause: 400 }));
 
-    if (!assignmentFile) {
-        if (answerFile?.path) await fs.unlink(answerFile.path);
-        return next(new Error("The main assignment file is required.", { cause: 400 }));
-    }
-
+  
+const file =assignmentFile;
     const newAssignment = await _internalCreateAssignment({
         ...req.validatedData,
-        file: assignmentFile,
+        file,
         teacherId: req.user._id,       
-         answerFile: answerFile, // Pass the optional answer file
-
+         answerFile,
     });
     res.status(201).json({ message: "Assignment created successfully", assignment: newAssignment });
 });
