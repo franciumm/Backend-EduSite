@@ -1,7 +1,6 @@
 // src/Modules/Sections/controller/section.controller.js
 import { asyncHandler } from '../../../utils/erroHandling.js';
 import { sectionModel } from '../../../../DB/models/section.model.js';
-import { gradeModel } from "../../../../DB/models/grades.model.js";
 import studentModel from '../../../../DB/models/student.model.js';
 import mongoose from 'mongoose';
 import { _internalCreateAssignment } from '../../Assignments/controller/start.js';
@@ -45,11 +44,8 @@ const propagateSectionToStreams = async ({ section, session }) => {
     }
 };
 
-export const _internalCreateSection = async ({ name, description, gradeId, groupIds, teacherId, itemsToAdd }) => {
-    // 1. Validation for core fields remains the same.
-    if (!gradeId || !mongoose.Types.ObjectId.isValid(gradeId)) {
-        throw new Error("A valid Grade ID is required to create a section.");
-    }
+export const _internalCreateSection = async ({ name, description, groupIds, teacherId, itemsToAdd }) => {
+  
     if (!Array.isArray(groupIds) || groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
         throw new Error("At least one valid Group ID is required to create a section.");
     }
