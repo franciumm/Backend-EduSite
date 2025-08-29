@@ -8,7 +8,7 @@ import { submissionStatusModel } from '../../../../DB/models/submissionStatus.mo
 import { pagination } from "../../../utils/pagination.js";
 
 
-const getAndHydrateGroupsViaAggregation = async (initialMatch, skip, limit) => {
+const getAndHydrateGroupsViaAggregation = async (initialMatch, skip=0 , limit=5) => {
     const pipeline = [
         // Stage 1: Initial Filter - Find only the groups the user is allowed to see.
         { $match: initialMatch },
