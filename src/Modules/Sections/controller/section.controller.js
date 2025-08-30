@@ -293,7 +293,7 @@ export const deleteSection = asyncHandler(async (req, res, next) => {
         // Step 4: If the hook succeeds, commit the transaction.
         await session.commitTransaction();
 
-        res.status(200).json({ message: "Section and all linked content deleted successfully." });
+        res.status(200).json({ message: "Section deleted successfully." });
 
     } catch (error) {
         // If any error occurred (either here or in the hook), abort the transaction.
