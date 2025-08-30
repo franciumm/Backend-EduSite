@@ -13,6 +13,9 @@ import { contentStreamModel } from '../../../../DB/models/contentStream.model.js
 import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
 import { toZonedTime } from 'date-fns-tz'; // Import for timezone handling
+import { assignmentModel } from '../../../../DB/models/assignment.model.js';
+import { examModel } from '../../../../DB/models/exams.model.js';
+import materialModel from '../../../../DB/models/material.model.js';
 
 function capitalize(str) {
     if (!str) return '';
@@ -262,21 +265,20 @@ export const viewSectionById = asyncHandler(async (req, res, next) => {
 export const deleteSection = asyncHandler(async (req, res, next) => {
     const { sectionId } = req.params;
 
-    // A transaction is crucial here to ensure all-or-nothing deletion.
+    // A transaction is still crucial to ensure the entire operation is atomic.
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-        // Step 1: Fetch the complete section document within the transaction.
+        // Step 1: Fetch the section document to perform checks.
         const section = await sectionModel.findById(sectionId).session(session);
 
-        // Step 2: Check if the section exists.
         if (!section) {
-            await session.abortTransaction();
+            await session.abortTransaction(); // No need to continue if not found
             return next(new Error("Section not found.", { cause: 404 }));
         }
 
-        // Step 3: Perform authorization checks.
+        // Step 2: Perform authorization checks (Controller's responsibility).
         const isMainTeacher = req.user.role === 'main_teacher';
         const isOwner = section.createdBy.equals(req.user._id);
 
@@ -285,47 +287,26 @@ export const deleteSection = asyncHandler(async (req, res, next) => {
             return next(new Error("Forbidden: You are not authorized to delete this section.", { cause: 403 }));
         }
 
-        // Step 4: Fetch all linked documents that need to be deleted.
-        const [assignmentsToDelete, examsToDelete, materialsToDelete] = await Promise.all([
-            assignmentModel.find({ '_id': { $in: section.linkedAssignments } }).session(session),
-            examModel.find({ '_id': { $in: section.linkedExams } }).session(session),
-            materialModel.find({ '_id': { $in: section.linkedMaterials } }).session(session)
-        ]);
-
-        // Step 5: Create an array of deletion promises. 
-        // Calling .deleteOne() on each document instance triggers the S3 cleanup hooks.
-        const deletionPromises = [
-            ...assignmentsToDelete.map(doc => doc.deleteOne({ session })),
-            ...examsToDelete.map(doc => doc.deleteOne({ session })),
-            ...materialsToDelete.map(doc => doc.deleteOne({ session }))
-        ];
-
-        // Also, delete the content stream entry for the section itself.
-        deletionPromises.push(
-            contentStreamModel.deleteMany({ contentId: sectionId, contentType: 'section' }, { session })
-        );
-
-        // Step 6: Execute all deletions in parallel.
-        await Promise.all(deletionPromises);
-
-        // Step 7: Finally, delete the section document itself.
+        // Step 3: Trigger the deletion. The pre('deleteOne') hook will now run automatically.
         await section.deleteOne({ session });
 
-        // Step 8: If all operations succeed, commit the transaction.
+        // Step 4: If the hook succeeds, commit the transaction.
         await session.commitTransaction();
 
-        res.status(200).json({ message: "Section deleted successfully." });
+        res.status(200).json({ message: "Section and all linked content deleted successfully." });
 
     } catch (error) {
-        // If any error occurred, abort the entire transaction.
+        // If any error occurred (either here or in the hook), abort the transaction.
         await session.abortTransaction();
-        console.error("Section deletion failed:", error); // Log the actual error
+        console.error("Section deletion failed:", error); 
         return next(new Error("Failed to delete section and its content. The operation was rolled back.", { cause: 500 }));
     } finally {
         // Always end the session.
         await session.endSession();
     }
 });
+
+
 export const getSections = asyncHandler(async (req, res, next) => {
     // 1. Initial setup from request
     const { page = 1, size = 10, groupId } = req.query;
