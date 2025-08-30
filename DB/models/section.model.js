@@ -1,6 +1,6 @@
 // DB/models/section.model.js
 
-import { Schema, model } from "mongoose";
+import mongoose, { Schema, model } from "mongoose";
 
 const sectionSchema = new Schema(
   {
@@ -46,14 +46,11 @@ const sectionSchema = new Schema(
 sectionSchema.index({ name: 1 }, { unique: true });
 sectionSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
   try {
-    // IMPORTANT: Use mongoose.model() to avoid circular dependency errors.
     const assignmentModel = mongoose.model('assignment');
     const examModel = mongoose.model('exam');
     const materialModel = mongoose.model('material');
     const contentStreamModel = mongoose.model('contentStream');
 
-    // Get the session from the current operation, if it exists.
-    // This allows the hook to participate in the transaction started in the controller.
     const session = this.$session();
 
     // Fetch all linked documents that need to be deleted.
