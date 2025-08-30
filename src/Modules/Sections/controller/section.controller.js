@@ -27,7 +27,6 @@ const propagateSectionToStreams = async ({ section, session }) => {
         userId: student._id,
         contentId: section._id,
         contentType: 'section',
-        gradeId: section.gradeId,
         groupId: student.groupId
     }));
 
@@ -36,7 +35,6 @@ const propagateSectionToStreams = async ({ section, session }) => {
         userId: section.createdBy,
         contentId: section._id,
         contentType: 'section',
-        gradeId: section.gradeId,
     });
 
     if (streamEntries.length > 0) {
@@ -55,7 +53,7 @@ try{
             session.startTransaction();
 
     // 2. Uniqueness check remains the same.
-    const existingSection = await sectionModel.findOne({ name, gradeId });
+    const existingSection = await sectionModel.findOne({ name });
     if (existingSection) {
         throw new Error("A section with this name already exists for this grade. Please choose a different name.");
     }
@@ -86,7 +84,7 @@ try{
 
 
   const [section] = await sectionModel.create([{
-            name, description, gradeId, groupIds,
+            name, description, groupIds,
             createdBy: teacherId,
             ...initialLinkedContent
         }], { session });
@@ -242,7 +240,7 @@ export const viewSectionById = asyncHandler(async (req, res, next) => {
         },
         {
             $project: {
-                _id: 1, name: 1, description: 1,gradeId: 1,
+                _id: 1, name: 1, description: 1,
                 content: {
                     $concatArrays: [
                         buildContentMap("$assignments", CONTENT_TYPES.ASSIGNMENT),
@@ -330,7 +328,7 @@ export const deleteSection = asyncHandler(async (req, res, next) => {
 });
 export const getSections = asyncHandler(async (req, res, next) => {
     // 1. Initial setup from request
-    const { page = 1, size = 10, groupId, gradeId } = req.query;
+    const { page = 1, size = 10, groupId } = req.query;
     const { user, isteacher } = req;
     const isTeacher = isteacher;
     const { limit, skip } = pagination({ page, size });
@@ -348,10 +346,7 @@ export const getSections = asyncHandler(async (req, res, next) => {
 
     let query = { _id: { $in: sectionIds } };
 
- if (gradeId) {
-        if (!mongoose.Types.ObjectId.isValid(gradeId)) return next(new Error("A valid Grade ID is required.", { cause: 400 }));
-        query.gradeId = gradeId;
-    }
+
     if (groupId) {
         if (!mongoose.Types.ObjectId.isValid(groupId)) return next(new Error("A valid Group ID is required.", { cause: 400 }));
         // This checks if the section is linked to the specified group.
