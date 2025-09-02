@@ -13,37 +13,21 @@ import { contentStreamModel } from "../../../../DB/models/contentStream.model.js
 import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
 
 const propagateExamToStreams = async ({ exam, session }) => {
-    const students = await studentModel.find({ groupIds: { $in: exam.groupIds } }).select('_id groupIds').session(session);
-    if (students.length === 0 && !exam.createdBy) return;
-
-    const streamEntries = [];
-    const statusEntries = [];
-
-    students.forEach(student => {
-        const commonGroupIds = student.groupIds.filter(sgid => 
-            exam.groupIds.some(egid => egid.equals(sgid))
-        );
-
-        // Create an entry for each common group
-        commonGroupIds.forEach(groupId => {
-            streamEntries.push({
-                userId: student._id, contentId: exam._id, contentType: 'exam', groupId: groupId
-            });
-            statusEntries.push({
-                studentId: student._id, contentId: exam._id, contentType: 'exam', submissionModel: 'subexam',
-                groupId: groupId, status: 'assigned'
-            });
-        });
+     await synchronizeContentStreams({
+        content: exam,
+        oldGroupIds: [], // There are no old groups on creation
+        newGroupIds: exam.groupIds,
+        session
     });
-
-    // Add teacher access (unchanged)
-    streamEntries.push({ userId: exam.createdBy, contentId: exam._id, contentType: 'exam' });
-
-    await Promise.all([
-        contentStreamModel.insertMany(streamEntries, { session }),
-        statusEntries.length > 0 ? submissionStatusModel.insertMany(statusEntries, { session }) : Promise.resolve()
-    ]);
+    await contentStreamModel.updateOne(
+        { userId: exam.createdBy, contentId: exam._id },
+        { 
+            $set: { contentType: 'exam' },
+        },
+        { upsert: true, session }
+    );
 };
+
 
 export const createExam = asyncHandler(async (req, res, next) => {
     const examFile = req.files?.file?.[0];
