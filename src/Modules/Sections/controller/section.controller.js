@@ -50,63 +50,60 @@ export const _internalCreateSection = async ({ name, description, groupIds, teac
     if (!Array.isArray(groupIds) || groupIds.length === 0 || groupIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
         throw new Error("At least one valid Group ID is required to create a section.");
     }
-        const session = await mongoose.startSession();
-try{
+    
+    const session = await mongoose.startSession();
+    
+    try {
+        session.startTransaction();
 
-            session.startTransaction();
+        // 2. Uniqueness check: Ensure the section name is unique within any of the target groups.
+        const existingSection = await sectionModel.findOne({ name, groupIds: { $in: groupIds } }).session(session);
+        if (existingSection) {
+            throw new Error("A section with this name already exists for one of the selected groups. Please choose a different name.");
+        }
 
-    // 2. Uniqueness check remains the same.
-    const existingSection = await sectionModel.findOne({ name });
-    if (existingSection) {
-        throw new Error("A section with this name already exists for this grade. Please choose a different name.");
-    }
+        // --- NEW: Logic to handle optional initial linking ---
+        const initialLinkedContent = {};
+        if (itemsToAdd && Array.isArray(itemsToAdd) && itemsToAdd.length > 0) {
+            const capitalize = (str) => str ? str.charAt(0).toUpperCase() + str.slice(1) : '';
 
-
-
-    // --- NEW: Logic to handle optional initial linking ---
-    const initialLinkedContent = {};
-    if (itemsToAdd && Array.isArray(itemsToAdd) && itemsToAdd.length > 0) {
-        const capitalize = (str) => str ? str.charAt(0).toUpperCase() + str.slice(1) : '';
-
-        itemsToAdd.forEach(item => {
-            // Basic validation for each item in the array
-            if (item && item.type && item.id && mongoose.Types.ObjectId.isValid(item.id)) {
-                const fieldName = `linked${capitalize(item.type)}s`;
-                
-                if (!initialLinkedContent[fieldName]) {
-                    initialLinkedContent[fieldName] = [];
+            itemsToAdd.forEach(item => {
+                // Basic validation for each item in the array
+                if (item && item.type && item.id && mongoose.Types.ObjectId.isValid(item.id)) {
+                    const fieldName = `linked${capitalize(item.type)}s`;
+                    
+                    if (!initialLinkedContent[fieldName]) {
+                        initialLinkedContent[fieldName] = [];
+                    }
+                    // Add the ID, ensuring no duplicates within the initial payload
+                    if (!initialLinkedContent[fieldName].includes(item.id)) {
+                        initialLinkedContent[fieldName].push(item.id);
+                    }
                 }
-                // Add the ID, ensuring no duplicates within the initial payload
-                if (!initialLinkedContent[fieldName].includes(item.id)) {
-                    initialLinkedContent[fieldName].push(item.id);
-                }
-            }
-        });
-    }
-    // --- End of new logic ---
+            });
+        }
+        // --- End of new logic ---
 
-
-  const [section] = await sectionModel.create([{
-            name, description, groupIds,
+        const [section] = await sectionModel.create([{
+            name, 
+            description, 
+            groupIds,
             createdBy: teacherId,
             ...initialLinkedContent
         }], { session });
 
-
-            await propagateSectionToStreams({ section, session });
+        await propagateSectionToStreams({ section, session });
 
         await session.commitTransaction();
-    return section;}catch (error) {
+        return section;
+    } catch (error) {
         await session.abortTransaction();
         // Re-throw to be handled by the calling asyncHandler
         throw error;
     } finally {
         await session.endSession();
     }
-
-   
 };
-
 
 
 export const createSection = asyncHandler(async (req, res, next) => {
