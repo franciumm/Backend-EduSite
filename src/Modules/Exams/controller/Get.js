@@ -32,7 +32,7 @@ export const getExams = asyncHandler(async (req, res, next) => {
         }
         const exams = await examModel
         .find(query)
-        .skip(skip) // <-- 3. APPLY PAGINATION
+        .skip(skip) 
         .limit(limit)
         .lean();
         return res.status(200).json({ message: "Exams fetched successfully", exams: exams });

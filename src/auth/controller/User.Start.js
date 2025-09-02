@@ -5,7 +5,6 @@ import bycrypt from 'bcrypt'
 import SendMail from "../../utils/Mailer.js";
 import { generateToken } from "../../utils/tokenFunctions.js";
 import { teacherModel } from "../../../DB/models/teacher.model.js";
-import { gradeModel } from "../../../DB/models/grades.model.js";
 import  studentModel  from "../../../DB/models/student.model.js";
 import { groupModel } from "../../../DB/models/groups.model.js"; 
 import { SubassignmentModel } from "../../../DB/models/submitted_assignment.model.js";
@@ -13,25 +12,21 @@ import { promises as fs } from 'fs';
 import { SubexamModel } from "../../../DB/models/submitted_exams.model.js";
 
 export const Signup = asyncHandler(async(req,res,next)=>{
-    const {email,parentemail,userName,firstName,lastName,password,grade ,  parentphone ,phone,cPassword}= req.body ;
+    const {email,parentemail,userName,firstName,lastName,password ,  parentphone ,phone,cPassword}= req.body ;
     
     if (password !== cPassword) {
         return next(new Error("Passwords do not match.", { cause: 400 }));
     }
-    const [userExists,gradeOBJ]= await Promise.all([ 
-        studentModel.findOne({ $or: [{ email }, { userName }, { phone }] }),
-        gradeModel.findOne({ grade }).lean()]);
+    const [userExists]= await Promise.all([ 
+        studentModel.findOne({ $or: [{ email }, { userName }, { phone }] })]);
      
     if (userExists) {
         return next(new Error('User with this email, username, or phone already exists.', { cause: 409 }));
     }
-   
-    if(!(gradeOBJ)){
-        return next( Error('Invalid Grade Id ', {cause:409}));
-    }
+  
     
     
-    const newUser ={firstName,lastName,email,parentemail,gradeId: gradeOBJ._id, userName,password ,parentPhone: parentphone , phone ,confirmEmail:true };
+    const newUser ={firstName,lastName,email,parentemail, userName,password ,parentPhone: parentphone , phone ,confirmEmail:true };
     
     const token = jwt.sign({  email, user:newUser }, process.env.EMAIL_SIG, { expiresIn: 60 * 120 });
     
@@ -175,13 +170,8 @@ export const getMyProfile = asyncHandler(async (req, res, next) => {
             });
 
             if (groupIdsToFetch.size > 0) {
-                // 2. Perform ONE efficient query to get all required groups and their grades.
                 const groups = await groupModel.find({
                     _id: { $in: Array.from(groupIdsToFetch) }
-                }).populate({
-                    path: 'gradeid',
-                    select: 'grade -_id', // Select only the 'grade' number
-                    model: 'grade'
                 }).lean();
 
                 // 3. Create a Map for instant lookups (ID -> Full Group Object).
@@ -193,15 +183,12 @@ export const getMyProfile = asyncHandler(async (req, res, next) => {
                     if (Array.isArray(idArray)) {
                         populatedPermissions[key] = idArray.map(id => {
                             const group = groupMap.get(id.toString());
-                            // Safety check in case a group or its grade was deleted from the DB
-                            if (!group || !group.gradeid) return null;
+                            if (!group ) return null;
                             
                             // 5. Shape the data exactly as requested.
                             return {
                                 groupId: group._id,
-                                groupname: group.groupname,
-                                grade: group.gradeid.grade
-                            };
+                                groupname: group.groupname                            };
                         }).filter(Boolean); // Remove any nulls from deleted records
                     }
                 }
@@ -218,7 +205,6 @@ export const getMyProfile = asyncHandler(async (req, res, next) => {
         account = await studentModel.findById(userId)
             .select({ password: 0, __v: 0 })
             .populate({ path: "groupId", select: "_id groupname", model: "group" }) 
-            .populate({ path: "gradeId", select: "grade", model: "grade" })
             .lean();
     }
 
@@ -290,7 +276,6 @@ if(!isteacher){
   const limit = Math.max(1, parseInt(req.query.limit, 10) || 10);
   const skip  = (page - 1) * limit;
 
-  // 3️⃣ Query students in this grade *and* NOT in any group
   const filter = {
     groupId: null                  // unassigned to any group
   };
