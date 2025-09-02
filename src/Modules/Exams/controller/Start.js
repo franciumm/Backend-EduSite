@@ -11,6 +11,7 @@ import { toZonedTime } from 'date-fns-tz';
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
 import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
 import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
+import { synchronizeContentStreams } from "../../../utils/streamHelpers.js";
 
 const propagateExamToStreams = async ({ exam, session }) => {
      await synchronizeContentStreams({
