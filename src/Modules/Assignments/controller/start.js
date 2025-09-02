@@ -12,37 +12,16 @@ import { contentStreamModel } from "../../../../DB/models/contentStream.model.js
 import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
 import { synchronizeContentStreams } from '../../../utils/streamHelpers.js';
 
-
 const propagateAssignmentToStreams = async ({ assignment, session }) => {
-    const students = await studentModel.find({ groupIds: { $in: assignment.groupIds } }).select('_id groupIds').session(session);
-    if (students.length === 0 && !assignment.createdBy) return;
-
-    const streamEntries = [];
-    const statusEntries = [];
-
-    students.forEach(student => {
-        const commonGroupIds = student.groupIds.filter(sgid => 
-            assignment.groupIds.some(agid => agid.equals(sgid))
-        );
-
-        commonGroupIds.forEach(groupId => {
-            streamEntries.push({
-                userId: student._id, contentId: assignment._id, contentType: 'assignment', groupId: groupId
-            });
-            statusEntries.push({
-                studentId: student._id, contentId: assignment._id, contentType: 'assignment', submissionModel: 'subassignment',
-                groupId: groupId, status: 'assigned'
-            });
-        });
-    });
-
-    streamEntries.push({ userId: assignment.createdBy, contentId: assignment._id, contentType: 'assignment' });
+   
     await synchronizeContentStreams({
         content: assignment,
-        oldGroupIds: [],
+        oldGroupIds: [], // There are no old groups on creation
         newGroupIds: assignment.groupIds,
         session
     });
+
+   
     await contentStreamModel.updateOne(
         { userId: assignment.createdBy, contentId: assignment._id },
         { 
@@ -50,11 +29,6 @@ const propagateAssignmentToStreams = async ({ assignment, session }) => {
         },
         { upsert: true, session }
     );
-
-    await Promise.all([
-        contentStreamModel.insertMany(streamEntries, { session }),
-        statusEntries.length > 0 ? submissionStatusModel.insertMany(statusEntries, { session }) : Promise.resolve()
-    ]);
 };
 export const _internalCreateAssignment =async ({ name, startDate, endDate, groupIds, teacherId, allowSubmissionsAfterDueDate, teacherNotes, mainFile, answerFile }) => {
           const slug =mainFile? slugify(name, { lower: true, strict: true }):null;
