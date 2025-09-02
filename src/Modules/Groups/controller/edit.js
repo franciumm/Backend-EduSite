@@ -82,12 +82,15 @@ export const removeStudent = asyncHandler(async(req,res,next)=>{
     }
 });
 
-// REFACTORED addStudentsToGroup
 export const addStudentsToGroup = asyncHandler(async (req, res, next) => {
     const { groupid, studentIds } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(groupid)) return res.status(400).json({ message: "Invalid Group ID format" });
-    if (!Array.isArray(studentIds) || studentIds.length === 0) return res.status(400).json({ message: "studentIds must be a non-empty array" });
+    if (!mongoose.Types.ObjectId.isValid(groupid)) {
+        return res.status(400).json({ message: "Invalid Group ID format" });
+    }
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+        return res.status(400).json({ message: "studentIds must be a non-empty array" });
+    }
     const uniqueStudentIds = [...new Set(studentIds)];
 
     const session = await mongoose.startSession();
@@ -100,40 +103,37 @@ export const addStudentsToGroup = asyncHandler(async (req, res, next) => {
         ]);
 
         if (!group) throw new Error("Group not found", { cause: 404 });
-        if (students.length !== uniqueStudentIds.length) throw new Error("One or more students not found", { cause: 404 });
-
-        // Use bulk operations for efficiency
-        const studentBulkOps = [];
-        const studentsAdded = [];
-
-        for (const student of students) {
-            // CHANGED: Logic now checks if the group ID is already in the array
-            const isAlreadyEnrolled = student.groupIds.some(id => id.equals(group._id));
-            if (!isAlreadyEnrolled) {
-                studentBulkOps.push({
-                    updateOne: {
-                        filter: { _id: student._id },
-                        update: { $addToSet: { groupIds: groupid } }
-                    }
-                });
-                studentsAdded.push(student);
-            }
+        if (students.length !== uniqueStudentIds.length) {
+            throw new Error("One or more students not found", { cause: 404 });
         }
 
-        if (studentsAdded.length > 0) {
-            await studentModel.bulkWrite(studentBulkOps, { session });
-            const studentIdsToAdd = studentsAdded.map(s => s._id);
-            await groupModel.findByIdAndUpdate(groupid, { $addToSet: { enrolledStudents: { $each: studentIdsToAdd } } }, { session });
+        // Filter out students who are already in the group
+        const studentsToAdd = students.filter(student => !student.groupIds.some(id => id.equals(group._id)));
 
-            for (const student of studentsAdded) {
-                await fanOutContentToStudent({ studentId: student._id, groupId: groupid, session });
-            }
+        if (studentsToAdd.length > 0) {
+            const studentIdsToAdd = studentsToAdd.map(s => s._id);
+
+            // Modify documents in memory first
+            studentsToAdd.forEach(student => student.groupIds.addToSet(group._id));
+            studentIdsToAdd.forEach(id => group.enrolledStudents.addToSet(id));
+
+            // Prepare all save operations
+            const studentSavePromises = studentsToAdd.map(student => student.save({ session }));
+            const groupSavePromise = group.save({ session });
+
+            // Execute all saves concurrently
+            await Promise.all([...studentSavePromises, groupSavePromise]);
+
+            // Fan out content to all newly added students in parallel for better performance
+            await Promise.all(studentsToAdd.map(student =>
+                fanOutContentToStudent({ studentId: student._id, groupId: groupid, session })
+            ));
         }
 
         await session.commitTransaction();
         
         const finalGroup = await groupModel.findById(groupid).populate("enrolledStudents", "_id userName firstName");
-        res.status(200).json({ message: `${studentsAdded.length} student(s) added successfully.`, group: finalGroup });
+        res.status(200).json({ message: `${studentsToAdd.length} student(s) added successfully.`, group: finalGroup });
 
     } catch (error) {
         await session.abortTransaction();
@@ -142,7 +142,6 @@ export const addStudentsToGroup = asyncHandler(async (req, res, next) => {
         await session.endSession();
     }
 });
-
 
 
 
