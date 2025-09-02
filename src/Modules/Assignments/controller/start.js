@@ -39,10 +39,18 @@ const propagateAssignmentToStreams = async ({ assignment, session }) => {
     streamEntries.push({ userId: assignment.createdBy, contentId: assignment._id, contentType: 'assignment' });
     await synchronizeContentStreams({
         content: assignment,
-        oldGroupIds: [], // There are no old groups on creation
+        oldGroupIds: [],
         newGroupIds: assignment.groupIds,
         session
     });
+    await contentStreamModel.updateOne(
+        { userId: assignment.createdBy, contentId: assignment._id },
+        { 
+            $set: { contentType: 'assignment' },
+        },
+        { upsert: true, session }
+    );
+
     await Promise.all([
         contentStreamModel.insertMany(streamEntries, { session }),
         statusEntries.length > 0 ? submissionStatusModel.insertMany(statusEntries, { session }) : Promise.resolve()
