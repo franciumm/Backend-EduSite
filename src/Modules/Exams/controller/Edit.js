@@ -7,7 +7,7 @@ import mongoose from "mongoose";
 import studentModel from "../../../../DB/models/student.model.js";
 import { groupModel } from "../../../../DB/models/groups.model.js";
 import { toZonedTime, fromZonedTime, format } from 'date-fns-tz';
-import { deleteFileFromS3, uploadFileToS3 } from "../../../utils/S3Client.js";
+import { deleteFileFromS3 } from "../../../utils/S3Client.js";
 import fs from 'fs'; 
 import { canAccessContent } from "../../../middelwares/contentAuth.js";
 import { sectionModel } from "../../../../DB/models/section.model.js";
