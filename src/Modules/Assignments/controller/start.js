@@ -105,14 +105,13 @@ export const submitAssignment = asyncHandler(async (req, res, next) => {
     if (!hasAccess) return next(new Error("You are not authorized to submit to this assignment.", { cause: 403 }));
 
     const [assignment, student] = await Promise.all([
-        assignmentModel.findById(assignmentId).select('groupIds endDate').lean(),
+       assignmentModel.findById(assignmentId).select('name groupIds endDate allowSubmissionsAfterDueDate').lean(),
         studentModel.findById(user._id).select('groupIds').lean(),
     ]);
     
     if (!assignment) { return next(new Error("Assignment not found.", { cause: 404 })); }
     if (!student) { return next(new Error("Student not found.", { cause: 404 })); }
 
-    // --- Unambiguous Context Resolution Logic ---
     const commonGroupIds = student.groupIds.filter(sgid => 
         assignment.groupIds.some(agid => agid.equals(sgid))
     );
