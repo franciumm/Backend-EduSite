@@ -286,7 +286,6 @@ export const getInviteLink = asyncHandler(async (req, res, next) => {
 });
 
 
-
 export const archiveOrRestore= asyncHandler(async(req,res,next)=>{
     const {_id,archivedOrRestore} =req.body;
     if (!mongoose.Types.ObjectId.isValid(_id)) {
