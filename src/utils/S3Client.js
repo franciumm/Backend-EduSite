@@ -14,26 +14,7 @@ export const s3 = new S3Client({
   },
 });
 
-// Upload File to S3
-export const uploadFileToS3 = async (bucketName, key, body, contentType) => {
-  const params = {
-    Bucket: bucketName,
-    Key: key,
-    Body: body,
-    ContentType: contentType,
-    ACL: "private", // Adjust ACL as needed
-  };
 
-  try {
-    const command = new PutObjectCommand(params);
-    const response = await s3.send(command);
-    console.log(`File uploaded successfully: ${key}`);
-    return response;
-  } catch (error) {
-    console.error(`Error uploading file to S3: ${error.message}`);
-    throw new Error("Error uploading file to S3");
-  }
-};
 
 // Delete File from S3
 export const deleteFileFromS3 = async (bucketName, key) => {

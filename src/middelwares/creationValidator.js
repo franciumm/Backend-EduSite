@@ -3,6 +3,7 @@ import { asyncHandler } from '../utils/erroHandling.js';
 import { toZonedTime } from 'date-fns-tz';
 import { promises as fs } from 'fs';
 import { CONTENT_TYPES } from '../utils/constants.js';
+import { deleteFileFromS3 } from '../utils/S3Client.js';
 
 const uaeTimeZone = 'Asia/Dubai';
 
@@ -14,13 +15,19 @@ export const creationValidator = (contentType) => {
           const mainFile = req.files?.file?.[0];
         const answerFile = req.files?.answerFile?.[0];
 
-          const cleanupFiles = async () => {
-            if (mainFile?.path) await fs.unlink(mainFile.path).catch(e => console.error("Error cleaning up main temp file:", e));
-            if (answerFile?.path) await fs.unlink(answerFile.path).catch(e => console.error("Error cleaning up answer temp file:", e));
+         const cleanupFiles = async () => {
+            const cleanupPromises = [];
+            if (mainFile) {
+                cleanupPromises.push(deleteFileFromS3(mainFile.bucket, mainFile.key).catch(e => console.error("Error cleaning up main S3 file:", e)));
+            }
+            if (answerFile) {
+                cleanupPromises.push(deleteFileFromS3(answerFile.bucket, answerFile.key).catch(e => console.error("Error cleaning up answer S3 file:", e)));
+            }
+            await Promise.all(cleanupPromises);
         };
+       
 
-        // 1. File and Teacher Validation
-        // Check for the main file from req.files
+        
         if (!mainFile) {
             await cleanupFiles(); // Clean up answer file if it exists
             return next(new Error(`Please upload the ${contentType} file.`, { cause: 400 }));

@@ -2,106 +2,78 @@ import path from 'path';
 import slugify from "slugify";
 import { asyncHandler } from "../../../utils/erroHandling.js";
 import { assignmentModel } from "../../../../DB/models/assignment.model.js";
-import { uploadFileToS3, deleteFileFromS3 } from "../../../utils/S3Client.js";
+import {  deleteFileFromS3 } from "../../../utils/S3Client.js";
 import { SubassignmentModel } from "../../../../DB/models/submitted_assignment.model.js";
 import studentModel from "../../../../DB/models/student.model.js";
 import mongoose from "mongoose";
-import { promises as fs } from 'fs';
 import { toZonedTime } from 'date-fns-tz';
 import { canAccessContent } from '../../../middelwares/contentAuth.js';
 import { contentStreamModel } from "../../../../DB/models/contentStream.model.js";
 import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
-
+import { synchronizeContentStreams } from '../../../utils/streamHelpers.js';
 
 
 const propagateAssignmentToStreams = async ({ assignment, session }) => {
-    // 1. Get students from groups
-    const studentsFromGroups = await studentModel.find({ groupId: { $in: assignment.groupIds } }).select('_id groupId').session(session);
+    const students = await studentModel.find({ groupIds: { $in: assignment.groupIds } }).select('_id groupIds').session(session);
+    if (students.length === 0 && !assignment.createdBy) return;
 
-    // 2. Combine with directly enrolled students, ensuring uniqueness
-    const studentMap = new Map();
-    studentsFromGroups.forEach(s => studentMap.set(s._id.toString(), { userId: s._id, groupId: s.groupId }));
-    (assignment.enrolledStudents || []).forEach(studentId => {
-        if (!studentMap.has(studentId.toString())) {
-            // A directly enrolled student might not have a groupId relevant to this assignment
-            studentMap.set(studentId.toString(), { userId: studentId, groupId: null });
-        }
+    const streamEntries = [];
+    const statusEntries = [];
+
+    students.forEach(student => {
+        const commonGroupIds = student.groupIds.filter(sgid => 
+            assignment.groupIds.some(agid => agid.equals(sgid))
+        );
+
+        commonGroupIds.forEach(groupId => {
+            streamEntries.push({
+                userId: student._id, contentId: assignment._id, contentType: 'assignment', groupId: groupId
+            });
+            statusEntries.push({
+                studentId: student._id, contentId: assignment._id, contentType: 'assignment', submissionModel: 'subassignment',
+                groupId: groupId, status: 'assigned'
+            });
+        });
     });
 
-    const allStudents = Array.from(studentMap.values());
-    if (allStudents.length === 0 && !assignment.createdBy) return;
-
-    // 3. Create Stream Entries for ALL students + the teacher
-    const streamEntries = allStudents.map(s => ({
-        userId: s.userId,
-        contentId: assignment._id,
-        contentType: 'assignment',
-        groupId: s.groupId // This can correctly be null for directly enrolled students
-    }));
-    streamEntries.push({
-        userId: assignment.createdBy,
-        contentId: assignment._id,
-        contentType: 'assignment',
+    streamEntries.push({ userId: assignment.createdBy, contentId: assignment._id, contentType: 'assignment' });
+    await synchronizeContentStreams({
+        content: assignment,
+        oldGroupIds: [], // There are no old groups on creation
+        newGroupIds: assignment.groupIds,
+        session
     });
-
-    // 4. Create Status Entries for ALL students, using the correct 'allStudents' list
-    const statusEntries = allStudents.map(s => ({
-        studentId: s.userId,
-        contentId: assignment._id,
-        contentType: 'assignment',
-        submissionModel: 'subassignment',
-        // The groupId from the map is the correct context for the status entry
-        groupId: s.groupId,
-        status: 'assigned'
-    }));
-
-    // 5. Insert into database
     await Promise.all([
         contentStreamModel.insertMany(streamEntries, { session }),
         statusEntries.length > 0 ? submissionStatusModel.insertMany(statusEntries, { session }) : Promise.resolve()
     ]);
 };
-export const _internalCreateAssignment = async ({ name, startDate, endDate, groupIds, file, teacherId, allowSubmissionsAfterDueDate ,answerFile,teacherNotes}) => {
-        const slug =file? slugify(name, { lower: true, strict: true }):null;
+export const _internalCreateAssignment =async ({ name, startDate, endDate, groupIds, teacherId, allowSubmissionsAfterDueDate, teacherNotes, mainFile, answerFile }) => {
+          const slug =mainFile? slugify(name, { lower: true, strict: true }):null;
 
-    const s3Key = file? `assignments/${slugify(name, { lower: true, strict: true })}-${Date.now()}${path.extname(file.originalname)}`:null;
-        const s3AnswerKey = answerFile ? `assignments/answers/${slug}-answer-${Date.now()}${path.extname(answerFile.originalname)}` : null;
-    const session = await mongoose.startSession();
+         const session = await mongoose.startSession();
 
     try {
                 session.startTransaction();
-
-        const fileContent = await fs.readFile(file.path);
-        if (fileContent.length === 0) throw new Error("Cannot create an assignment with an empty file.");
    const assignmentData = {
-            name,
-            slug,
-            startDate,
-            endDate,
-            groupIds,
+            name, slug, startDate, endDate, groupIds,
             allowSubmissionsAfterDueDate: allowSubmissionsAfterDueDate || false,
-            bucketName: process.env.S3_BUCKET_NAME,
-            key: s3Key,
-            path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
             createdBy: teacherId,
+            teacherNotes: teacherNotes,
+            bucketName: mainFile.bucket,
+            key: mainFile.key,
+            path: mainFile.location,
         };
-
-          let answerFileContent = null;
-        if (answerFile && s3AnswerKey) {
-            answerFileContent = await fs.readFile(answerFile.path);
-            if (answerFileContent.length === 0) throw new Error("The file cannot be empty and uploaded answer.");
-            assignmentData.answerBucketName = process.env.S3_BUCKET_NAME;
-            assignmentData.answerKey = s3AnswerKey;
-            assignmentData.answerPath = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3AnswerKey}`;
+   
+        
+        if (answerFile) {
+            assignmentData.answerBucketName = answerFile.bucket;
+            assignmentData.answerKey = answerFile.key;
+            assignmentData.answerPath = answerFile.location;
         }
         
-        const [newAssignment] = await assignmentModel.create([assignmentData], { session });
-  await propagateAssignmentToStreams({ assignment: newAssignment, session });
-        // 1. Upload to S3 first. If this fails, the DB is not touched.
-  await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, file.mimetype);
-        if (answerFile && s3AnswerKey && answerFileContent) {
-            await uploadFileToS3(process.env.S3_BUCKET_NAME, s3AnswerKey, answerFileContent, answerFile.mimetype);
-        }
+    const [newAssignment] = await assignmentModel.create([assignmentData], { session });
+        await propagateAssignmentToStreams({ assignment: newAssignment, session });
 
         await session.commitTransaction();
         return newAssignment;
@@ -111,129 +83,108 @@ export const _internalCreateAssignment = async ({ name, startDate, endDate, grou
 
     } catch (err) {
         await session.abortTransaction();
-        console.error("Internal assignment creation failed. Rolling back S3 files...", err);
-        // If any error occurred, attempt to clean up the S3 files.
-        await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key).catch(e => console.error("S3 assignment file rollback failed:", e));
-        if (s3AnswerKey) {
-            await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3AnswerKey).catch(e => console.error("S3 answer file rollback failed:", e));
-        }
-        throw err; // Re-throw the error for the calling service (hub or controller) to handle.
+        // S3 Rollback: If DB fails, delete the files that multer-s3 already uploaded.
+        if (mainFile) await deleteFileFromS3(mainFile.bucket, mainFile.key).catch(e => console.error("S3 assignment file rollback failed:", e));
+        if (answerFile) await deleteFileFromS3(answerFile.bucket, answerFile.key).catch(e => console.error("S3 answer file rollback failed:", e));
+        throw err;
+
     } finally {
          await session.endSession();
-        if (file?.path) {
-            await fs.unlink(file.path).catch(e => console.error(`Failed to delete temp file: ${file.path}`, e));
-        }
-        if (answerFile?.path) {
-            await fs.unlink(answerFile.path).catch(e => console.error(`Failed to delete temp file: ${answerFile.path}`, e));
-        }
+      
     }
 };
 
 export const CreateAssignment = asyncHandler(async (req, res, next) => {
-      const assignmentFile = req.files?.file?.[0];
+    const mainFile = req.files?.file?.[0];
     const answerFile = req.files?.answerFile?.[0];
     const {teacherNotes} = req.body;
-    if(!assignmentFile&& !teacherNotes )    return next(new Error("The assignment file or notes is required.", { cause: 400 }));
-
+ if (!mainFile && !teacherNotes) {
+        return next(new Error("The assignment file or notes is required.", { cause: 400 }));
+    }
   
-const file =assignmentFile;
-    const newAssignment = await _internalCreateAssignment({
+const newAssignment = await _internalCreateAssignment({
         ...req.validatedData,
-        file,
-        teacherId: req.user._id,       
-         answerFile,
+        teacherId: req.user._id,
+        mainFile,
+        answerFile,
     });
     res.status(201).json({ message: "Assignment created successfully", assignment: newAssignment });
 });
 
 
 export const submitAssignment = asyncHandler(async (req, res, next) => {
-    const { assignmentId, notes } = req.body;
-    const { user,isteacher  } = req;
+    const { assignmentId, notes } = req.body; // No groupId from frontend
+    const { user, isteacher } = req;
 
-    if (!req.file) {
-        return next(new Error("A file must be attached for submission.", { cause: 400 }));
-    }
-    if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) {
-        await fs.unlink(req.file.path);
-        return next(new Error("A valid assignmentId is required.", { cause: 400 }));
-    }
+    if (!req.file) return next(new Error("A file must be attached for submission.", { cause: 400 }));
+    if (!assignmentId || !mongoose.Types.ObjectId.isValid(assignmentId)) return next(new Error("A valid assignmentId is required.", { cause: 400 }));
+    
+    const hasAccess = await canAccessContent({ user, isTeacher: isteacher, contentId: assignmentId, contentType: 'assignment' });
+    if (!hasAccess) return next(new Error("You are not authorized to submit to this assignment.", { cause: 403 }));
 
-    // --- REFACTOR: Use the universal authorizer to check permissions ---
-      const hasAccess = await canAccessContent({
-        user,
-        isTeacher: isteacher,
-        contentId: assignmentId,
-        contentType: 'assignment'
-    });
-
-    if (!hasAccess) {
-        await fs.unlink(req.file.path);
-        return next(new Error("You are not authorized to submit to this assignment.", { cause: 403 }));
-    }
-    // --- END REFACTOR ---
-
-    const [assignment, student, fileContent] = await Promise.all([
-        assignmentModel.findById(assignmentId),
-        studentModel.findById(user._id).select('groupId').lean(),
-        fs.readFile(req.file.path)
+    const [assignment, student] = await Promise.all([
+        assignmentModel.findById(assignmentId).select('groupIds endDate').lean(),
+        studentModel.findById(user._id).select('groupIds').lean(),
     ]);
     
-    if (!assignment) { await fs.unlink(req.file.path); return next(new Error("Assignment not found.", { cause: 404 })); }
-    if (fileContent.length === 0) { await fs.unlink(req.file.path); return next(new Error("Cannot submit an empty file.", { cause: 400 })); }
-    
+    if (!assignment) { return next(new Error("Assignment not found.", { cause: 404 })); }
+    if (!student) { return next(new Error("Student not found.", { cause: 404 })); }
+
+    // --- Unambiguous Context Resolution Logic ---
+    const commonGroupIds = student.groupIds.filter(sgid => 
+        assignment.groupIds.some(agid => agid.equals(sgid))
+    );
+
+    if (commonGroupIds.length === 0) {
+        return next(new Error("Submission context is invalid. You do not share a group with this assignment.", { cause: 403 }));
+    }
+    if (commonGroupIds.length > 1) {
+        return next(new Error("Ambiguous submission context: This assignment exists in multiple groups you belong to. Please contact your teacher to resolve this.", { cause: 409 })); // 409 Conflict is appropriate here
+    }
+    const determinedGroupId = commonGroupIds[0]; // This is the one, unambiguous group
+    // --- End of Logic ---
+
     const uaeTimeZone = 'Asia/Dubai';
     const submissionTime = toZonedTime(new Date(), uaeTimeZone);
     const isLate = submissionTime > new Date(assignment.endDate);
 
     if (isLate && !assignment.allowSubmissionsAfterDueDate) {
-        await fs.unlink(req.file.path);
         return next(new Error("Cannot submit because the deadline has passed.", { cause: 403 }));
     }
 
-    const fileExtension = path.extname(req.file.originalname);
-    const s3Key = `AssignmentSubmissions/${assignmentId}/${user._id}_${submissionTime.getTime()}${fileExtension}`;
-    
     const session = await mongoose.startSession();
     try {
         session.startTransaction();
-        const currentVersionCount = await SubassignmentModel.countDocuments({ studentId: user._id, assignmentId }).session(session);
+        const currentVersionCount = await SubassignmentModel.countDocuments({ studentId: user._id, assignmentId, groupId: determinedGroupId }).session(session);
         const newVersion = currentVersionCount + 1;
-        await uploadFileToS3(process.env.S3_BUCKET_NAME, s3Key, fileContent, req.file.mimetype);
 
         const [newSubmission] = await SubassignmentModel.create([{
             studentId: user._id, assignmentId, version: newVersion,
-            assignmentname: assignment.name, groupId: student.groupId,
+            assignmentname: assignment.name,
+            groupId: determinedGroupId, // Use the auto-detected group ID
             SubmitDate: submissionTime,
             notes: notes?.trim() || (isLate ? "Submitted late" : "Submitted on time"),
-            isLate, bucketName: process.env.S3_BUCKET_NAME, key: s3Key,
-            path: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`,
+            isLate, 
+            bucketName: req.file.bucket,
+            key: req.file.key,
+            path: req.file.location,
         }], { session });
- await submissionStatusModel.updateOne(
-            { studentId: user._id, contentId: assignmentId, contentType: 'assignment' },
-            { 
-                $set: {
-                    status: 'submitted', 
-                    submissionId: newSubmission._id,
-                    isLate: isLate,
-                    SubmitDate: submissionTime,
-                    // Ensure the groupId is set, especially if this is a new document
-                    groupId: newSubmission.groupId, 
-                    submissionModel: 'subassignment'
-                }
-            },
-            { session, upsert: true } // The magic is here: upsert: true
+
+        await submissionStatusModel.updateOne(
+            { studentId: user._id, contentId: assignmentId, groupId: determinedGroupId },
+            { $set: { status: 'submitted', submissionId: newSubmission._id, isLate, SubmitDate: submissionTime, submissionModel: 'subassignment' }},
+            { session, upsert: true }
         );
 
         await session.commitTransaction();
+        // NO CHANGE IN RESPONSE STRUCTURE
         res.status(200).json({ message: "Assignment submitted successfully.", submission: newSubmission });
 
     } catch (error) {
         await session.abortTransaction();
-        await deleteFileFromS3(process.env.S3_BUCKET_NAME, s3Key).catch(e => console.error("S3 rollback failed:", e));
+        await deleteFileFromS3(req.file.bucket, req.file.key).catch(e => console.error("S3 rollback failed:", e));
         return next(new Error("Failed to save submission. The operation was rolled back.", { cause: 500 }));
     } finally {
         await session.endSession();
-        await fs.unlink(req.file.path).catch(e => console.error(`Final temp file cleanup failed: ${req.file.path}`, e));
     }
 });

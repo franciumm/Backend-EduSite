@@ -22,18 +22,29 @@ function capitalize(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
+// In src/Modules/Sections/controller/section.controller.js
 
 const propagateSectionToStreams = async ({ section, session }) => {
-    const students = await studentModel.find({ groupId: { $in: section.groupIds } }).select('_id groupId').session(session);
+    const students = await studentModel.find({ groupIds: { $in: section.groupIds } }).select('_id groupIds').session(session);
+    if (students.length === 0 && !section.createdBy) return;
 
-    const streamEntries = students.map(student => ({
-        userId: student._id,
-        contentId: section._id,
-        contentType: 'section',
-        groupId: student.groupId
-    }));
+    const streamEntries = [];
 
-    // Add access for the teacher who created it
+    students.forEach(student => {
+        const commonGroupIds = student.groupIds.filter(sgid => 
+            section.groupIds.some(secgid => secgid.equals(sgid))
+        );
+
+        commonGroupIds.forEach(groupId => {
+            streamEntries.push({
+                userId: student._id,
+                contentId: section._id,
+                contentType: 'section',
+                groupId: groupId
+            });
+        });
+    });
+
     streamEntries.push({
         userId: section.createdBy,
         contentId: section._id,
@@ -41,7 +52,14 @@ const propagateSectionToStreams = async ({ section, session }) => {
     });
 
     if (streamEntries.length > 0) {
-        await contentStreamModel.insertMany(streamEntries, { session });
+        const streamOps = streamEntries.map(entry => ({
+            updateOne: {
+                filter: { userId: entry.userId, contentId: entry.contentId, groupId: entry.groupId },
+                update: { $set: entry },
+                upsert: true
+            }
+        }));
+        await contentStreamModel.bulkWrite(streamOps, { session });
     }
 };
 
@@ -104,7 +122,6 @@ export const _internalCreateSection = async ({ name, description, groupIds, teac
         await session.endSession();
     }
 };
-
 
 export const createSection = asyncHandler(async (req, res, next) => {
           const { user, isteacher } = req;

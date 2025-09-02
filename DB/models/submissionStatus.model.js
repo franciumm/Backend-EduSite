@@ -17,11 +17,8 @@ const submissionStatusSchema = new Schema({
         required: true,
         enum: ['assignment', 'exam']
     },
-    groupId: {
-        type: Schema.Types.ObjectId,
-        ref: 'group',
-        required: true
-    },
+      groupId: { type: Schema.Types.ObjectId, ref: 'group', required: true },
+
     status: {
         type: String,
         required: true,
@@ -49,6 +46,7 @@ const submissionStatusSchema = new Schema({
 }, { timestamps: true });
 
 submissionStatusSchema.index({ contentId: 1, groupId: 1 });
-submissionStatusSchema.index({ studentId: 1, contentId: 1 }, { unique: true });
+submissionStatusSchema.index({ studentId: 1, contentId: 1, groupId: 1 }, { unique: true });
+
 
 export const submissionStatusModel = model('submissionStatus', submissionStatusSchema);

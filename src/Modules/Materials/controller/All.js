@@ -17,25 +17,46 @@ const s3Client = new S3Client({
 });
 
 
-
 const propagateMaterialToStreams = async ({ material, session }) => {
-    const students = await studentModel.find({ groupId: { $in: material.groupIds } }).select('_id groupId').session(session);
+    const students = await studentModel.find({ groupIds: { $in: material.groupIds } }).select('_id groupIds').session(session);
+    if (students.length === 0 && !material.createdBy) return;
 
-    const streamEntries = students.map(student => ({
-        userId: student._id,
-        contentId: material._id,
-        contentType: 'material',
-         groupId: student.groupId
-    }));
+    const streamEntries = [];
 
-    // Add access for the teacher who created it
+    students.forEach(student => {
+        // Find which of the student's groups overlap with the material's groups
+        const commonGroupIds = student.groupIds.filter(sgid => 
+            material.groupIds.some(mgid => mgid.equals(sgid))
+        );
+
+        // Create a separate stream entry for each common group context
+        commonGroupIds.forEach(groupId => {
+            streamEntries.push({
+                userId: student._id,
+                contentId: material._id,
+                contentType: 'material',
+                groupId: groupId
+            });
+        });
+    });
+
+    // Add teacher access (unchanged)
     streamEntries.push({
         userId: material.createdBy,
         contentId: material._id,
-        contentType: 'material'    });
+        contentType: 'material'
+    });
 
     if (streamEntries.length > 0) {
-        await contentStreamModel.insertMany(streamEntries, { session });
+        // Use bulkWrite with upsert to prevent duplicates in edge cases
+        const streamOps = streamEntries.map(entry => ({
+            updateOne: {
+                filter: { userId: entry.userId, contentId: entry.contentId, groupId: entry.groupId },
+                update: { $set: entry },
+                upsert: true
+            }
+        }));
+        await contentStreamModel.bulkWrite(streamOps, { session });
     }
 };
 
@@ -44,7 +65,7 @@ const propagateMaterialToStreams = async ({ material, session }) => {
 
 export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
   const { groupId } = req.params;
-  const { page, size } = req.query; // <-- 2. GET PAGE AND SIZE
+  const { page, size } = req.query;
 
   if (!mongoose.Types.ObjectId.isValid(groupId)) {
     return next(new Error("Invalid Group ID.", { cause: 400 }));
@@ -53,25 +74,20 @@ export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
   const { user, isteacher } = req;
   const uaeTimeZone = "Asia/Dubai";
   const nowInUAE = toZonedTime(new Date(), uaeTimeZone);
-  const { limit, skip } = pagination({ page, size }); // Calculate pagination
+  const { limit, skip } = pagination({ page, size });
 
   let queryFilter = { groupIds: groupId };
   let isAuthorized = false;
 
   if (isteacher) {
-           const permittedGroupIds = (user.permissions?.materials ?? []).map((id) => id.toString());
-
-    if (
-      user.role === "main_teacher" ||
-      (user.role === "assistant" && (permittedGroupIds || []).includes(groupId))
-    ) {
+    const permittedGroupIds = (user.permissions?.materials ?? []).map((id) => id.toString());
+    if (user.role === "main_teacher" || (user.role === "assistant" && permittedGroupIds.includes(groupId))) {
       isAuthorized = true;
-      // For teachers, there's no date filtering at the DB level.
-      // They can see all materials, scheduled or not.
     }
   } else {
-    // Student authorization and filtering
-    if (user.groupId?.toString() === groupId) {
+    // Student authorization: Check if the student's groupIds array includes the requested groupId
+    const isStudentInGroup = user.groupIds?.some(id => id.toString() === groupId);
+    if (isStudentInGroup) {
       isAuthorized = true;
       // For students, filter out materials that are not yet published.
       queryFilter.$or = [
@@ -83,46 +99,26 @@ export const viewGroupsMaterial = asyncHandler(async (req, res, next) => {
   }
 
   if (!isAuthorized) {
-    return next(
-      new Error("Unauthorized: You do not have access to this group's materials.", {
-        cause: 403,
-      })
-    );
+    return next(new Error("Unauthorized: You do not have access to this group's materials.", { cause: 403 }));
   }
 
-  // 3. APPLY PAGINATION TO THE QUERY
-  let materials = await materialModel
-    .find(queryFilter)
-    .sort({ createdAt: -1 }) // Sort for consistent results across pages
-    .skip(skip)
-    .limit(limit)
-    .lean();
+  let materials = await materialModel.find(queryFilter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean();
 
-  // This post-processing logic for teachers now runs on the paginated data, which is efficient.
   if (isteacher) {
     materials = materials.map((material) => {
-      const isPublished =
-        !material.publishDate || new Date(material.publishDate) <= nowInUAE;
+      const isPublished = !material.publishDate || new Date(material.publishDate) <= nowInUAE;
       return {
         ...material,
-        status: isPublished
-          ? "Published"
-          : `Scheduled for ${new Date(material.publishDate).toLocaleDateString(
-              "en-GB",
-              { timeZone: uaeTimeZone }
-            )}`,
+        status: isPublished ? "Published" : `Scheduled for ${new Date(material.publishDate).toLocaleDateString("en-GB", { timeZone: uaeTimeZone })}`,
         publishDate: material.publishDate,
       };
     });
   }
 
-  // **RESPONSE STRUCTURE PRESERVED**
-  res
-    .status(200)
-    .json({
+  res.status(200).json({
       message: "Materials fetched successfully for the group.",
       data: materials,
-    });
+  });
 });
 // Create material (main_teacher only) - Logic is correct.
 export const createMaterial = asyncHandler(async (req, res, next) => {

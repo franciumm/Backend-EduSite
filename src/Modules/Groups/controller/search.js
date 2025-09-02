@@ -97,10 +97,11 @@ export const getall = asyncHandler(async (req, res, next) => {
             initialMatch._id = { $in: permittedGroupIds }; 
         }
     } else {
-        if (!user.groupId) {
+        if (!user.groupIds || user.groupIds.length === 0) {
             return res.status(200).json({ Message: "Done", groups: [] });
         }
-        initialMatch._id = user.groupId;
+        // Use $in to match any group ID in the student's array.
+        initialMatch._id = { $in: user.groupIds };
     }
 
 
@@ -131,8 +132,9 @@ export const ById = asyncHandler(async (req, res, next) => {
             }
         }
     } else {
-        if (!user.groupId || user.groupId.toString() !== _id) {
-            return next(new Error('Forbidden: You can only view your own group.', { cause: 403 }));
+       const isStudentInGroup = user.groupIds?.some(id => id.equals(groupId));
+        if (!isStudentInGroup) {
+            return next(new Error('Forbidden: You are not a member of this group.', { cause: 403 }));
         }
     }
 

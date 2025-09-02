@@ -138,21 +138,23 @@ export const isAuth = asyncHandler(async (req, res, next) => {
       return next(new Error('Invalid user ID in token', { cause: 400 }));
     }
 
-    // Try student first
-    let user = await studentModel
-      .findById(decoded._id, 'email userName groupId')
-      .lean();
+    let user;  
 
-    req.isteacher = false;
-
-    if (!user) {
+    if (decoded.role !== 'student') {
       user = await teacherModel
         .findById(decoded._id, 'email name role permissions')
         .lean();
 
       if (!user) return next(new Error('User not found. Please sign up.', { cause: 404 }));
       req.isteacher = true;
-    }
+    }else{ 
+       user = await studentModel
+      .findById(decoded._id, 'email userName groupIds') 
+      .lean();
+
+    req.isteacher = false;
+  }
+
 
     req.user = user;
     return next();

@@ -53,20 +53,18 @@ export const GetAllByGroup = asyncHandler(async (req, res, next) => {
     }
   } else {
     // Student Logic
-    const studentGroupId = req.user.groupId?.toString();
+    const studentGroupIds = req.user.groupIds?.map(id => id.toString()) || [];
 
   
 
-    if (groupId && groupId !== studentGroupId) {
-      return next(
-        new Error("Unauthorized: You can only view assignments for your own group.", {
-          cause: 403,
-        })
-      );
-    }
-
-    if (studentGroupId) {
-      query.groupIds = studentGroupId;
+    if (groupId) {
+        if (!studentGroupIds.includes(groupId)) {
+            return next(new Error("Unauthorized: You are not a member of the requested group.", { cause: 403 }));
+        }
+        query.groupIds = groupId;
+    } 
+else {
+        query.groupIds = { $in: req.user.groupIds };
     }
   }
 
@@ -249,7 +247,7 @@ export const findSubmissions = asyncHandler(async (req, res, next) => {
         
 const basePipeline = [
             // Stage 1: Find all students that belong to the specified group.
-            { $match: { groupId: new mongoose.Types.ObjectId(groupId) } },
+            { $match: { groupIds: new mongoose.Types.ObjectId(groupId) } },
             // Stage 2: Perform a "left outer join" to the submissionstatuses collection.
             {
                 $lookup: {

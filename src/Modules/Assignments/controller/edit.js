@@ -11,8 +11,6 @@ import { deleteFileFromS3, uploadFileToS3 } from '../../../utils/S3Client.js';
 import { canAccessContent, canViewSubmissionsFor } from '../../../middelwares/contentAuth.js';
 import { assignmentModel } from '../../../../DB/models/assignment.model.js';
 import { s3 } from '../../../utils/S3Client.js';
-import fs from "fs";
-import { promises as fsPromises } from 'fs';
 import { CONTENT_TYPES } from "../../../utils/constants.js"; 
 import path from "path"; 
 import { submissionStatusModel } from "../../../../DB/models/submissionStatus.model.js";
@@ -76,8 +74,9 @@ export const editAssignment = asyncHandler(async (req, res, next) => {
     if (!isMainTeacher && !isOwner) {
         return next(new Error("You are not authorized to edit this assignment.", { cause: 403 }));
     }
- const oldGroupIds = assignment.groupIds;
-        if (groupIds) { // Only run if groupIds are part of the update
+ const oldGroupIds = assignment.groupIds.map(id => id.toString());
+
+         if (groupIds) { 
             await synchronizeContentStreams({
                 content: assignment,
                 oldGroupIds: oldGroupIds,
@@ -90,31 +89,25 @@ export const editAssignment = asyncHandler(async (req, res, next) => {
 
   
 
+      
         if (assignmentFile) {
+            // Delete old file if it exists
             if (assignment.key) {
                 await deleteFileFromS3(assignment.bucketName, assignment.key).catch(err => console.error("Non-critical error: Failed to delete old assignment file during edit:", err));
             }
-            const fileContent = await fsPromises.readFile(assignmentFile.path);
-            const newKey = `assignments/${assignment.slug}-${Date.now()}${path.extname(assignmentFile.originalname)}`;
-            await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, assignmentFile.mimetype);
-            
-            assignment.key = newKey;
-            assignment.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
-            assignment.bucketName = process.env.S3_BUCKET_NAME;
+            // Update record with new S3 details from multer-s3
+            assignment.key = assignmentFile.key;
+            assignment.path = assignmentFile.location;
+            assignment.bucketName = assignmentFile.bucket;
         }
-
         // Handle new answer file upload
         if (answerFile) {
             if (assignment.answerKey) {
                 await deleteFileFromS3(assignment.answerBucketName, assignment.answerKey).catch(err => console.error("Non-critical error: Failed to delete old answer file during edit:", err));
             }
-            const answerContent = await fsPromises.readFile(answerFile.path);
-            const newAnswerKey = `assignments/answers/${assignment.slug}-answer-${Date.now()}${path.extname(answerFile.originalname)}`;
-            await uploadFileToS3(process.env.S3_BUCKET_NAME, newAnswerKey, answerContent, answerFile.mimetype);
-
-            assignment.answerKey = newAnswerKey;
-            assignment.answerPath = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newAnswerKey}`;
-            assignment.answerBucketName = process.env.S3_BUCKET_NAME;
+            assignment.answerKey = answerFile.key;
+            assignment.answerPath = answerFile.location;
+            assignment.answerBucketName = answerFile.bucket;
         }
 
               Object.assign(assignment, updateData);
@@ -134,8 +127,6 @@ export const editAssignment = asyncHandler(async (req, res, next) => {
 
                     await session.endSession();
 
-        if ( req.files?.file?.[0].path) await fsPromises.unlink(req.files?.file?.[0].path).catch(e => console.error("Error deleting temp assignment file", e));
-        if (answerFile?.path) await fsPromises.unlink(answerFile.path).catch(e => console.error("Error deleting temp answer file", e));
     }
 });
 
@@ -317,10 +308,14 @@ const submission = await SubassignmentModel.findById(submissionId);
 
     
     let isAuthorized = false;
-    if (!req.isteacher && req.user._id.equals(submission.studentId)) {
-        isAuthorized = true; // Student owner
+     if (!req.isteacher) {
+        if (!req.user._id.equals(submission.studentId)) {
+            return next(new Error("You are not authorized to delete this submission.", { cause: 403 }));
+        }
+        if (submission.isMarked || submission.score !== null) {
+            return next(new Error("Cannot delete a submission that has already been graded.", { cause: 403 }));
+        }
     } else if (req.isteacher) {
-        // *** FIX: Use centralized helper for all teachers ***
         isAuthorized = await canViewSubmissionsFor({
             user: req.user,
             isTeacher: true,

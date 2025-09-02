@@ -7,7 +7,6 @@ import materialModel from '../../../DB/models/material.model.js';
 import { sectionModel } from '../../../DB/models/section.model.js';
 import mongoose from 'mongoose';
 import { createContentSearchFilter, normalizeContentName } from '../../utils/queryHelpers.js';
-import { groupModel } from '../../../DB/models/groups.model.js';
 
 
 const modelMap = {

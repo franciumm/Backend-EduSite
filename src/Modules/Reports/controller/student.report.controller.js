@@ -31,7 +31,7 @@ function resolveDateRange({ from, to, year, fromMonth, toMonth }) {
 async function gatherStudentData(studentId, from, to) {
   const student = await studentModel
     .findById(studentId)
-    .populate({ path: "groupId", select: "groupname" })
+    .populate({ path: "groupIds", select: "groupname" })
     .lean();
 
   if (!student) throw new Error("Student not found.");
@@ -93,7 +93,7 @@ async function gatherStudentData(studentId, from, to) {
 
   const summary = {
     studentName: `${student.firstName || ""} ${student.lastName || ""}`.trim() || student.userName,
-    group: student.groupId?.groupname ?? "-",
+    group: student.groupIds?.groupname ?? "-",
     from: format(from, "yyyy-MM-dd"),
     to: format(to, "yyyy-MM-dd"),
     assignments: {

@@ -13,10 +13,11 @@ const studentSchema = new Schema(
     firstName: String,
     lastName: String,
     
-    groupId: {
+    groupIds: [{
       type: Schema.Types.ObjectId,
-      ref: "group", index: true
-    },
+      ref: "group", 
+      index: true
+    }],
     phone: { type: String },
     parentPhone: { type: String },
     email: {

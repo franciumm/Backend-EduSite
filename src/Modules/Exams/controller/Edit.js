@@ -89,7 +89,6 @@ export const downloadExam = [
     authorizeExamDownload,
     streamExamFile,
 ];
-
 export const editExam = asyncHandler(async (req, res, next) => {
     const { examId, ...updateData } = req.body;
     const { user } = req;
@@ -113,57 +112,40 @@ export const editExam = asyncHandler(async (req, res, next) => {
     const examFile = req.files?.file?.[0];
     const answerFile = req.files?.answerFile?.[0];
     
-    try {
-        // Handle new main exam file upload
-        if (examFile) {
-            if (exam.key) {
-                await deleteFileFromS3(exam.bucketName, exam.key).catch(err => console.error("Non-critical error: Failed to delete old exam file during edit:", err));
-            }
-            const fileContent = await fsPromises.readFile(examFile.path);
-            const newKey = `exams/${exam.Name.replace(/\s+/g, '_')}-${Date.now()}.pdf`;
-            await uploadFileToS3(process.env.S3_BUCKET_NAME, newKey, fileContent, "application/pdf");
-            
-            exam.key = newKey;
-            exam.path = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newKey}`;
-            exam.bucketName = process.env.S3_BUCKET_NAME;
+    // Handle new main exam file upload
+    if (examFile) {
+        if (exam.key && exam.bucketName) {
+            await deleteFileFromS3(exam.bucketName, exam.key).catch(err => console.error("Non-critical error: Failed to delete old exam file during edit:", err));
         }
-
-        // Handle new answer file upload
-        if (answerFile) {
-            if (exam.answerKey) {
-                await deleteFileFromS3(exam.answerBucketName, exam.answerKey).catch(err => console.error("Non-critical error: Failed to delete old answer file during edit:", err));
-            }
-            const answerContent = await fsPromises.readFile(answerFile.path);
-            const newAnswerKey = `exams/answers/${exam.Name.replace(/\s+/g, '_')}-answer-${Date.now()}.pdf`;
-            await uploadFileToS3(process.env.S3_BUCKET_NAME, newAnswerKey, answerContent, "application/pdf");
-
-            exam.answerKey = newAnswerKey;
-            exam.answerPath = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${newAnswerKey}`;
-            exam.answerBucketName = process.env.S3_BUCKET_NAME;
-        }
-
-        // Sanitize and update name if provided
-        if (updateData.Name) {
-            updateData.Name = updateData.Name.trim();
-        }
-        
-        Object.keys(updateData).forEach(key => {
-            if (updateData[key] !== undefined && updateData[key] !== null) {
-                exam[key] = updateData[key];
-            }
-        });
-
-        const updatedExam = await exam.save();
-
-        res.status(200).json({
-            message: "Exam updated successfully.",
-            exam: updatedExam,
-        });
-    } finally {
-        // Clean up temp files
-        if (examFile?.path) await fsPromises.unlink(examFile.path).catch(e => console.error("Error deleting temp exam file", e));
-        if (answerFile?.path) await fsPromises.unlink(answerFile.path).catch(e => console.error("Error deleting temp answer file", e));
+        // Update document with new S3 details from multer-s3
+        exam.key = examFile.key;
+        exam.path = examFile.location;
+        exam.bucketName = examFile.bucket;
     }
+
+    // Handle new answer file upload
+    if (answerFile) {
+        if (exam.answerKey && exam.answerBucketName) {
+            await deleteFileFromS3(exam.answerBucketName, exam.answerKey).catch(err => console.error("Non-critical error: Failed to delete old answer file during edit:", err));
+        }
+        // Update document with new S3 details from multer-s3
+        exam.answerKey = answerFile.key;
+        exam.answerPath = answerFile.location;
+        exam.answerBucketName = answerFile.bucket;
+    }
+
+    // Sanitize and update name if provided
+    if (updateData.Name) {
+        updateData.Name = updateData.Name.trim();
+    }
+    
+    Object.assign(exam, updateData);
+    const updatedExam = await exam.save();
+
+    res.status(200).json({
+        message: "Exam updated successfully.",
+        exam: updatedExam,
+    });
 });
 
 

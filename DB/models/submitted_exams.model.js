@@ -8,7 +8,7 @@ const submittedExamSchema = new Schema(
     score: { type: Number, default: null },
     notes: { type: String },
     examname :  { type: String, required: true },
-
+groupId: { type: Schema.Types.ObjectId, ref: "group", required: true },
     // Add a version number to track attempts
     version: { type: Number, required: true },
 
@@ -31,15 +31,13 @@ const submittedExamSchema = new Schema(
 );
 
 
-
 submittedExamSchema.pre('deleteOne', { document: true, query: false }, async function (next) {
-    if (this.fileKey) {
-        // This will now automatically clean up the S3 file when a submission is deleted.
+    if (this.fileKey && this.fileBucket) { // Added fileBucket check for safety
         await deleteFileFromS3(this.fileBucket, this.fileKey);
     }
     next();
 });
 
 
-submittedExamSchema.index({ examId: 1, studentId: 1 });
+submittedExamSchema.index({ examId: 1, studentId: 1, groupId: 1 });
 export const SubexamModel = model("subexam", submittedExamSchema);
