@@ -203,7 +203,7 @@ export const getMyProfile = asyncHandler(async (req, res, next) => {
         // --- Student Logic (Remains the same, it was already correct) ---
         account = await studentModel.findById(userId)
             .select({ password: 0, __v: 0 })
-            .populate({ path: "groupId", select: "_id groupname", model: "group" }) 
+            .populate({ path: "groupIds", select: "_id groupname" }) 
             .lean();
     }
 
