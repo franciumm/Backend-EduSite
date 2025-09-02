@@ -284,3 +284,22 @@ export const getInviteLink = asyncHandler(async (req, res, next) => {
         expiresAt: group.inviteTokenExpires.toISOString() 
     });
 });
+
+
+
+export const archiveOrRestore= asyncHandler(async(req,res,next)=>{
+    const {_id,archivedOrRestore} =req.body;
+    if (!mongoose.Types.ObjectId.isValid(_id)) {
+            return next(new Error(`Invalid Group ID format`, { cause: 400 }));
+        }
+    const groupId = new mongoose.Types.ObjectId(_id);
+
+
+
+    const group = await groupModel.findById(groupId);
+    if(!group)return res.status(404).json ({Message : 'Group not found'});
+    
+    group.isArchived = archivedOrRestore;
+    await group.save();
+    res.status(201).json ({Message : 'Group Edited successfully'});
+});
