@@ -145,7 +145,6 @@ export const isAuth = asyncHandler(async (req, res, next) => {
         .findById(decoded._id, 'email name role permissions')
         .lean();
 
-      if (!user) return next(new Error('User not found. Please sign up.', { cause: 404 }));
       req.isteacher = true;
     }else{ 
        user = await studentModel
@@ -154,6 +153,7 @@ export const isAuth = asyncHandler(async (req, res, next) => {
 
     req.isteacher = false;
   }
+      if (!user) return next(new Error('User not found. Please sign up.', { cause: 404 }));
 
 
     req.user = user;

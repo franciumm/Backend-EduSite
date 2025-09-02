@@ -16,7 +16,7 @@ import { synchronizeContentStreams } from "../../../utils/streamHelpers.js";
 const propagateExamToStreams = async ({ exam, session }) => {
      await synchronizeContentStreams({
         content: exam,
-        oldGroupIds: [], // There are no old groups on creation
+        oldGroupIds: [], 
         newGroupIds: exam.groupIds,
         session
     });
