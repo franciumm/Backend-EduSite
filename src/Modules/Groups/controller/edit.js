@@ -253,7 +253,7 @@ export const getInviteLink = asyncHandler(async (req, res, next) => {
     if (!group.isInviteLinkActive || !group.inviteToken || new Date() > group.inviteTokenExpires) {
         return res.status(200).json({ message: 'There is no active invite link for this group.' });
     }
-    const inviteLink = `${req.protocol}://${req.get('host')}/api/v1/groups/join/${group.inviteToken}`;
+    const inviteLink = `${req.protocol}://${req.get('host')}/group/join/${group.inviteToken}`;
     res.status(200).json({ 
         message: 'Active invite link retrieved.', 
         inviteLink,
