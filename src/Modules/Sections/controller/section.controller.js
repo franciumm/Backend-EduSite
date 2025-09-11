@@ -204,8 +204,10 @@ const buildContentMap = (inputArray, type) => ({
         as: "item",
         in: {
             id: "$$item._id",
-            name: { $ifNull: ["$$item.name", "$$item.Name"] },
-            type: type
+            name: { $ifNull: ["$$item.name", "$$item.Name"] }, // Handles 'name' (assignments/materials) and 'Name' (exams)
+            type: type,
+            startDate: { $ifNull: ["$$item.startDate", "$$item.startdate"] }, 
+            endDate: { $ifNull: ["$$item.endDate", "$$item.enddate"] }
         }
     }
 });
