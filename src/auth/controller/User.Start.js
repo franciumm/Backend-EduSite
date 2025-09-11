@@ -276,7 +276,7 @@ if(!isteacher){
   const skip  = (page - 1) * limit;
 
   const filter = {
-    groupId: null                  // unassigned to any group
+    groupIds: null                  // unassigned to any group
   };
 
   const [ total, students ] = await Promise.all([
