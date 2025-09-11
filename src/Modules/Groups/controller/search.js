@@ -81,16 +81,20 @@ const getAndHydrateGroupsViaAggregation = async (initialMatch, skip=0 , limit=5)
 
 // --- Refactored & Secured Controller Functions ---
 
-export const getall = asyncHandler(async (req, res, next) => {
 
+export const getall = asyncHandler(async (req, res, next) => {
     const { user, isteacher } = req;
-    const { page, size,isArchived } = req.query;
+    
+    // Parse query parameters and provide defaults
+    const page = parseInt(req.query.page, 10) || 1;
+    const size = parseInt(req.query.size, 10) || 10;
     const isArchivedBool = req.query.isArchived === 'true';
-    const initialMatch = { isArchived: isArchivedBool };
+
     const { limit, skip } = pagination({ page, size });
 
+    // 1. Build the initial match query based on permissions
+    const initialMatch = { isArchived: isArchivedBool };
 
-//-----------------------------Permissions Check Logic----------------------------------------------
     if (isteacher) {
         if (user.role === 'assistant') {
             const permittedGroupIds = user.permissions.groups?.map(id => new mongoose.Types.ObjectId(id)) || [];
@@ -98,20 +102,64 @@ export const getall = asyncHandler(async (req, res, next) => {
         }
     } else {
         if (!user.groupIds || user.groupIds.length === 0) {
-            return res.status(200).json({ Message: "Done", groups: [] });
+            return res.status(200).json({ 
+                message: "No groups found.",
+                data: [],
+                total: 0,
+                totalPages: 0,
+                currentPage: page
+            });
         }
-        // Use $in to match any group ID in the student's array.
         initialMatch._id = { $in: user.groupIds };
     }
 
+    // 2. Create the main aggregation pipeline with $facet
+    const aggregationPipeline = [
+        { $match: initialMatch },
+        {
+            $facet: {
+                // Pipeline 1: Get the paginated and hydrated data
+                paginatedResults: [
+                    { $skip: skip },
+                    { $limit: limit },
+                    // --- This is the "Hydration" part ---
+                    // Add any lookups or additional fields you need for the group objects
+                    {
+                        $addFields: {
+                            studentCount: { $size: "$enrolledStudents" }
+                        }
+                    },
+                    {
+                        $project: {
+                            enrolledStudents: 0, // Exclude the large array from the final response
+                            __v: 0
+                        }
+                    }
+                ],
+                // Pipeline 2: Get the total count of documents
+                totalCount: [
+                    { $count: 'count' }
+                ]
+            }
+        }
+    ];
 
-//------------------------------------------Get Groups ----------------------------------------------------------
+    const result = await groupModel.aggregate(aggregationPipeline);
 
+    // 3. Extract data and calculate pagination details
+    const hydratedGroups = result[0].paginatedResults;
+    const total = result[0].totalCount.length > 0 ? result[0].totalCount[0].count : 0;
+    const totalPages = Math.ceil(total / limit);
 
-    const hydratedGroups = await getAndHydrateGroupsViaAggregation(initialMatch, skip, limit);
-    res.status(200).json({ Message: "Done", groups: hydratedGroups });
+    // 4. Send the final response
+    res.status(200).json({ 
+        Message: "Done", 
+        groups: hydratedGroups,
+        total,
+        totalPages,
+        currentPage: page
+    });
 });
-
 
 export const ById = asyncHandler(async (req, res, next) => {
     const { user, isteacher } = req;
