@@ -41,13 +41,17 @@ export const _internalCreateAssignment =async ({ name, startDate, endDate, group
             name, slug, startDate, endDate, groupIds,
             allowSubmissionsAfterDueDate: allowSubmissionsAfterDueDate || false,
             createdBy: teacherId,
-            teacherNotes: teacherNotes,
-            bucketName: mainFile.bucket,
-            key: mainFile.key,
-            path: mainFile.location,
+            
         };
    
-        
+        if(mainFile){
+            assignmentData.bucketName= mainFile.bucket;
+             assignmentData.key= mainFile.key;
+             assignmentData.path= mainFile.location
+        }else{
+            assignmentData.teacherNotes= teacherNotes
+
+        }
         if (answerFile) {
             assignmentData.answerBucketName = answerFile.bucket;
             assignmentData.answerKey = answerFile.key;
