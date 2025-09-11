@@ -11,6 +11,7 @@ const uaeTimeZone = 'Asia/Dubai';
 export const creationValidator = (contentType) => {
     return asyncHandler(async (req, res, next) => {
         // 1. File and Teacher Validation
+    const {teacherNotes} = req.body;
 
           const mainFile = req.files?.file?.[0];
         const answerFile = req.files?.answerFile?.[0];
@@ -28,9 +29,9 @@ export const creationValidator = (contentType) => {
        
 
         
-        if (!mainFile) {
+        if (!mainFile && !teacherNotes) {
             await cleanupFiles(); // Clean up answer file if it exists
-            return next(new Error(`Please upload the ${contentType} file.`, { cause: 400 }));
+            return next(new Error(`Please upload the ${contentType} file or teacher notes.`, { cause: 400 }));
         }
         if (!req.isteacher) {
         await cleanupFiles();
