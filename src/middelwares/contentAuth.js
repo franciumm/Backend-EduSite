@@ -45,7 +45,7 @@ export const canAccessContent = async ({ user, isTeacher, contentId, contentType
         
         // This is a failsafe; content should exist if a stream entry exists.
         if (!content) return false; 
-
+        if(content.allowSubmissionsAfterDueDate) return allowSubmissionsAfterDueDate;
         // The timeline validation logic itself was correct, so we reuse it.
         return isStudentTimelineValid({ user, content });
     }
