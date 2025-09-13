@@ -24,10 +24,7 @@ const examSchema = new Schema(
     enddate: { type: Date, required: true },
     enrolledStudents: [{ type: Schema.Types.ObjectId, ref: "student" }],
     rejectedStudents: [{ type: Schema.Types.ObjectId, ref: "student" }], // For exceptions you do NOT want
-    /**
-     * New: Custom timeline for certain students.
-     * If a student is listed here, they must follow these dates instead of main start/end.
-     */
+    
     exceptionStudents: [
       {
         studentId: { type: Schema.Types.ObjectId, ref: "student" },
