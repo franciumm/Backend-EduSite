@@ -220,15 +220,19 @@ export const joinWithInviteLink = asyncHandler(async (req, res, next) => {
         inviteToken, isInviteLinkActive: true, inviteTokenExpires: { $gt: new Date() }
     });
     if (!group) return next(new Error('Invalid or expired invite link.', { cause: 400 }));
-    const student = await studentModel.findById(studentId);
-    if (!student) return next(new Error('Student profile not found.', { cause: 404 }));
-    const isAlreadyMember = student.groupIds.some(id => id.equals(group._id));
-    if (isAlreadyMember) {
-        return res.status(200).json({ message: 'You are already a member of this group.' });
-    }
+  
     const session = await mongoose.startSession();
     try {
         session.startTransaction();
+        
+        const student = await studentModel.findById(studentId).session(session);
+        if (!student) throw new Error('Student profile not found.', { cause: 404 });
+        const isAlreadyMember = student.groupIds.some(id => id.equals(group._id));
+        if (isAlreadyMember) {
+        await session.abortTransaction();
+        return res.status(200).json({ message: 'You are already a member of this group.' });
+        }
+
         student.groupIds.addToSet(group._id);
         group.enrolledStudents.addToSet(studentId);
         await fanOutContentToStudent({ studentId, groupId: group._id, session });
