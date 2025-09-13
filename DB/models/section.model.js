@@ -61,24 +61,32 @@ sectionSchema.pre('deleteOne', { document: true, query: false }, async function 
     ]);
 
     // Create an array of deletion promises.
-    // Calling .deleteOne() on each document instance triggers THEIR S3 cleanup hooks.
     const deletionPromises = [
         ...assignmentsToDelete.map(doc => doc.deleteOne({ session })),
         ...examsToDelete.map(doc => doc.deleteOne({ session })),
         ...materialsToDelete.map(doc => doc.deleteOne({ session }))
     ];
 
-    // Also, delete the content stream entry for the section itself.
+    // --- THIS IS THE CORRECTED LOGIC ---
+    // 1. Gather all content IDs: the section's and all its children's.
+    const allContentIds = [
+        this._id,
+        ...this.linkedAssignments,
+        ...this.linkedExams,
+        ...this.linkedMaterials
+    ];
+
+    // 2. Delete all contentStream entries for those IDs in one command.
     deletionPromises.push(
-        contentStreamModel.deleteMany({ contentId: this._id, contentType: 'section' }, { session })
+        contentStreamModel.deleteMany({ contentId: { $in: allContentIds } }, { session })
     );
+    // --- END OF CORRECTION ---
 
     // Execute all deletions in parallel.
     await Promise.all(deletionPromises);
 
     next();
   } catch (error) {
-    // If anything fails, pass the error to the next middleware (which will abort the transaction)
     console.error("Error during section cascade delete:", error);
     next(error);
   }

@@ -60,7 +60,9 @@ examSchema.pre('deleteOne', { document: true, query: false }, async function (ne
     }
      await sectionModel.updateMany(
             { linkedExams: this._id },
-            { $pull: { linkedExams: this._id } }
+            { $pull: { linkedExams: this._id } },
+            { session: this.$session() }
+
         );
     next();
 });

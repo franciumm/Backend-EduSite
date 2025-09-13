@@ -59,7 +59,8 @@ assignmentSchema.index({ gradeId: 1, groupIds: 1 });
 
       await sectionModel.updateMany(
         { linkedAssignments: this._id },
-        { $pull: { linkedAssignments: this._id } }
+        { $pull: { linkedAssignments: this._id } },
+        { session: this.$session() }
     );
     next();
 });

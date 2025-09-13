@@ -52,7 +52,9 @@ materialSchema.pre('deleteOne', { document: true, query: false }, async function
     }
 await sectionModel.updateMany(
         { linkedMaterials: this._id },
-        { $pull: { linkedMaterials: this._id } }
+        { $pull: { linkedMaterials: this._id } },
+        { session: this.$session() }
+
     );
     // Proceed to delete the document from the database
     next();
