@@ -31,6 +31,7 @@ const corsOptions = {
 
 const app = express();
 app.use(cors(corsOptions));
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet());
 app.use(compression());
